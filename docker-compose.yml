@@ -28,32 +28,27 @@ services:
     build: ./backend
     container_name: classicalmusic_backend
     restart: unless-stopped
-    command: python manage.py runserver 0.0.0.0:8000
-    volumes:
-      - ./backend:/app
-    ports:
-      - "8000:8000"
+    command: 
+           sh -c "python manage.py migrate --noinput &&
+           python manage.py collectstatic --noinput &&
+           gunicorn core.wsgi:application --bind 0.0.0.0:8000"
     env_file:
       - .env
     environment:
+      DJANGO_SETTINGS_MODULE: core.settings
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
+    volumes:
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+    ports:
+      - "8000:8000" 
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_started
 
-  #frontend:
-   # build: ./frontend
-    #container_name: classicalmusic_frontend
-    #restart: unless-stopped
-    #volumes:
-    # - ./frontend:/app
-    #  - /app/node_modules
-    #ports:
-    #  - "3000:3000"
-    #command: sh -c "if [ ! -f package.json ]; then echo 'Next.js not installed yet' && sleep infinity; else npm run dev; fi"
 
   nginx:
     build: ./nginx
@@ -61,10 +56,14 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+    volumes:
+      - static_volume:/app/staticfiles:ro
+      - media_volume:/app/media:ro
     depends_on:
       - backend
-    #  - frontend
+      
 
 volumes:
   postgres_data:
-
+  static_volume:
+  media_volume:

@@ -13,7 +13,7 @@ SECRET_KEY = env('SECRET_KEY')
 
 DEBUG = env('DEBUG')
 
-ALLOWED_HOSTS = env('ALLOWED_HOSTS')
+ALLOWED_HOSTS = ["*"]
 
 DATABASES = {
     'default': {
@@ -92,8 +92,16 @@ USE_I18N = True
 USE_TZ = True
 
 
+STATIC_URL = "/static/"
+STATIC_ROOT = "/app/staticfiles"
 
-STATIC_URL = 'static/'
+MEDIA_URL = "/media/"
+MEDIA_ROOT = "/app/media"
+
+
+STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.ManifestStaticFilesStorage'
+
+
 
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

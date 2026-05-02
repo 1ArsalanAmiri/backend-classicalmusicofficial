@@ -2,14 +2,15 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-ENV PIP_INDEX_URL=https://package-mirror.liara.ir/repository/pypi/simple
+COPY requirements.txt .
 
-COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+COPY . .
 
-COPY . /app/
+EXPOSE 8000
+
+CMD ["gunicorn", "core.wsgi:application", "--bind", "0.0.0.0:8000"]
