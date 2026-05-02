@@ -4,3 +4,4 @@ djangorestframework_simplejwt
 psycopg2-binary==2.9.9
 redis
 celery
+django-environ
