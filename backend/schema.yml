@@ -1,0 +1,41 @@
+openapi: 3.0.3
+info:
+  title: Classical Music API
+  version: 1.0.0
+  description: Detailed documentation for Classical Music project
+paths:
+  /api/test/:
+    get:
+      operationId: test_retrieve
+      tags:
+      - test
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestResponse'
+          description: ''
+components:
+  schemas:
+    TestResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        status:
+          type: string
+      required:
+      - message
+      - status
+  securitySchemes:
+    jwtAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+servers:
+- url: http://localhost
+  description: Local Development (via Nginx)

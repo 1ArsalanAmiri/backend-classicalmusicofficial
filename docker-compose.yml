@@ -31,18 +31,20 @@ services:
     command: 
            sh -c "python manage.py migrate --noinput &&
            python manage.py collectstatic --noinput &&
-           gunicorn core.wsgi:application --bind 0.0.0.0:8000"
+           gunicorn config.wsgi:application --bind 0.0.0.0:8000"
     env_file:
       - .env
     environment:
-      DJANGO_SETTINGS_MODULE: core.settings
+      DJANGO_SETTINGS_MODULE: config.settings
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
     volumes:
+      - ./backend:/app
       - static_volume:/app/staticfiles
       - media_volume:/app/media
-    ports:
-      - "8000:8000" 
+    expose:
+      - "8000"
+
     depends_on:
       db:
         condition: service_healthy
@@ -55,12 +57,14 @@ services:
     container_name: classicalmusic_nginx
     restart: unless-stopped
     ports:
-      - "80:80"
+     - "80:80"
+  
     volumes:
-      - static_volume:/app/staticfiles:ro
-      - media_volume:/app/media:ro
+     - static_volume:/usr/share/nginx/html/static:ro
+     - media_volume:/usr/share/nginx/html/media:ro
+     - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
     depends_on:
-      - backend
+     - backend
       
 
 volumes:
