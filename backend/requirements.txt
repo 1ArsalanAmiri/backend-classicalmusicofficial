@@ -2,12 +2,16 @@ Django
 djangorestframework
 djangorestframework_simplejwt
 django_jalali
+django-redis
 psycopg2-binary==2.9.9
 redis
 celery
 django-environ
 gunicorn
+
 drf-spectacular
+drf-spectacular[sidecar]
+
 pillow
-ghasedak_sms==1.0.3
-zarinpal-py-sdk==0.1.4
+# ghasedak_sms
+# zarinpal-py-sdk

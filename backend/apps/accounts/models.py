@@ -92,7 +92,6 @@ class CustomUser(AbstractUser):
     def __str__(self):
         return self.username
 
-    # این متد عملاً اضافی بود، اگر جایی در کد فرانت یا بک‌اند از آن استفاده می‌کنی، نگهش داریم
     def phoneNumber(self):
         return self.phone_number
 

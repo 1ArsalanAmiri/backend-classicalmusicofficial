@@ -3,15 +3,14 @@ import environ
 from datetime import timedelta
 
 
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 env = environ.Env(DEBUG=(bool, False),ALLOWED_HOSTS=(list, []),)
 
 environ.Env.read_env(BASE_DIR / '.env')
 
-
 SECRET_KEY = env('SECRET_KEY')
-
 
 DEBUG = env('DEBUG')
 
@@ -28,7 +27,6 @@ DATABASES = {
     }
 }
 
-
 # Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -40,9 +38,11 @@ INSTALLED_APPS = [
     'django_jalali',
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'redis',
     'celery',
     'drf_spectacular',
+    "drf_spectacular_sidecar",
 
     #apps
     'apps.accounts'
@@ -92,8 +92,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
-
 LANGUAGE_CODE = 'en-us'
 
 TIME_ZONE = 'UTC'
@@ -102,18 +100,14 @@ USE_I18N = True
 
 USE_TZ = True
 
-
 STATIC_URL = '/static/'
 STATIC_ROOT = '/app/staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = '/app/media'
 
-
 STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.ManifestStaticFilesStorage'
 
-
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-
 
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
@@ -129,32 +123,32 @@ SIMPLE_JWT = {
 }
 
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'Classical Music API',
-    'DESCRIPTION': 'Detailed documentation for Classical Music project',
-    'VERSION': '1.0.0',
-    'SERVE_INCLUDE_SCHEMA': False,
-    'SERVERS': [
-        {'url': 'http://localhost', 'description': 'Local Development (via Nginx)'},
-    ],
+    "TITLE": "Classical Music API",
+    "DESCRIPTION": "API documentation",
+    "VERSION": "1.0.0",
+    "SWAGGER_UI_DIST": "SIDECAR",
+    "SWAGGER_UI_FAVICON_HREF": "SIDECAR",
 }
-
 
 # Redis Cache
 CACHES = {
     'default': {
         'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': 'redis://127.0.0.1:6379/1',
+        'LOCATION': 'redis://redis:6379/1',
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
         }
     }
 }
 
-
 # Celery
-CELERY_BROKER_URL = 'redis://127.0.0.1:6379/0'
-CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/0'
+CELERY_BROKER_URL = 'redis://redis:6379/0'
+CELERY_RESULT_BACKEND = 'redis://redis:6379/0'
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'Asia/Tehran'
+
+#AUTH USER MODEL
+AUTH_USER_MODEL = "accounts.CustomUser"
+
