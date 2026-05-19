@@ -2,8 +2,10 @@ Django
 djangorestframework
 djangorestframework_simplejwt
 django_jalali
+django-phonenumber-field
+phonenumbers
 django-redis
-psycopg2-binary==2.9.9
+# psycopg2-binary==2.9.9
 redis
 celery
 django-environ

@@ -18,16 +18,26 @@ ALLOWED_HOSTS = ["*"]
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': env('POSTGRES_DB'),
-        'USER': env('POSTGRES_USER'),
-        'PASSWORD': env('POSTGRES_PASSWORD'),
-        'HOST': env('POSTGRES_HOST'),
-        'PORT': env('POSTGRES_PORT'),
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
 
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': env('POSTGRES_DB'),
+#         'USER': env('POSTGRES_USER'),
+#         'PASSWORD': env('POSTGRES_PASSWORD'),
+#         'HOST': env('POSTGRES_HOST'),
+#         'PORT': env('POSTGRES_PORT'),
+#     }
+# }
+
+
+
 # Application definition
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -43,9 +53,21 @@ INSTALLED_APPS = [
     'celery',
     'drf_spectacular',
     "drf_spectacular_sidecar",
+    "phonenumber_field",
+
 
     #apps
-    'apps.accounts'
+    'apps.accounts',
+    "apps.common",
+    "apps.music",
+    "apps.playlists",
+    "apps.content",
+    "apps.payments",
+    "apps.subscriptions",
+    "apps.tags",
+    "apps.contacts",
+    "apps.notifications",
+    "apps.profiles",
 ]
 
 MIDDLEWARE = [
@@ -117,8 +139,8 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=5),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
@@ -151,4 +173,3 @@ CELERY_TIMEZONE = 'Asia/Tehran'
 
 #AUTH USER MODEL
 AUTH_USER_MODEL = "accounts.CustomUser"
-

@@ -1,44 +1,41 @@
+from phonenumber_field.serializerfields import PhoneNumberField
 from rest_framework import serializers
 from .models import CustomUser
-from django.contrib.auth import authenticate
-from rest_framework_simplejwt.tokens import RefreshToken
+from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
+
+
+User = get_user_model()
 
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
-        fields = ["username" , "first_name" , "last_name" , "phone_number" , "date_joined" , "email"]
+        fields = ["first_name" , "last_name" , "phone_number" , "date_joined" , "email" ]
+        read_only_fields = [ "phone_number" ,"date_joined" ]
 
-
-class RegisterSerializer(serializers.ModelSerializer):
-    confirm_password = serializers.CharField(write_only=True)
-
-    class Meta:
-        model = CustomUser
-        fields = ["username", "phone_number", "password", "confirm_password"]
-        extra_kwargs = {"password": {"write_only": True}}
-
-    def validate(self, data):
-        if data["password"] != data["confirm_password"]:
-            raise serializers.ValidationError("رمزها یکسان نیستند")
-        return data
-
-    def create(self, validated_data):
-        validated_data.pop("confirm_password")
-        user = CustomUser.objects.create_user(username=validated_data["username"],phone_number=validated_data["phone_number"],password=validated_data["password"])
-        return user
 
 
 class LoginSerializer(serializers.Serializer):
-    username = serializers.CharField()
+    phone_number = PhoneNumberField(region="IR")
     password = serializers.CharField()
 
-    def validate(self, data):
-        user = authenticate(username=data["username"],password=data["password"])
-        if not user:
-            raise serializers.ValidationError("اطلاعات ورود اشتباه است")
-        refresh = RefreshToken.for_user(user)
-        return {"user": user,"refresh": str(refresh),"access": str(refresh.access_token)}
+
+
+class LogoutSerializer(serializers.Serializer):
+    phone_number = PhoneNumberField(region="IR")
+    refresh = serializers.CharField()
 
 
 
+class ChangePasswordSerializer(serializers.Serializer):
+    old_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True)
+    password_confirm = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        if attrs["new_password"] != attrs["password_confirm"]:
+            raise serializers.ValidationError("Passwords do not match")
+
+        validate_password(attrs["new_password"])
+        return attrs

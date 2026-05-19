@@ -1,4 +1,6 @@
 FROM python:3.11-slim
+#FROM mirror-docker.runflare.com/library/python:3.11-slim
+
 
 WORKDIR /app
 
@@ -7,7 +9,11 @@ ENV PYTHONUNBUFFERED=1
 
 COPY requirements.txt .
 
+#RUN pip install -i https://mirrors.cloud.tencent.com/pypi/simple --no-cache-dir -r requirements.txt
+
+#With Stable Connection:
 RUN pip install --no-cache-dir -r requirements.txt
+
 
 COPY . .
 
