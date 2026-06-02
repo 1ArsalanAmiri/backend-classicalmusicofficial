@@ -3,17 +3,20 @@ djangorestframework
 djangorestframework_simplejwt
 django_jalali
 django-phonenumber-field
+django-nested-admin
 phonenumbers
 django-redis
-# psycopg2-binary==2.9.9
+psycopg2-binary==2.9.9
 redis
 celery
 django-environ
 gunicorn
+mutagen
 
 drf-spectacular
 drf-spectacular[sidecar]
 
 pillow
-# ghasedak_sms
+
+ghasedak_sms
 # zarinpal-py-sdk

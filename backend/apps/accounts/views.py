@@ -1,22 +1,12 @@
-from datetime import timedelta
-
 from django.contrib.auth import authenticate
-from django.db import transaction
-from django.utils import timezone
-from rest_framework import status, request
-from rest_framework.generics import UpdateAPIView
-from rest_framework.permissions import IsAuthenticated
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
-
-from .models import OTPCode
 from .serializers import *
 from rest_framework_simplejwt.tokens import  RefreshToken
 
-from ..common.utils.get_client_ip import get_client_ip
-from ..common.utils.otp import generate_otp
-from ..common.utils.sms import send_sms
 
 
 class LoginView(APIView):
@@ -72,47 +62,32 @@ class LogoutView(APIView):
 
 
 
-class ProfileView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        serializer = UserSerializer(request.user)
-        return Response(serializer.data)
-
-
-
-class UpdateProfileView(UpdateAPIView):
-    serializer_class = UserSerializer
-    permission_classes = [IsAuthenticated]
-    http_method_names = ["patch"]
-
-    def get_object(self):
-        return self.request.user
-
-
-
-class ChangePasswordView(APIView):
+class ChangePhoneNumberView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        serializer = ChangePasswordSerializer(data=request.data)
+        serializer = ChangePhoneNumberSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         user = request.user
-        old_password = serializer.validated_data["old_password"]
-        new_password = serializer.validated_data["new_password"]
+        new_phone_number = serializer.validated_data["new_phone_number"]
 
-        if not user.check_password(old_password):
-            return Response(
-                {"detail": "Old password is incorrect"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        if User.objects.filter(phone_number=new_phone_number).exists():
+            return Response({"error": "Phone number already used"}, status=400)
 
-        user.set_password(new_password)
-        user.save()
+        user.phone_number = new_phone_number
+        user.save(update_fields=["phone_number"])
 
-        return Response(
-            {"detail": "Password updated successfully"},
-            status=status.HTTP_200_OK
-        )
+        return Response({"detail": "Phone number changed"}, status=200)
 
+
+
+class ResetPasswordView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = ResetPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        serializer.save()
+        return Response({"message": "Password has been reset successfully."},status=status.HTTP_200_OK)

@@ -1,145 +1,100 @@
-from django.db import transaction
-from django.utils import timezone
-from datetime import timedelta
-from apps.common.serializers import *
-from django.contrib.auth import get_user_model
+from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
-from rest_framework_simplejwt.tokens import  RefreshToken
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.contrib.auth import get_user_model
+from django.core.cache import cache
+
+from apps.common.serializers import SendOTPSerializer, VerifyOTPSerializer
 from apps.common.utils.otp import generate_otp
 from apps.common.utils.sms import send_sms
-from apps.common.utils.get_client_ip import get_client_ip
-from apps.accounts.models import OTPCode, CustomUser
+from apps.profiles.models import UserProfile
 
 User = get_user_model()
+
+OTP_EXPIRY_SECONDS = 300
+MAX_OTP_ATTEMPTS = 3
 
 
 class SendOTPView(APIView):
 
     def post(self, request):
-
         serializer = SendOTPSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         phone_number = serializer.validated_data["phone_number"].as_e164
-        purpose = serializer.validated_data["purpose"].upper()
-        PURPOSE_CHOICES = ["LOGIN" , "REGISTER" , "RESET_PASSWORD" , "CHANGE_PHONE"]
-        user_exists = CustomUser.objects.filter(phone_number=phone_number).exists()
 
-        if purpose not in PURPOSE_CHOICES:
-            return Response({"error": "Invalid purpose"}, status=400)
+        otp = generate_otp()
 
-        if not user_exists:
-            return Response({"error": "User not found"}, status=404)
-
-
-        with transaction.atomic():
-            OTPCode.objects.filter(phone_number=phone_number,purpose=purpose,is_used=False).update(is_used=True)
-
-            expires_at = timezone.now() + timedelta(minutes=5)
-
-            otp = generate_otp()
-
-            OTPCode.objects.create(phone_number=phone_number,code=otp,purpose=purpose,expires_at=expires_at,is_used=False)
+        cache_key_otp = f"otp:{phone_number}"
+        cache_key_attempts = f"otp_attempts:{phone_number}"
 
         try:
-            send_sms(phone_number, otp)
+            sms_response = send_sms(phone_number, otp)
+
+            if sms_response and sms_response.get("isSuccess") is False:
+                return Response({"error": "SMS Provider Error ,try again later", "details": sms_response.get("message")},status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+            cache.set(cache_key_otp, otp, timeout=OTP_EXPIRY_SECONDS)
+            cache.set(cache_key_attempts, 0, timeout=OTP_EXPIRY_SECONDS)
+
         except Exception as e:
-            transaction.set_rollback(True)
-            return Response({"error": "Failed to send OTP"}, status=500)
+            return Response({"error": "Failed to send OTP", "details": str(e)},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        print(phone_number , type(phone_number))
-        print(otp , type(otp))
-
-        return Response({"message": f"OTP sent successfully => {otp}"})
-
+        return Response({"message": f"OTP sent successfully => {otp}"}, status=status.HTTP_200_OK)
 
 
 
 class VerifyOTPView(APIView):
+
     def post(self, request):
         serializer = VerifyOTPSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         phone_number = serializer.validated_data["phone_number"]
         otp_input = serializer.validated_data["otp"].strip()
-        purpose = serializer.validated_data["purpose"]
-        max_attempts = 3
 
-        with transaction.atomic():
-            otp_obj = OTPCode.objects.select_for_update().filter(
-                phone_number=str(phone_number),
-                purpose=purpose,
-                is_used=False
-            ).order_by("-created_at").first()
+        cache_key_otp = f"otp:{phone_number}"
+        cache_key_attempts = f"otp_attempts:{phone_number}"
 
-            if not otp_obj:
-                return Response({"error": "OTP not found or expired"}, status=400)
+        try:
+            cached_otp = cache.get(cache_key_otp)
+            attempts = cache.get(cache_key_attempts, 0)
 
-            # Expired
-            if timezone.now() > otp_obj.expires_at:
-                otp_obj.is_used = True
-                otp_obj.save(update_fields=["is_used"])
-                return Response({"error": "OTP expired"}, status=400)
+            if not cached_otp:
+                return Response({"error": "OTP not found or expired."}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Attempts exceeded
-            if otp_obj.attempts >= max_attempts:
-                otp_obj.is_used = True
-                otp_obj.save(update_fields=["is_used"])
-                return Response({"error": "Too many attempts"}, status=400)
+            if attempts >= MAX_OTP_ATTEMPTS:
+                cache.delete(cache_key_otp)
+                cache.delete(cache_key_attempts)
+                return Response({"error": "Max attempts reached. Request a new OTP."},
+                                status=status.HTTP_400_BAD_REQUEST)
 
-            # Wrong code
-            if otp_obj.code.strip() != otp_input:
-                otp_obj.attempts += 1
-                otp_obj.save(update_fields=["attempts"])
-                return Response({"error": "Invalid OTP"}, status=400)
+            if str(cached_otp) != otp_input:
 
-            # Success
-            otp_obj.is_used = True
-            otp_obj.save(update_fields=["is_used"])
+                try:
+                    cache.incr(cache_key_attempts)
+                except ValueError:
+                    cache.set(cache_key_attempts, attempts + 1, timeout=OTP_EXPIRY_SECONDS)
 
-        #PURPOSE LOGIC
-        if purpose == "REGISTER":
-            user, _ = User.objects.get_or_create(phone_number=phone_number)
+                return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
+
+            cache.delete(cache_key_otp)
+            cache.delete(cache_key_attempts)
+
+            user, created = User.objects.get_or_create(phone_number=phone_number)
+
+            if created:
+                UserProfile.objects.create(user=user)
+
             refresh = RefreshToken.for_user(user)
-            return Response({"access": str(refresh.access_token), "refresh": str(refresh)}, status=200)
 
-        elif purpose == "LOGIN":
-            try:
-                user = User.objects.get(phone_number=phone_number)
-                refresh = RefreshToken.for_user(user)
-                return Response({"access": str(refresh.access_token), "refresh": str(refresh)}, status=200)
-            except User.DoesNotExist:
-                return Response({"error": "User not found"}, status=404)
+            message = "User registered successfully." if created else "User Logged in successfully."
+            status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
 
-        elif purpose == "RESET_PASSWORD":
-            reset_serializer = ResetPasswordSerializer(data=request.data)
-            reset_serializer.is_valid(raise_exception=True)
-            password = reset_serializer.validated_data["new_password"]
-
-            try:
-                user = User.objects.get(phone_number=phone_number)
-                user.set_password(password)
-                user.save()
-                return Response({"detail": "Password reset successful"}, status=200)
-            except User.DoesNotExist:
-                return Response({"error": "User not found"}, status=404)
-
-        elif purpose == "CHANGE_PHONE":
-            change_serializer = ChangePhoneNumberSerializer(
-                data={"phone_number": phone_number,"new_phone_number": request.data.get("new_phone_number")}
-            )
-            change_serializer.is_valid(raise_exception=True)
-
-            new_phone_number = change_serializer.validated_data["new_phone_number"]
-
-            if User.objects.filter(phone_number=new_phone_number).exists():
-                return Response({"error": "Phone number already used"}, status=400)
-
-            user = User.objects.get(phone_number=phone_number)
-            user.phone_number = new_phone_number
-            user.save(update_fields=["phone_number"])
-
-            return Response({"detail": "Phone number changed"}, status=200)
-
-        return Response({"message": "OTP verified"}, status=200)
+            return Response(
+                {"notice": message,
+                    "access": str(refresh.access_token),
+                    "refresh": str(refresh)}, status=status_code)
+        except Exception as e:
+            return Response({"error": "An unexpected error occurred.", "details": str(e)},status=status.HTTP_500_INTERNAL_SERVER_ERROR)

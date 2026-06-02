@@ -1,3 +1,5 @@
+from random import randint
 
 def generate_otp():
-    return str(111111)
+    # return str(randint(100000,999999))
+    return str("111111")

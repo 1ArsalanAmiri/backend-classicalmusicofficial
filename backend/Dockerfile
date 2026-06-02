@@ -9,10 +9,16 @@ ENV PYTHONUNBUFFERED=1
 
 COPY requirements.txt .
 
-#RUN pip install -i https://mirrors.cloud.tencent.com/pypi/simple --no-cache-dir -r requirements.txt
+#RUN pip install --no-cache-dir -r requirements.txt
+#RUN pip install -i https://package-mirror.liara.ir/repository/pypi/simple --no-cache-dir -r requirements.txt
+#RUN pip install -i https://mirror-pypi.runflare.com/simple --no-cache-dir -r requirements.txt
+#RUN pip install -i https://mirror.abrha.net/repository/pypi/simple --no-cache-dir -r requirements.txt
 
-#With Stable Connection:
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --upgrade pip setuptools wheel && \
+    (pip install --no-cache-dir -r requirements.txt || \
+     pip install --no-cache-dir -i https://package-mirror.liara.ir/repository/pypi/simple -r requirements.txt || \
+     pip install --no-cache-dir -i https://mirror-pypi.runflare.com/simple -r requirements.txt || \
+     pip install --no-cache-dir -i https://mirror.abrha.net/repository/pypi/simple -r requirements.txt)
 
 
 COPY . .
