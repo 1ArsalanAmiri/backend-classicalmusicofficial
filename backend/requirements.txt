@@ -4,14 +4,23 @@ djangorestframework_simplejwt
 django_jalali
 django-phonenumber-field
 django-nested-admin
+django-admin-inline-paginator
+django-admin-extra-buttons
+django-filter
+
 phonenumbers
 django-redis
 psycopg2-binary==2.9.9
-redis
+redis==5.2.1
 celery
 django-environ
 gunicorn
 mutagen
+rarfile
+daphne
+channels-redis
+channels
+
 
 drf-spectacular
 drf-spectacular[sidecar]

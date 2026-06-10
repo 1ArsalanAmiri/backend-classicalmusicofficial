@@ -1,0 +1,79 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+    .upload-container { max-width: 600px; margin: 40px auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .progress-wrapper { width: 100%; background-color: #f3f3f3; border-radius: 5px; margin-top: 20px; overflow: hidden; display: none; }
+    .progress-bar { height: 25px; background-color: #4CAF50; width: 0%; text-align: center; line-height: 25px; color: white; transition: width 0.4s ease; }
+    .status-text { margin-top: 10px; font-weight: bold; color: #555; }
+    .error-box { margin-top: 15px; color: #721c24; background-color: #f8d7da; padding: 10px; border-radius: 4px; display: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="upload-container">
+    <h2>آپلود گروهی ترک‌ها برای آلبوم: {{ album.title }}</h2>
+
+    {% if not is_uploading %}
+        <form method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+            <div style="margin: 20px 0;">
+                <label for="archive_file">فایل فشرده (ZIP/RAR) را انتخاب کنید:</label><br><br>
+                <input type="file" name="archive_file" id="archive_file" accept=".zip,.rar" required>
+            </div>
+            <div class="submit-row">
+                <input type="submit" value="شروع آپلود و پردازش" class="default">
+            </div>
+        </form>
+    {% else %}
+        <p>فایل با موفقیت ارسال شد و در حال پردازش در پس‌زمینه است. لطفا این صفحه را نبندید...</p>
+
+        <div class="progress-wrapper" id="progress-wrapper" style="display: block;">
+            <div class="progress-bar" id="progress-bar">0%</div>
+        </div>
+        <div class="status-text" id="status-text">وضعیت: در صف انتظار (PENDING)</div>
+        <div class="error-box" id="error-box"></div>
+
+        <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                const uploadId = "{{ upload_record_id }}";
+                const progressBar = document.getElementById('progress-bar');
+                const statusText = document.getElementById('status-text');
+                const errorBox = document.getElementById('error-box');
+                const progressUrl = "{{ progress_url }}";
+
+
+                const interval = setInterval(() => {
+                    fetch(progressUrl)
+                        .then(response => response.json())
+                        .then(data => {
+                            // آپدیت نوار پیشرفت ( $$ Progress = data.progress $$ )
+                            progressBar.style.width = data.progress + '%';
+                            progressBar.textContent = data.progress + '%';
+
+                            statusText.textContent = 'وضعیت: ' + data.status;
+
+                            if (data.status === 'COMPLETED') {
+                                clearInterval(interval);
+                                progressBar.style.backgroundColor = '#28a745';
+                                statusText.textContent = "پردازش با موفقیت به پایان رسید!";
+                                statusText.style.color = '#28a745';
+                            }
+                            else if (data.status === 'FAILED') {
+                                clearInterval(interval);
+                                progressBar.style.backgroundColor = '#dc3545';
+                                errorBox.style.display = 'block';
+                                errorBox.textContent = "خطا: " + data.error_log;
+                            }
+                        })
+                        .catch(err => {
+                            console.error('Error fetching progress:', err);
+                        });
+                }, 1500);
+            });
+        </script>
+    {% endif %}
+</div>
+{% endblock %}

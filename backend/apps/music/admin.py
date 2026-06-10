@@ -1,445 +1,165 @@
-# apps/music/admin.py
-from __future__ import annotations
-
-from django.contrib import admin
-from django.db.models import Count
+from django.contrib import admin , messages
+from django.shortcuts import render ,redirect, get_object_or_404
+from django.urls import path
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
+from .models import Artist, Album, Track, AlbumArchiveUpload, ArchiveUploadStatus
+import json
+from django.http import JsonResponse
+from django.template.response import TemplateResponse
+from admin_extra_buttons.api import ExtraButtonsMixin, button
 
-from .models import (
-    Album,
-    AlbumType,
-    Artist,
-    ArtistType,
-    Composer,
-    CreditRole,
-    Era,
-    Genre,
-    Label,
-    PublishStatus,
-    Recording,
-    RecordingCredit,
-    RecordingType,
-    Track,
-    Work,
-    WorkCatalogRef,
-    WorkType,
-)
-
-# =========================================================
-# Shared admin helpers
-# =========================================================
-
-@admin.action(description=_("انتشار انتخاب‌شده‌ها"))
-def make_published(modeladmin, request, queryset):
-    queryset.update(status=PublishStatus.PUBLISHED)
-
-
-@admin.action(description=_("پیش‌نویس کردن انتخاب‌شده‌ها"))
-def make_draft(modeladmin, request, queryset):
-    queryset.update(status=PublishStatus.DRAFT)
-
-
-@admin.action(description=_("آرشیو کردن انتخاب‌شده‌ها"))
-def make_archived(modeladmin, request, queryset):
-    queryset.update(status=PublishStatus.ARCHIVED)
-
-
-class TimestampedAdmin(admin.ModelAdmin):
-    readonly_fields = ("created_at", "updated_at")
-    list_per_page = 50
+from django.urls import reverse
+from .tasks import process_album_archive_task
 
 
 # =========================================================
-# Taxonomies
-# =========================================================
-
-@admin.register(Genre)
-class GenreAdmin(TimestampedAdmin):
-    list_display = ("name", "slug", "created_at")
-    search_fields = ("name", "slug")
-    prepopulated_fields = {"slug": ("name",)}
-    ordering = ("name",)
-
-
-@admin.register(Era)
-class EraAdmin(TimestampedAdmin):
-    list_display = ("name", "slug", "created_at")
-    search_fields = ("name", "slug")
-    prepopulated_fields = {"slug": ("name",)}
-    ordering = ("name",)
-
-
-@admin.register(WorkType)
-class WorkTypeAdmin(TimestampedAdmin):
-    list_display = ("name", "slug", "created_at")
-    search_fields = ("name", "slug")
-    prepopulated_fields = {"slug": ("name",)}
-    ordering = ("name",)
-
-
-@admin.register(Label)
-class LabelAdmin(TimestampedAdmin):
-    list_display = ("name", "slug", "website_link", "created_at")
-    search_fields = ("name", "slug", "website")
-    prepopulated_fields = {"slug": ("name",)}
-    ordering = ("name",)
-
-    def website_link(self, obj: Label):
-        if not obj.website:
-            return "-"
-        return format_html('<a href="{}" target="_blank" rel="noopener">link</a>', obj.website)
-    website_link.short_description = _("وب‌سایت")
-
-
-# =========================================================
-# Artists / composers
+# Artist Admin
 # =========================================================
 
 @admin.register(Artist)
-class ArtistAdmin(TimestampedAdmin):
-    list_display = (
-        "name",
-        "artist_type",
-        "country",
-        "is_active",
-        "is_featured",
-        "status",
-        "genres_count",
-        "created_at",
-    )
-    list_filter = (
-        "artist_type",
-        "is_active",
-        "is_featured",
-        "status",
-        ("genres", admin.RelatedOnlyFieldListFilter),
-    )
-    search_fields = ("name", "sort_name", "slug", "country")
-    autocomplete_fields = ("genres",)
+class ArtistAdmin(admin.ModelAdmin):
+    list_display = ("name", "artist_type", "era", "country", "created_at")
+    list_filter = ("artist_type", "era")
+    search_fields = ("name", "country", "biography")
     prepopulated_fields = {"slug": ("name",)}
-    ordering = ("sort_name", "name")
-    actions = (make_published, make_draft, make_archived)
+    readonly_fields = ("created_at", "updated_at")
 
     fieldsets = (
-        (_("اطلاعات اصلی"), {
-            "fields": ("name", "sort_name", "slug", "artist_type", "country", "image")
+        (_("اطلاعات پایه"), {
+            "fields": ("name", "slug", "artist_type", "era", "country", "image")
         }),
-        (_("زندگی‌نامه"), {
-            "fields": ("birth_date", "death_date", "short_bio"),
+        (_("جزئیات"), {
+            "fields": ("biography",)
         }),
-        (_("وضعیت"), {
-            "fields": ("is_active", "is_featured", "status", "genres"),
-        }),
-        (_("سیستمی"), {
-            "fields": ("created_at", "updated_at"),
+        (_("تاریخچه"), {
+            "fields": ("created_at", "updated_at")
         }),
     )
-
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        return qs.annotate(_genres_count=Count("genres", distinct=True))
-
-    def genres_count(self, obj: Artist):
-        return getattr(obj, "_genres_count", 0)
-    genres_count.short_description = _("تعداد ژانر")
-    genres_count.admin_order_field = "_genres_count"
-
-
-@admin.register(Composer)
-class ComposerAdmin(TimestampedAdmin):
-    list_display = ("artist", "era", "is_featured", "created_at")
-    list_filter = ("era", "is_featured")
-    search_fields = ("artist__name", "artist__sort_name")
-    autocomplete_fields = ("artist", "era")
-    ordering = ("artist__sort_name", "artist__name")
-
 
 # =========================================================
-# Works
-# =========================================================
-
-class WorkCatalogRefInline(admin.TabularInline):
-    model = WorkCatalogRef
-    extra = 1
-    fields = ("number",)
-    autocomplete_fields = ()
-    show_change_link = True
-
-
-@admin.register(Work)
-class WorkAdmin(TimestampedAdmin):
-    list_display = (
-        "title",
-        "composer",
-        "era",
-        "genre",
-        "work_type",
-        "composition_year",
-        "is_featured",
-        "status",
-        "recordings_count",
-        "created_at",
-    )
-    list_filter = (
-        "status",
-        "is_featured",
-        ("era", admin.RelatedOnlyFieldListFilter),
-        ("genre", admin.RelatedOnlyFieldListFilter),
-        ("work_type", admin.RelatedOnlyFieldListFilter),
-        ("composer", admin.RelatedOnlyFieldListFilter),
-    )
-    search_fields = (
-        "title",
-        "full_title",
-        "normalized_title",
-        "slug",
-        "composer__artist__name",
-        "composer__artist__sort_name",
-    )
-    autocomplete_fields = ("composer", "genre", "work_type", "era", "parent_work")
-    prepopulated_fields = {"slug": ("title",)}
-    inlines = (WorkCatalogRefInline,)
-    actions = (make_published, make_draft, make_archived)
-
-    fieldsets = (
-        (_("مشخصات"), {
-            "fields": ("composer", "title", "full_title", "slug", "parent_work"),
-        }),
-        (_("طبقه‌بندی"), {
-            "fields": ("genre", "work_type", "era", "composition_year"),
-        }),
-        (_("وضعیت"), {
-            "fields": ("is_featured", "status"),
-        }),
-        (_("توضیحات"), {
-            "fields": ("description",),
-        }),
-        (_("سیستمی"), {
-            "fields": ("created_at", "updated_at"),
-        }),
-    )
-
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        return qs.annotate(_recordings_count=Count("recordings", distinct=True))
-
-    def recordings_count(self, obj: Work):
-        return getattr(obj, "_recordings_count", 0)
-    recordings_count.short_description = _("تعداد ضبط")
-    recordings_count.admin_order_field = "_recordings_count"
-
-
-@admin.register(WorkCatalogRef)
-class WorkCatalogRefAdmin(TimestampedAdmin):
-    list_display = ("work", "number", "created_at")
-    search_fields = ("number", "work__title", "work__composer__artist__name")
-    autocomplete_fields = ("work",)
-    ordering = ("number",)
-
-
-# =========================================================
-# Recordings
-# =========================================================
-
-class RecordingCreditInline(admin.TabularInline):
-    model = RecordingCredit
-    extra = 1
-    fields = ("artist", "role", "credit_order", "is_primary")
-    autocomplete_fields = ("artist",)
-    ordering = ("credit_order", "id")
-    show_change_link = True
-
-
-@admin.register(Recording)
-class RecordingAdmin(TimestampedAdmin):
-    list_display = (
-        "display_title",
-        "work",
-        "recording_type",
-        "label",
-        "release_date",
-        "is_complete_work",
-        "is_featured",
-        "status",
-        "tracks_count",
-        "created_at",
-    )
-    list_filter = (
-        "recording_type",
-        "status",
-        "is_featured",
-        "is_complete_work",
-        ("label", admin.RelatedOnlyFieldListFilter),
-        ("work", admin.RelatedOnlyFieldListFilter),
-    )
-    search_fields = (
-        "title_override",
-        "work__title",
-        "work__full_title",
-        "work__composer__artist__name",
-        "label__name",
-    )
-    autocomplete_fields = ("work", "label")
-    inlines = (RecordingCreditInline,)
-    actions = (make_published, make_draft, make_archived)
-    date_hierarchy = "release_date"
-    ordering = ("-release_date", "-id")
-
-    fieldsets = (
-        (_("اصلی"), {
-            "fields": ("work", "title_override", "recording_type"),
-        }),
-        (_("تاریخ‌ها"), {
-            "fields": ("recording_date", "release_date"),
-        }),
-        (_("انتشار"), {
-            "fields": ("label", "is_complete_work", "duration_ms"),
-        }),
-        (_("امتیازدهی"), {
-            "fields": ("popularity", "is_featured", "status"),
-        }),
-        (_("سیستمی"), {
-            "fields": ("created_at", "updated_at"),
-        }),
-    )
-
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        return qs.annotate(_tracks_count=Count("tracks", distinct=True))
-
-    def tracks_count(self, obj: Recording):
-        return getattr(obj, "_tracks_count", 0)
-    tracks_count.short_description = _("تعداد ترک")
-    tracks_count.admin_order_field = "_tracks_count"
-
-
-@admin.register(RecordingCredit)
-class RecordingCreditAdmin(TimestampedAdmin):
-    list_display = ("recording", "artist", "role", "credit_order", "is_primary", "created_at")
-    list_filter = ("role", "is_primary")
-    search_fields = ("recording__work__title", "recording__work__composer__artist__name", "artist__name")
-    autocomplete_fields = ("recording", "artist")
-    ordering = ("recording", "credit_order", "id")
-
-
-# =========================================================
-# Albums / tracks
+# Track Inline for Album Admin
 # =========================================================
 
 class TrackInline(admin.TabularInline):
+    """
+    نمایش ترک‌ها به صورت درون‌خطی در صفحه ادمین آلبوم
+    به کاربر اجازه می‌دهد همزمان با ساخت آلبوم، ترک‌های آن را نیز آپلود کند.
+    """
     model = Track
-    extra = 0
-    fields = (
-        "disc_number",
-        "track_number",
-        "sequence_order",
-        "recording",
-        "title_override",
-        "duration_ms",
-        "is_premium",
-        "is_streamable",
-        "status",
-    )
-    autocomplete_fields = ("recording",)
-    show_change_link = True
-    ordering = ("disc_number", "track_number", "sequence_order", "id")
+    extra = 0  # تعداد فرم‌های خالی پیش‌فرض
+    fields = ("track_number", "title", "audio_file", "duration_ms", "composer", "singer", "status")
+    autocomplete_fields = ["composer", "singer"]
+    ordering = ["track_number"]
+
+# =========================================================
+# Track Admin (Standalone)
+# =========================================================
+
+@admin.register(Track)
+class TrackAdmin(ExtraButtonsMixin, admin.ModelAdmin):
+    list_display = ['title', 'get_album_or_single', 'track_number', 'get_duration', 'status']
+    list_filter = ['status', 'album']
+    search_fields = ['title', 'album__title']
+
+    @admin.display(description='آلبوم / سینگل', ordering='album__title')
+    def get_album_or_single(self, obj):
+        if obj.album:
+            return obj.album.title
+        return "تک‌آهنگ (Single)"
+
+    @admin.display(description='مدت زمان', ordering='duration_ms')
+    def get_duration(self, obj):
+        if not obj.duration_ms:
+            return "00:00"
+        seconds = obj.duration_ms // 1000
+        minutes = seconds // 60
+        seconds = seconds % 60
+        return f"{minutes:02}:{seconds:02}"
+
 
 
 @admin.register(Album)
-class AlbumAdmin(TimestampedAdmin):
-    list_display = (
-        "title",
-        "album_type",
-        "label",
-        "release_date",
-        "is_featured",
-        "status",
-        "tracks_count",
-        "created_at",
-    )
-    list_filter = (
-        "album_type",
-        "status",
-        "is_featured",
-        ("label", admin.RelatedOnlyFieldListFilter),
-    )
-    search_fields = ("title", "slug", "label__name")
-    autocomplete_fields = ("label",)
+class AlbumAdmin(admin.ModelAdmin):
+    list_display = ('title', 'composer', 'status', 'upload_archive_button', 'display_cover_image')
+    list_filter = ('status', 'release_date')
+    search_fields = ('title', 'composer', 'conductor', 'orchestra', 'soloist', 'ensemble')
     prepopulated_fields = {"slug": ("title",)}
-    inlines = (TrackInline,)
-    actions = (make_published, make_draft, make_archived)
-    date_hierarchy = "release_date"
-    ordering = ("-release_date", "title")
+    readonly_fields = ("created_at", "updated_at")
 
-    fieldsets = (
-        (_("اصلی"), {"fields": ("title", "slug", "album_type", "label", "release_date")}),
-        (_("محتوا"), {"fields": ("cover_image", "description", "editorial_note")}),
-        (_("وضعیت"), {"fields": ("is_featured", "popularity", "status")}),
-        (_("سیستمی"), {"fields": ("created_at", "updated_at")}),
-    )
-
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        return qs.annotate(_tracks_count=Count("tracks", distinct=True))
-
-    def tracks_count(self, obj: Album):
-        return getattr(obj, "_tracks_count", 0)
-    tracks_count.short_description = _("تعداد ترک")
-    tracks_count.admin_order_field = "_tracks_count"
+    def display_cover_image(self, obj):
+        if obj.cover_image:
+            return format_html('<img src="{}" width="50" height="50" />', obj.cover_image.url)
+        return _("بدون کاور")
+    display_cover_image.short_description = _("کاور آلبوم")
 
 
-@admin.register(Track)
-class TrackAdmin(TimestampedAdmin):
-    list_display = (
-        "album",
-        "disc_number",
-        "track_number",
-        "display_title",
-        "recording",
-        "duration_ms",
-        "is_premium",
-        "is_streamable",
-        "status",
-        "created_at",
-    )
-    list_filter = (
-        "status",
-        "is_premium",
-        "is_streamable",
-        ("album", admin.RelatedOnlyFieldListFilter),
-    )
-    search_fields = (
-        "title_override",
-        "album__title",
-        "recording__work__title",
-        "recording__work__composer__artist__name",
-    )
-    autocomplete_fields = ("album", "recording")
-    actions = (make_published, make_draft, make_archived)
-    ordering = ("album", "disc_number", "track_number", "sequence_order", "id")
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
 
-    fieldsets = (
-        (_("ارتباط‌ها"), {"fields": ("album", "recording")}),
-        (_("نمایش/ترتیب"), {"fields": ("title_override", "disc_number", "track_number", "sequence_order")}),
-        (_("فایل صوتی"), {
-            "fields": (
-                "audio_file",
-                "file_size_bytes",
-                "audio_bitrate_kbps",
-                "audio_sample_rate_hz",
-                "audio_codec",
-                "duration_ms",
+        if obj.cover_image and change:
+            tracks_to_update = Track.objects.filter(album=obj, cover_image__isnull=True)
+            for track in tracks_to_update:
+                track.save()
+            messages.success(request, _(f"کاور آلبوم به {tracks_to_update.count()} ترک اختصاص داده شد."))
+
+        elif not obj.cover_image and change:
+             pass
+
+
+    def upload_archive_button(self, obj):
+        url = reverse('admin:album_batch_upload', args=[obj.pk])
+        return format_html('<a class="button" href="{}">آپلود گروهی ترک‌ها (ZIP/RAR)</a>', url)
+    upload_archive_button.short_description = "آپلود آرشیو"
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path('<int:album_id>/batch-upload/', self.admin_site.admin_view(self.batch_upload_view),
+                 name='album_batch_upload'),
+            path('upload-progress/<int:upload_id>/', self.admin_site.admin_view(self.upload_progress_api),
+                 name='album_upload_progress'),
+        ]
+        return custom_urls + urls
+
+    def batch_upload_view(self, request, album_id):
+        album = self.get_object(request, album_id)
+        if request.method == 'POST' and request.FILES.get('archive_file'):
+            archive_file = request.FILES['archive_file']
+            upload_record = AlbumArchiveUpload.objects.create(
+                album=album,
+                archive_file=archive_file,
+                status=ArchiveUploadStatus.PENDING,
+                progress=0
             )
-        }),
-        (_("دسترسی"), {"fields": ("is_premium", "is_streamable", "status")}),
-        (_("سیستمی"), {"fields": ("created_at", "updated_at")}),
-    )
+            task = process_album_archive_task.delay(upload_record.id)
+            upload_record.task_id = task.id
+            upload_record.save()
 
+            progress_url = reverse('admin:album_upload_progress', args=[upload_record.id])
+            context = dict(
+                self.admin_site.each_context(request),
+                album=album,
+                upload_record_id=upload_record.id,
+                progress_url=progress_url,
+                is_uploading=True,
+            )
+            return TemplateResponse(request, "admin/music/track/batch_zip_upload.html", context)
 
-# =========================================================
-# Admin site cosmetics (optional)
-# =========================================================
-admin.site.site_header = _("مدیریت موسیقی کلاسیک")
-admin.site.site_title = _("پنل ادمین")
-admin.site.index_title = _("مدیریت محتوا")
+        context = dict(
+            self.admin_site.each_context(request),
+            album=album,
+            is_uploading=False,
+        )
+        return TemplateResponse(request, "admin/music/track/batch_zip_upload.html", context)
+
+    def upload_progress_api(self, request, upload_id):
+        try:
+            record = AlbumArchiveUpload.objects.get(id=upload_id)
+            return JsonResponse({
+                'status': record.status,
+                'progress': record.progress,
+                'error_log': record.error_log
+            })
+        except AlbumArchiveUpload.DoesNotExist:
+            return JsonResponse({'status': 'ERROR', 'error_log': 'Record not found'}, status=404)

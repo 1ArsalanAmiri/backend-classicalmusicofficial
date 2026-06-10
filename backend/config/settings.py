@@ -5,6 +5,8 @@ from os import path
 from django.urls import reverse_lazy
 
 
+SITE_URL = "http://localhost"  # در سرور واقعی این را به https://yourdomain.com تغییر دهید
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 env = environ.Env(DEBUG=(bool, False),ALLOWED_HOSTS=(list, []),)
@@ -38,8 +40,8 @@ DATABASES = {
 }
 
 
-
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -56,6 +58,11 @@ INSTALLED_APPS = [
     "drf_spectacular_sidecar",
     "phonenumber_field",
     'nested_admin',
+    "django_admin_inline_paginator",
+    "admin_extra_buttons",
+    'django_filters',
+    'channels',
+
 
     #my-apps
     'apps.accounts',
@@ -85,9 +92,9 @@ ROOT_URLCONF = 'config.urls'
 
 TEMPLATES = [
     {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [BASE_DIR / "templates"],
-        "APP_DIRS": True,
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [path.join(BASE_DIR, 'templates')],
+        'APP_DIRS': True,
         "OPTIONS": {
             "context_processors": [
                 "django.template.context_processors.debug",
@@ -99,7 +106,8 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'config.wsgi.application'
+# WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = 'config.asgi.application'
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -118,7 +126,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Tehran'
 
 USE_I18N = True
 
@@ -128,7 +136,7 @@ STATIC_URL = '/static/'
 STATIC_ROOT = path.join(BASE_DIR, 'staticfiles')
 
 MEDIA_URL = '/media/'
-MEDIA_ROOT = '/app/media'
+MEDIA_ROOT = path.join(BASE_DIR, 'media')
 
 
 # STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.ManifestStaticFilesStorage'
@@ -136,12 +144,17 @@ MEDIA_ROOT = '/app/media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
+    'DEFAULT_THROTTLE_RATES': {
+        'zip_generation': '500/hour',  # هر کاربر نهایتاً 5 درخواست در ساعت
+    }
 }
+
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=500),
@@ -164,6 +177,7 @@ CACHES = {
         'LOCATION': 'redis://redis:6379/1',
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            "CONNECTION_POOL_KWARGS": {"max_connections": 100}
         }
     }
 }
@@ -176,5 +190,24 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'Asia/Tehran'
 
+
 #AUTH USER MODEL
 AUTH_USER_MODEL = "accounts.CustomUser"
+
+
+#MAXIMUM DJANGO MEMORY DATA SET IN ONE REQUEST (10MB)
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10485760
+
+#MAXIMUM DATA SIZE (MUST BE SET WITH NGINX)
+DATA_UPLOAD_MAX_MEMORY_SIZE = 524288000
+
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [("redis", 6379)],
+            "capacity": 5000,
+        },
+    },
+}

@@ -10,6 +10,9 @@ from apps.common.utils.otp import generate_otp
 from apps.common.utils.sms import send_sms
 from apps.profiles.models import UserProfile
 
+
+
+
 User = get_user_model()
 
 OTP_EXPIRY_SECONDS = 300
@@ -98,3 +101,4 @@ class VerifyOTPView(APIView):
                     "refresh": str(refresh)}, status=status_code)
         except Exception as e:
             return Response({"error": "An unexpected error occurred.", "details": str(e)},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+

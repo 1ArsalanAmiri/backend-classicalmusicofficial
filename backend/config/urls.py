@@ -17,4 +17,6 @@ urlpatterns = [
 
     path("profile/", include("apps.profiles.urls"), name="profile"),
 
+    path("music/", include("apps.music.urls"), name="music"),
+
 ]

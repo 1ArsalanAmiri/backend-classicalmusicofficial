@@ -7,7 +7,12 @@ from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
-from apps.profiles.models import UserProfile
+from apps.music.models import Artist
+from apps.profiles.models import UserProfile, ArtistProfile
+from django.shortcuts import get_object_or_404
+from django.db.models import Q
+import jdatetime
+
 
 
 User = get_user_model()
@@ -20,16 +25,83 @@ class UserProfileSerializer(serializers.ModelSerializer):
     last_name = serializers.CharField(source='user.last_name', read_only=True)
     email = serializers.EmailField(source='user.email', read_only=True)
 
+    current_subscription_name = serializers.SerializerMethodField()
+    subscription_start_date = serializers.SerializerMethodField()
+    subscription_end_date = serializers.SerializerMethodField()
+    days_until_expiration = serializers.SerializerMethodField()
+    subscription_status = serializers.SerializerMethodField()
+
     class Meta:
         model = UserProfile
         fields = [
             'phone_number', 'first_name', 'last_name', 'email',
-            'profile_image', 'joined_date', 'subscription',
-            'subscription_start_date', 'subscription_end_date',
-            'days_until_expiration']
+            'profile_image', 'joined_date',
+            'current_subscription_name',
+            'subscription_start_date',
+            'subscription_end_date',
+            'days_until_expiration',
+            'subscription_status',
+        ]
 
-        read_only_fields = ['joined_date', 'subscription_start_date', 'subscription_end_date', 'days_until_expiration',
-                            'subscription']
+    def get_latest_active_subscription_history(self, obj):
+        """Helper to get the latest active or upcoming subscription history"""
+        today = jdatetime.date.today()
+        # Fetch history entries that are either active or will start soon
+        return obj.subscriptionhistory_set.filter(
+            Q(end_date__gte=today) | Q(start_date__gte=today)
+        ).order_by('-start_date').select_related('subscription').first()
+
+    def get_current_subscription_name(self, obj):
+        history = self.get_latest_active_subscription_history(obj)
+        if history and history.subscription:
+            return history.subscription.name
+        return None
+
+    def get_subscription_start_date(self, obj):
+        history = self.get_latest_active_subscription_history(obj)
+        if history and history.start_date:
+            # Convert jdatetime.date to string YYYY-MM-DD
+            return history.start_date.strftime('%Y-%m-%d')
+        return None
+
+    def get_subscription_end_date(self, obj):
+        history = self.get_latest_active_subscription_history(obj)
+        if history and history.end_date:
+            # Convert jdatetime.date to string YYYY-MM-DD
+            return history.end_date.strftime('%Y-%m-%d')
+        return None
+
+    def get_days_until_expiration(self, obj):
+        history = self.get_latest_active_subscription_history(obj)
+        if not history or not history.end_date:
+            return 0
+
+        today = jdatetime.date.today()
+        end_date = history.end_date
+
+        if end_date <= today:
+            return 0
+
+        diff = end_date - today
+        return diff.days
+
+    def get_subscription_status(self, obj):
+        history = self.get_latest_active_subscription_history(obj)
+        if not history:
+            return "No active subscription"
+
+        today = jdatetime.date.today()
+        end_date = history.end_date
+
+        if end_date is None:
+            return "Active (Unlimited)"
+
+        if history.start_date > today:
+            return "Upcoming"
+        elif end_date >= today:
+            return "Active"
+        else: # end_date < today
+            return "Expired"
 
 
 
@@ -110,3 +182,28 @@ class ChangePasswordSerializer(serializers.Serializer):
 
         return attrs
 
+
+
+class ArtistSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = Artist
+        fields = [
+            "name",
+            "slug",
+            "country",
+            "artist_type",
+            "era",
+            "image",
+            "biography",
+        ]
+
+
+
+class ArtistProfileSerializer(serializers.ModelSerializer):
+
+    artist = ArtistSerializer(read_only=True)
+
+    class Meta:
+        model = ArtistProfile
+        fields = ["artist",]

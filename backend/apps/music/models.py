@@ -1,15 +1,22 @@
 from __future__ import annotations
-from django.core.exceptions import ValidationError
-from django.core.validators import FileExtensionValidator, MinValueValidator, MaxValueValidator
+from django.core.validators import FileExtensionValidator
 from django.db import models
+from django.db.models import Sum
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
-
+from uuid import uuid4
 
 
 # =========================================================
-# Base
+# Utilities & Base Models
 # =========================================================
+class ArchiveUploadStatus(models.TextChoices):
+    PENDING = "pending", _("در صف انتظار")
+    EXTRACTING = "extracting", _("در حال استخراج")
+    PROCESSING = "processing", _("در حال پردازش متادیتا و آپلود")
+    COMPLETED = "completed", _("تکمیل شده")
+    FAILED = "failed", _("خطا")
+
 
 class TimeStampedModel(models.Model):
     created_at = models.DateTimeField(_("تاریخ ایجاد"), auto_now_add=True, db_index=True)
@@ -28,8 +35,7 @@ class PublishStatus(models.TextChoices):
 def unique_slugify(instance, slug_field_name: str, value: str):
     slug_field = instance._meta.get_field(slug_field_name)
     max_length = slug_field.max_length
-
-    base_slug = slugify(value) or "item"
+    base_slug = slugify(value, allow_unicode=True) or "item"
     base_slug = base_slug[:max_length]
 
     slug = base_slug
@@ -48,87 +54,29 @@ def unique_slugify(instance, slug_field_name: str, value: str):
     return slug
 
 
-# =========================================================
-# Taxonomies
-# =========================================================
-
-class Genre(TimeStampedModel):
-    name = models.CharField(_("نام"), max_length=100, unique=True)
-    slug = models.SlugField(_("اسلاگ"), max_length=120, unique=True, blank=True)
-    description = models.TextField(_("توضیحات"), blank=True)
-
-    class Meta:
-        verbose_name = _("ژانر")
-        verbose_name_plural = _("ژانرها")
-        ordering = ["name"]
-
-    def save(self, *args, **kwargs):
-        if not self.slug:
-            self.slug = unique_slugify(self, "slug", self.name)
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return self.name
+def upload_path_handler(instance, filename, folder_name):
+    ext = filename.split('.')[-1]
+    return f"music/{folder_name}/{instance.id or uuid4().hex[:8]}/{uuid4().hex}.{ext}"
 
 
-class Era(TimeStampedModel):
-    name = models.CharField(_("نام"), max_length=100, unique=True)
-    slug = models.SlugField(_("اسلاگ"), max_length=120, unique=True, blank=True)
-    description = models.TextField(_("توضیحات"), blank=True)
-
-    class Meta:
-        verbose_name = _("دوره")
-        verbose_name_plural = _("دوره‌ها")
-        ordering = ["name"]
-
-    def save(self, *args, **kwargs):
-        if not self.slug:
-            self.slug = unique_slugify(self, "slug", self.name)
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return self.name
+def artist_image_path(instance, filename):
+    return upload_path_handler(instance, filename, "artists/images")
 
 
-class WorkType(TimeStampedModel):
-    name = models.CharField(_("نام"), max_length=100, unique=True)
-    slug = models.SlugField(_("اسلاگ"), max_length=120, unique=True, blank=True)
-
-    class Meta:
-        verbose_name = _("نوع اثر")
-        verbose_name_plural = _("انواع اثر")
-        ordering = ["name"]
-
-    def save(self, *args, **kwargs):
-        if not self.slug:
-            self.slug = unique_slugify(self, "slug", self.name)
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return self.name
+def album_cover_path(instance, filename):
+    return upload_path_handler(instance, filename, "albums/covers")
 
 
-class Label(TimeStampedModel):
-    name = models.CharField(_("نام"), max_length=150, unique=True)
-    slug = models.SlugField(_("اسلاگ"), max_length=180, unique=True, blank=True)
-    website = models.URLField(_("وب‌سایت"), blank=True)
+def track_cover_path(instance, filename):
+    return upload_path_handler(instance, filename, "tracks/covers")
 
-    class Meta:
-        verbose_name = _("لیبل")
-        verbose_name_plural = _("لیبل‌ها")
-        ordering = ["name"]
 
-    def save(self, *args, **kwargs):
-        if not self.slug:
-            self.slug = unique_slugify(self, "slug", self.name)
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return self.name
+def track_audio_path(instance, filename):
+    return upload_path_handler(instance, filename, "tracks/audio")
 
 
 # =========================================================
-# Artists / composers
+# Choices
 # =========================================================
 
 class ArtistType(models.TextChoices):
@@ -139,326 +87,120 @@ class ArtistType(models.TextChoices):
     OTHER = "other", _("سایر")
 
 
+class EraChoices(models.TextChoices):
+    RENAISSANCE = "renaissance", _("رنسانس")
+    BAROQUE = "baroque", _("باروک")
+    CLASSICAL = "classical", _("کلاسیک")
+    ROMANTIC = "romantic", _("رمانتیک")
+    IMPRESSIONISM = "impressionism", _("امپرسیونیسم")
+    MODERN = "modern", _("مدرن")
+    CONTEMPORARY = "contemporary", _("معاصر")
+
+
+# =========================================================
+# Artist Model
+# =========================================================
+
 class Artist(TimeStampedModel):
-    name = models.CharField(_("نام"), max_length=255)
-    sort_name = models.CharField(_("نام مرتب‌سازی"), max_length=255, blank=True, db_index=True)
-    slug = models.SlugField(_("اسلاگ"), max_length=280, unique=True, blank=True)
+    name = models.CharField(_("نام آرتیست"), max_length=255)
+    slug = models.SlugField(_("اسلاگ"), max_length=120, unique=True, blank=True, allow_unicode=True)
+    country = models.CharField(_("ملیت/کشور"), max_length=100, blank=True)
 
     artist_type = models.CharField(
         _("نوع آرتیست"),
         max_length=20,
         choices=ArtistType.choices,
         default=ArtistType.PERSON,
-        db_index=True,
+        db_index=True
     )
-    country = models.CharField(_("کشور"), max_length=100, blank=True)
-    birth_date = models.DateField(_("تاریخ تولد"), null=True, blank=True)
-    death_date = models.DateField(_("تاریخ وفات"), null=True, blank=True)
-    short_bio = models.TextField(_("بیو کوتاه"), blank=True)
 
-    image = models.ImageField(
-        _("تصویر"),
-        upload_to="music/artists/images/",
+    era = models.CharField(
+        _("دوره زمانی"),
+        max_length=20,
+        choices=EraChoices.choices,
         null=True,
         blank=True,
-        validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])],
+        db_index=True
     )
 
-    is_active = models.BooleanField(_("فعال"), default=True, db_index=True)
-    is_featured = models.BooleanField(_("ویژه"), default=False, db_index=True)
-    status = models.CharField(
-        _("وضعیت انتشار"),
-        max_length=20,
-        choices=PublishStatus.choices,
-        default=PublishStatus.DRAFT,
-        db_index=True,
-    )
-
-    genres = models.ManyToManyField(
-        Genre,
-        verbose_name=_("ژانرها"),
-        related_name="artists",
+    image = models.ImageField(
+        _("عکس"),
+        upload_to=artist_image_path,
+        null=True,
         blank=True,
+        validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])]
     )
+
+    biography = models.TextField(_("بیوگرافی"), blank=True)
+
 
     class Meta:
         verbose_name = _("آرتیست")
         verbose_name_plural = _("آرتیست‌ها")
-        ordering = ["sort_name", "name"]
-
-    def clean(self):
-        if self.birth_date and self.death_date and self.death_date < self.birth_date:
-            raise ValidationError({"death_date": _("تاریخ وفات نمی‌تواند قبل از تاریخ تولد باشد.")})
+        ordering = ["name"]
 
     def save(self, *args, **kwargs):
-        if not self.sort_name:
-            self.sort_name = self.name
         if not self.slug:
             self.slug = unique_slugify(self, "slug", self.name)
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return self.name
-
-
-class Composer(TimeStampedModel):
-    artist = models.OneToOneField(
-        Artist,
-        verbose_name=_("آرتیست"),
-        on_delete=models.CASCADE,
-        related_name="composer_profile",
-    )
-    era = models.ForeignKey(
-        Era,
-        verbose_name=_("دوره"),
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="composers",
-    )
-    is_featured = models.BooleanField(_("ویژه"), default=False, db_index=True)
-
-    class Meta:
-        verbose_name = _("آهنگساز")
-        verbose_name_plural = _("آهنگسازان")
-        ordering = ["artist__sort_name", "artist__name"]
-
-    def clean(self):
-        if self.artist and self.artist.artist_type != ArtistType.PERSON:
-            raise ValidationError({"artist": _("آهنگساز باید از نوع شخص باشد.")})
-
-    def __str__(self):
-        return self.artist.name
-
+        return f"{self.name} ({self.get_artist_type_display()})"
 
 # =========================================================
-# Works
+# Album Model
 # =========================================================
-
-class Work(TimeStampedModel):
-    composer = models.ForeignKey(Composer, verbose_name=_("آهنگساز"), on_delete=models.PROTECT, related_name="works")
-    title = models.CharField(_("عنوان"), max_length=300)
-    full_title = models.CharField(_("عنوان کامل"), max_length=500, blank=True)
-    normalized_title = models.CharField(_("عنوان نرمال"), max_length=500, blank=True, db_index=True)
-    slug = models.SlugField(_("اسلاگ"), max_length=550, unique=True, blank=True)
-
-    genre = models.ForeignKey(Genre, verbose_name=_("ژانر"), on_delete=models.SET_NULL, null=True, blank=True, related_name="works")
-    work_type = models.ForeignKey(WorkType, verbose_name=_("نوع اثر"), on_delete=models.SET_NULL, null=True, blank=True, related_name="works")
-    era = models.ForeignKey(Era, verbose_name=_("دوره"), on_delete=models.SET_NULL, null=True, blank=True, related_name="works")
-
-    composition_year = models.PositiveIntegerField(
-        _("سال ساخت"),
-        null=True,
-        blank=True,
-        validators=[MinValueValidator(0), MaxValueValidator(3000)],
-    )
-
-    parent_work = models.ForeignKey(
-        "self",
-        verbose_name=_("اثر والد"),
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="child_works",
-    )
-
-    description = models.TextField(_("توضیحات"), blank=True)
-    is_featured = models.BooleanField(_("ویژه"), default=False, db_index=True)
-    status = models.CharField(
-        _("وضعیت انتشار"),
-        max_length=20,
-        choices=PublishStatus.choices,
-        default=PublishStatus.DRAFT,
-        db_index=True,
-    )
-
-    class Meta:
-        verbose_name = _("اثر")
-        verbose_name_plural = _("آثار")
-        ordering = ["composer__artist__sort_name", "title"]
-        constraints = [
-            models.UniqueConstraint(fields=["composer", "title"], name="uniq_work_title_per_composer"),
-        ]
-
-    def clean(self):
-        if self.parent_work_id and self.parent_work_id == self.id:
-            raise ValidationError({"parent_work": _("اثر والد نمی‌تواند خود اثر باشد.")})
-
-    def save(self, *args, **kwargs):
-        if not self.full_title:
-            self.full_title = self.title
-        self.normalized_title = self.full_title.lower().strip()
-        if not self.slug:
-            self.slug = unique_slugify(self, "slug", f"{self.composer.artist.name}-{self.title}")
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return f"{self.composer.artist.name} - {self.title}"
-
-
-class WorkCatalogRef(TimeStampedModel):
-    work = models.ForeignKey(Work, verbose_name=_("اثر"), on_delete=models.CASCADE, related_name="catalog_refs")
-    number = models.CharField(_("شماره"), max_length=100)
-
-    class Meta:
-        verbose_name = _("مرجع کاتالوگ اثر")
-        verbose_name_plural = _("مراجع کاتالوگ اثر")
-        ordering = ["number"]
-        constraints = [
-            models.UniqueConstraint(fields=["work", "number"], name="uniq_work_catalog_ref"),
-        ]
-
-    def __str__(self):
-        return f"{self.work.title} - {self.number}"
-
-
-# =========================================================
-# Recordings
-# =========================================================
-
-class RecordingType(models.TextChoices):
-    STUDIO = "studio", _("استودیویی")
-    LIVE = "live", _("اجرای زنده")
-    OTHER = "other", _("سایر")
-
-
-class CreditRole(models.TextChoices):
-    COMPOSER = "composer", _("آهنگساز")
-    CONDUCTOR = "conductor", _("رهبر ارکستر")
-    SOLOIST = "soloist", _("سولیست")
-    ORCHESTRA = "orchestra", _("ارکستر")
-    ENSEMBLE = "ensemble", _("گروه")
-    CHOIR = "choir", _("کر")
-    PERFORMER = "performer", _("اجراکننده")
-    ARRANGER = "arranger", _("تنظیم‌کننده")
-    PRODUCER = "producer", _("تهیه‌کننده")
-
-
-class Recording(TimeStampedModel):
-    work = models.ForeignKey(Work, verbose_name=_("اثر"), on_delete=models.PROTECT, related_name="recordings")
-    title_override = models.CharField(_("عنوان جایگزین"), max_length=300, blank=True)
-
-    recording_type = models.CharField(
-        _("نوع ضبط"),
-        max_length=20,
-        choices=RecordingType.choices,
-        default=RecordingType.STUDIO,
-        db_index=True,
-    )
-    recording_date = models.DateField(_("تاریخ ضبط"), null=True, blank=True)
-    release_date = models.DateField(_("تاریخ انتشار"), null=True, blank=True)
-
-    label = models.ForeignKey(
-        Label,
-        verbose_name=_("لیبل"),
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="recordings",
-    )
-
-    is_complete_work = models.BooleanField(_("اجرای کامل اثر"), default=True, db_index=True)
-    duration_ms = models.PositiveIntegerField(_("مدت زمان (ms)"), default=0)
-    is_featured = models.BooleanField(_("ویژه"), default=False, db_index=True)
-    popularity = models.FloatField(_("محبوبیت"), default=0.0, validators=[MinValueValidator(0.0)])
-    status = models.CharField(
-        _("وضعیت انتشار"),
-        max_length=20,
-        choices=PublishStatus.choices,
-        default=PublishStatus.DRAFT,
-        db_index=True,
-    )
-
-    class Meta:
-        verbose_name = _("ضبط")
-        verbose_name_plural = _("ضبط‌ها")
-        ordering = ["-is_featured", "-release_date", "id"]
-
-    @property
-    def display_title(self):
-        return self.title_override or self.work.full_title or self.work.title
-
-    def __str__(self):
-        return self.display_title
-
-
-class RecordingCredit(TimeStampedModel):
-    recording = models.ForeignKey(Recording, verbose_name=_("ضبط"), on_delete=models.CASCADE, related_name="credits")
-    artist = models.ForeignKey(Artist, verbose_name=_("آرتیست"), on_delete=models.CASCADE, related_name="recording_credits")
-    role = models.CharField(_("نقش"), max_length=20, choices=CreditRole.choices, db_index=True)
-    credit_order = models.PositiveIntegerField(_("ترتیب"), default=0, db_index=True)
-    is_primary = models.BooleanField(_("اصلی"), default=False, db_index=True)
-
-    class Meta:
-        verbose_name = _("کردیت ضبط")
-        verbose_name_plural = _("کردیت‌های ضبط")
-        ordering = ["recording", "credit_order", "id"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["recording", "artist", "role"],
-                name="uniq_recording_artist_role",
-            ),
-        ]
-
-    def clean(self):
-        if self.role == CreditRole.COMPOSER and not hasattr(self.artist, "composer_profile"):
-            raise ValidationError({"artist": _("برای نقش آهنگساز، آرتیست باید پروفایل آهنگساز داشته باشد.")})
-
-    def __str__(self):
-        return f"{self.recording} - {self.artist.name} ({self.role})"
-
-
-# =========================================================
-# Albums / tracks
-# =========================================================
-
-class AlbumType(models.TextChoices):
-    ALBUM = "album", _("آلبوم")
-    SINGLE = "single", _("تک‌آهنگ")
-    EP = "ep", _("ای‌پی")
-    COMPILATION = "compilation", _("منتخب")
-    BOX_SET = "box_set", _("باکس ست")
-
 
 class Album(TimeStampedModel):
-    title = models.CharField(_("عنوان"), max_length=300)
-    slug = models.SlugField(_("اسلاگ"), max_length=350, unique=True, blank=True)
-
-    album_type = models.CharField(
-        _("نوع آلبوم"),
-        max_length=20,
-        choices=AlbumType.choices,
-        default=AlbumType.ALBUM,
-        db_index=True,
-    )
-    label = models.ForeignKey(Label, verbose_name=_("لیبل"), on_delete=models.SET_NULL, null=True, blank=True, related_name="albums")
-    release_date = models.DateField(_("تاریخ انتشار"), null=True, blank=True)
+    composer = models.CharField(_("نام آهنگساز"), max_length=255, blank=True)
+    title = models.CharField(_("عنوان آلبوم"), max_length=300 , blank = True , null=True)
+    slug = models.SlugField(_("اسلاگ"), max_length=120, unique=True, blank=True, allow_unicode=True)
+    source_path = models.CharField(max_length=500, unique=True , null=True)
 
     cover_image = models.ImageField(
-        _("کاور"),
-        upload_to="music/albums/covers/",
+        _("تصویر آلبوم"),
+        upload_to=album_cover_path,
         null=True,
         blank=True,
-        validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])],
+        validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])]
     )
 
-    description = models.TextField(_("توضیحات"), blank=True)
-    editorial_note = models.TextField(_("یادداشت تحریریه"), blank=True)
+    release_date = models.DateField(_("تاریخ انتشار"), null=True, blank=True)
 
-    is_featured = models.BooleanField(_("ویژه"), default=False, db_index=True)
-    popularity = models.FloatField(_("محبوبیت"), default=0.0, validators=[MinValueValidator(0.0)])
+    conductor = models.CharField(_("نام رهبر ارکستر"), max_length=255, blank=True)
+    orchestra = models.CharField(_("نام ارکستر"), max_length=255, blank=True)
+    soloist = models.CharField(_("نام نوازنده"), max_length=255, blank=True)
+    ensemble = models.CharField(_("نام گروه موسیقی"), max_length=255, blank=True)
+
+
     status = models.CharField(
         _("وضعیت انتشار"),
         max_length=20,
         choices=PublishStatus.choices,
-        default=PublishStatus.DRAFT,
-        db_index=True,
+        default=PublishStatus.PUBLISHED,
+        db_index=True
     )
 
     class Meta:
         verbose_name = _("آلبوم")
         verbose_name_plural = _("آلبوم‌ها")
         ordering = ["-release_date", "title"]
+        indexes = [
+            models.Index(fields=["release_date"]),
+        ]
+
+    @property
+    def total_tracks(self):
+        return self.tracks.count()
+
+    @property
+    def total_duration_ms(self):
+        return self.tracks.aggregate(total=Sum("duration_ms"))["total"] or 0
+
+    @property
+    def on_this_album(self):
+        names = [self.composer, self.conductor, self.orchestra, self.soloist, self.ensemble]
+        return [name.strip() for name in names if name and name.strip()]
 
     def save(self, *args, **kwargs):
         if not self.slug:
@@ -466,53 +208,119 @@ class Album(TimeStampedModel):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return self.title
+        return self.title or "بدون عنوان"
 
+
+
+class AlbumArchiveUpload(TimeStampedModel):
+    album = models.ForeignKey(Album, on_delete=models.CASCADE, related_name="archive_uploads")
+    archive_file = models.FileField(upload_to="tmp/archives/")
+    task_id = models.CharField(max_length=255, blank=True, null=True)
+    status = models.CharField(max_length=20, choices=ArchiveUploadStatus.choices, default=ArchiveUploadStatus.PENDING)
+    progress = models.PositiveIntegerField(default=0, help_text=_("درصد پیشرفت از $0$ تا $100$"))
+    error_log = models.TextField(blank=True, null=True)
+
+    class Meta:
+        verbose_name = _("آپلود گروهی آلبوم")
+        verbose_name_plural = _("آپلودهای گروهی آلبوم")
+
+
+
+class AlbumZipExport(TimeStampedModel):
+    class ExportStatus(models.TextChoices):
+        PENDING = 'pending', _('Pending')
+        PROCESSING = 'processing', _('Processing')
+        COMPLETED = 'completed', _('Completed')
+        FAILED = 'failed', _('Failed')
+
+    album = models.OneToOneField('Album', on_delete=models.CASCADE, related_name='zip_export')
+    zip_file = models.FileField(upload_to='exports/albums/zips/', null=True, blank=True)
+    status = models.CharField(max_length=20, choices=ExportStatus.choices, default=ExportStatus.PENDING)
+    error_log = models.TextField(null=True, blank=True)
+
+    def __str__(self):
+        return f"ZIP Export for {self.album.title} - {self.status}"
+
+# =========================================================
+# Track Model
+# =========================================================
 
 class Track(TimeStampedModel):
-    album = models.ForeignKey(Album, verbose_name=_("آلبوم"), on_delete=models.PROTECT, related_name="tracks")
-    recording = models.ForeignKey(Recording, verbose_name=_("ضبط"), on_delete=models.PROTECT, related_name="tracks")
 
-    title_override = models.CharField(_("عنوان جایگزین"), max_length=300, blank=True)
-    disc_number = models.PositiveIntegerField(_("شماره دیسک"), default=1, validators=[MinValueValidator(1)])
-    track_number = models.PositiveIntegerField(_("شماره ترک"), default=1, validators=[MinValueValidator(1)])
-    sequence_order = models.PositiveIntegerField(_("ترتیب کلی"), default=0, db_index=True)
-    duration_ms = models.PositiveIntegerField(_("مدت زمان (ms)"), default=0)
+    album = models.ForeignKey(Album,on_delete=models.CASCADE,related_name="tracks",null=True,blank=True,verbose_name=_("آلبوم"))
+
+    title = models.CharField(_("عنوان ترک"), max_length=300)
+    slug = models.SlugField(_("اسلاگ"), max_length=300, unique=True, blank=True, allow_unicode=True)
+    genre = models.CharField(_("زانر"), max_length=30)
 
     audio_file = models.FileField(
         _("فایل صوتی"),
-        upload_to="music/tracks/audio/",
-        validators=[FileExtensionValidator(["mp3", "m4a", "aac", "flac", "wav", "ogg"])],
+        upload_to=track_audio_path,
+        validators=[FileExtensionValidator(["mp3", "wav", "flac"])]
     )
-    file_size_bytes = models.BigIntegerField(_("حجم فایل"), default=0)
-    audio_bitrate_kbps = models.PositiveIntegerField(_("بیت‌ریت"), null=True, blank=True)
-    audio_sample_rate_hz = models.PositiveIntegerField(_("نرخ نمونه‌برداری"), null=True, blank=True)
-    audio_codec = models.CharField(_("کدک"), max_length=30, blank=True)
+    cover_image = models.ImageField(
+        _("کاور اختصاصی ترک"),
+        upload_to=track_cover_path,
+        null=True,
+        blank=True,
+        help_text=_("اگر سینگل ترک است، حتماً کاور آپلود شود. در صورت داشتن آلبوم، کاور آلبوم اولویت دارد.")
+    )
 
-    is_premium = models.BooleanField(_("پریمیوم"), default=False, db_index=True)
-    is_streamable = models.BooleanField(_("قابل پخش"), default=True, db_index=True)
+    release_date = models.DateField(_("تاریخ انتشار ترک"), null=True, blank=True, help_text=_("مخصوص سینگل ترک‌ها"))
+
+    composer = models.ForeignKey(Artist, on_delete=models.SET_NULL, null=True, blank=True,
+                                 related_name="composed_tracks", verbose_name=_("آهنگساز"))
+    singer = models.ForeignKey(Artist, on_delete=models.SET_NULL, null=True, blank=True, related_name="sung_tracks",
+                               verbose_name=_("خواننده"))
+
+    duration_ms = models.PositiveIntegerField(_("مدت زمان (میلی‌ثانیه)"), null=True, blank=True)
+    description = models.TextField(_("توضیحات"), blank=True)
+
+    track_number = models.PositiveIntegerField(_("شماره ترک در آلبوم"), null=True, blank=True)
+
     status = models.CharField(
         _("وضعیت انتشار"),
         max_length=20,
         choices=PublishStatus.choices,
-        default=PublishStatus.DRAFT,
-        db_index=True,
+        default=PublishStatus.PUBLISHED,
+        db_index=True
     )
+    instrument = models.CharField(verbose_name=_("ساز"), max_length=20, null=True, blank=True)
 
     class Meta:
         verbose_name = _("ترک")
         verbose_name_plural = _("ترک‌ها")
-        ordering = ["album", "disc_number", "track_number", "sequence_order", "id"]
+        ordering = ["album", "track_number"]
         constraints = [
             models.UniqueConstraint(
-                fields=["album", "disc_number", "track_number"],
-                name="uniq_album_disc_track_number",
-            ),
+                fields=['album', 'track_number'],
+                name='uniq_track_position_in_album',
+                condition=models.Q(album__isnull=False) & models.Q(track_number__isnull=False)
+            )
         ]
 
     @property
-    def display_title(self):
-        return self.title_override or self.recording.display_title
+    def is_single(self):
+        return self.album is None
+
+    @property
+    def effective_cover_image(self):
+
+        if self.album and self.album.cover_image:
+            return self.album.cover_image
+        return self.cover_image
+
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = unique_slugify(self, "slug", self.title)
+
+        if self.album and self.album.cover_image and not self.cover_image:
+            self.cover_image = self.album.cover_image
+        super().save(*args, **kwargs)
+
 
     def __str__(self):
-        return f"{self.album.title} - {self.disc_number}.{self.track_number} - {self.display_title}"
+        return f"{self.title} (Single)" if self.is_single else f"{self.title} - {self.album.title}"
+
+

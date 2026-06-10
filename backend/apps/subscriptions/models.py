@@ -17,6 +17,17 @@ class Subscription(models.Model):
         verbose_name = 'اشتراک'
         verbose_name_plural = 'اشتراک‌ها'
 
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(price__gte=0),
+                name='subscription_price_gte_0'
+            ),
+            models.CheckConstraint(
+                check=models.Q(duration_days__gt=0),
+                name='subscription_duration_gt_0'
+            ),
+        ]
+
     name = models.CharField(max_length=100,verbose_name="نام اشتراک",unique=True)
 
     price = models.DecimalField(max_digits=20,decimal_places=0,verbose_name="قیمت")
@@ -34,12 +45,10 @@ class Subscription(models.Model):
     discount_label = models.CharField(max_length=50,null=True,blank=True,verbose_name="برچسب تخفیف",help_text="مثلاً: تخفیف ویژه، حراج نوروزی، ...")
 
     def save(self, *args, **kwargs):
-        if self.has_permanent_discount and self.discounted_price and self.price > 0:
+        if self.has_permanent_discount and self.discounted_price is not None and self.price > 0:
             if self.discounted_price < self.price:
                 discount_amount = self.price - self.discounted_price
-                self.discount_percentage = int(
-                    (discount_amount / self.price) * 100
-                )
+                self.discount_percentage = int((discount_amount / self.price) * 100)
             else:
                 self.has_permanent_discount = False
                 self.discounted_price = None

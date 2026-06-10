@@ -1,23 +1,31 @@
 from django.contrib.auth import update_session_auth_hash
-from rest_framework import status
+from rest_framework import status, generics
 from rest_framework.generics import UpdateAPIView, RetrieveAPIView
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.mixins import RetrieveModelMixin
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .serializers import ChangePasswordSerializer
-from apps.profiles.models import UserProfile
-from apps.profiles.serializers import UserProfileSerializer, UserProfileUpdateSerializer
+from apps.profiles.models import UserProfile, ArtistProfile
+from apps.profiles.serializers import UserProfileSerializer, UserProfileUpdateSerializer ,ArtistProfileSerializer
 from django.shortcuts import get_object_or_404
+from apps.music.models import Artist
+from rest_framework.viewsets import ReadOnlyModelViewSet, ViewSet, GenericViewSet
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
 
 
-
-class ProfileView(RetrieveAPIView):
-    serializer_class = UserProfileSerializer
+class ProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get_object(self):
-        return get_object_or_404(UserProfile.objects.select_related('user'), user=self.request.user)
+    def get(self, request):
+        profile = get_object_or_404(
+            UserProfile.objects.select_related("user"),
+            user=request.user
+        )
 
+        serializer = UserProfileSerializer(profile)
+        return Response(serializer.data)
 
 
 class UpdateProfileView(UpdateAPIView):
@@ -46,3 +54,21 @@ class ChangePasswordView(APIView):
             return Response({"detail": "Password Changed Successfilly"}, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+
+class ArtistProfileViewSet(ReadOnlyModelViewSet):
+    serializer_class = ArtistProfileSerializer
+    permission_classes = [AllowAny]
+    lookup_field = "slug"
+    lookup_url_kwarg = "slug"
+
+    queryset = ArtistProfile.objects.select_related("artist")
+
+    def get_object(self):
+        slug = self.kwargs.get(self.lookup_url_kwarg)
+
+        return get_object_or_404(
+            self.queryset,
+            artist__slug=slug
+        )
