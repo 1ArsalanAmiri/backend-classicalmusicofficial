@@ -3,6 +3,10 @@ import environ
 from datetime import timedelta
 from os import path
 from django.urls import reverse_lazy
+import sentry_sdk
+from sentry_sdk.integrations.django import DjangoIntegration
+from sentry_sdk.integrations.celery import CeleryIntegration
+from sentry_sdk.integrations.redis import RedisIntegration
 
 
 SITE_URL = "http://localhost"  # در سرور واقعی این را به https://yourdomain.com تغییر دهید
@@ -211,3 +215,19 @@ CHANNEL_LAYERS = {
         },
     },
 }
+
+
+SENTRY_DSN = env("SENTRY_DSN")
+
+if not DEBUG and SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[
+            DjangoIntegration(),
+            CeleryIntegration(),
+            RedisIntegration(),
+        ],
+        traces_sample_rate=0.2,
+        environment="production",
+        send_default_pii=True
+    )

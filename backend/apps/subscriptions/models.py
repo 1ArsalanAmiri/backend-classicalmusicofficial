@@ -30,7 +30,7 @@ class Subscription(models.Model):
 
     name = models.CharField(max_length=100,verbose_name="نام اشتراک",unique=True)
 
-    price = models.DecimalField(max_digits=20,decimal_places=0,verbose_name="قیمت")
+    price = models.DecimalField(max_digits=20,decimal_places=0,verbose_name="قیمت (تومان)")
 
     duration_days = models.IntegerField(verbose_name="مدت زمان (روز)")
 

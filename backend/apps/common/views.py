@@ -4,13 +4,10 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
-
 from apps.common.serializers import SendOTPSerializer, VerifyOTPSerializer
 from apps.common.utils.otp import generate_otp
 from apps.common.utils.sms import send_sms
 from apps.profiles.models import UserProfile
-
-
 
 
 User = get_user_model()

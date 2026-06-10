@@ -1,5 +1,7 @@
+from django.urls import reverse
 from rest_framework import serializers
 from .models import Artist, Album, Track
+
 
 
 class ArtistSerializer(serializers.ModelSerializer):
@@ -18,16 +20,35 @@ class ArtistSerializer(serializers.ModelSerializer):
 class TrackSerializer(serializers.ModelSerializer):
     singer_name = serializers.CharField(source='singer.name', read_only=True)
     composer_name = serializers.CharField(source='composer.name', read_only=True)
-    is_single = serializers.BooleanField(read_only=True)
+    instrument_name = serializers.CharField(source='instrument.name', read_only=True)
     duration_seconds = serializers.SerializerMethodField()
 
     class Meta:
         model = Track
         fields = [
-            'id', 'title', 'slug', 'audio_file', 'cover_image', 'release_date',
-            'track_number', 'duration_ms', 'duration_seconds', 'instrument',
-            'composer', 'composer_name', 'singer', 'singer_name', 'is_single', 'status'
+            'title', 'slug', 'audio_file', 'cover_image', 'release_date',
+            'duration_seconds', 'instrument_name',
+            'composer_name','singer_name','status'
         ]
+
+
+    def get_audio_stream_url(self, obj):
+        has_stream_access = self.context.get("has_stream_access", False)
+        if not has_stream_access:
+            return None
+
+        request = self.context.get('request')
+        return request.build_absolute_uri(reverse('track-stream', kwargs={'slug': obj.slug}))
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+
+        has_stream_access = self.context.get("has_stream_access", False)
+
+        if not has_stream_access:
+            data.pop("audio_file", None)
+
+        return data
 
     def get_duration_seconds(self, obj):
         if not obj.duration_ms:
@@ -52,6 +73,7 @@ class AlbumListSerializer(serializers.ModelSerializer):
 
 
 class AlbumDetailSerializer(serializers.ModelSerializer):
+
     tracks = TrackSerializer(many=True, read_only=True)
 
     total_tracks = serializers.IntegerField(read_only=True)

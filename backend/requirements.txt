@@ -20,6 +20,7 @@ rarfile
 daphne
 channels-redis
 channels
+sentry-sdk
 
 
 drf-spectacular

@@ -1,24 +1,15 @@
 import os
-import io
-import shutil
 import tempfile
 import zipfile
 import rarfile
-import mutagen
 from mutagen import File as MutagenFile
-from django.utils.text import slugify
 from celery import shared_task
 from django.core.files import File
-from django.conf import settings
-from django.db import transaction
-
 from config.settings import SITE_URL
 from .models import *
 from apps.common.connectors import MockStorageConnector
 from channels.layers import get_channel_layer
-
 from asgiref.sync import async_to_sync
-from django.core.files.base import ContentFile
 from django.utils.text import slugify
 from django.core.cache import cache
 from datetime import timedelta
@@ -66,6 +57,7 @@ def process_album_archive_task(upload_record_id: int):
             title = audio_meta.get('title', [os.path.basename(file_path)])[0]
             track_number = audio_meta.get('tracknumber', [str(index + 1)])[0]
             artist_name = audio_meta.get('artist', ['Unknown Artist'])[0]
+            genre = audio_meta.get('genre', [None])[0]
 
             duration_ms = int(audio_meta.info.length * 1000) if hasattr(audio_meta.info, 'length') else 0
 
@@ -95,6 +87,7 @@ def process_album_archive_task(upload_record_id: int):
                 defaults={
                     'title': safe_title,
                     'slug': safe_slug,
+                    'genre': genre,
                     'composer': artist,
                     'duration_ms': duration_ms,
                     'audio_file': final_path,
@@ -119,7 +112,6 @@ def process_album_archive_task(upload_record_id: int):
             shutil.rmtree(temp_dir)
 
 
-
 def send_status_to_websocket(album_slug, status, message, download_url=None):
     channel_layer = get_channel_layer()
     group_name = f'album_{album_slug}'
@@ -140,7 +132,6 @@ def send_status_to_websocket(album_slug, status, message, download_url=None):
         group_name,
         event_data
     )
-
 
 
 @shared_task(bind=True)
@@ -187,7 +178,6 @@ def generate_album_zip_task(self, album_id, export_record_id):
         raise e
     finally:
         cache.delete(lock_id)
-
 
 
 @shared_task

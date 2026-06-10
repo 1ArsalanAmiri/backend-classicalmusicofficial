@@ -1,14 +1,11 @@
 from django.contrib import admin , messages
-from django.shortcuts import render ,redirect, get_object_or_404
 from django.urls import path
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
-from .models import Artist, Album, Track, AlbumArchiveUpload, ArchiveUploadStatus
-import json
+from .models import Artist, Album, Track, AlbumArchiveUpload, ArchiveUploadStatus, Genre, Instrument
 from django.http import JsonResponse
 from django.template.response import TemplateResponse
 from admin_extra_buttons.api import ExtraButtonsMixin, button
-
 from django.urls import reverse
 from .tasks import process_album_archive_task
 
@@ -42,12 +39,9 @@ class ArtistAdmin(admin.ModelAdmin):
 # =========================================================
 
 class TrackInline(admin.TabularInline):
-    """
-    نمایش ترک‌ها به صورت درون‌خطی در صفحه ادمین آلبوم
-    به کاربر اجازه می‌دهد همزمان با ساخت آلبوم، ترک‌های آن را نیز آپلود کند.
-    """
+
     model = Track
-    extra = 0  # تعداد فرم‌های خالی پیش‌فرض
+    extra = 0
     fields = ("track_number", "title", "audio_file", "duration_ms", "composer", "singer", "status")
     autocomplete_fields = ["composer", "singer"]
     ordering = ["track_number"]
@@ -81,7 +75,7 @@ class TrackAdmin(ExtraButtonsMixin, admin.ModelAdmin):
 
 @admin.register(Album)
 class AlbumAdmin(admin.ModelAdmin):
-    list_display = ('title', 'composer', 'status', 'upload_archive_button', 'display_cover_image')
+    list_display = ('title', 'composer' ,'status', 'upload_archive_button', 'display_cover_image')
     list_filter = ('status', 'release_date')
     search_fields = ('title', 'composer', 'conductor', 'orchestra', 'soloist', 'ensemble')
     prepopulated_fields = {"slug": ("title",)}
@@ -163,3 +157,92 @@ class AlbumAdmin(admin.ModelAdmin):
             })
         except AlbumArchiveUpload.DoesNotExist:
             return JsonResponse({'status': 'ERROR', 'error_log': 'Record not found'}, status=404)
+
+
+
+@admin.register(Genre)
+class GenreAdmin(admin.ModelAdmin):
+
+    list_display = (
+        "name",
+        "slug",
+        "created_at",
+        "updated_at",
+    )
+
+    search_fields = (
+        "name",
+        "slug",
+    )
+
+    prepopulated_fields = {
+        "slug": ("name",)
+    }
+
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+    )
+
+    ordering = (
+        "name",
+    )
+
+    fieldsets = (
+        ("اطلاعات ژانر", {
+            "fields": (
+                "name",
+                "slug",
+            )
+        }),
+        ("اطلاعات سیستمی", {
+            "fields": (
+                "created_at",
+                "updated_at",
+            )
+        }),
+    )
+
+
+@admin.register(Instrument)
+class InstrumentAdmin(admin.ModelAdmin):
+
+    list_display = (
+        "name",
+        "slug",
+        "created_at",
+        "updated_at",
+    )
+
+    search_fields = (
+        "name",
+        "slug",
+    )
+
+    prepopulated_fields = {
+        "slug": ("name",)
+    }
+
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+    )
+
+    ordering = (
+        "name",
+    )
+
+    fieldsets = (
+        ("اطلاعات ساز", {
+            "fields": (
+                "name",
+                "slug",
+            )
+        }),
+        ("اطلاعات سیستمی", {
+            "fields": (
+                "created_at",
+                "updated_at",
+            )
+        }),
+    )

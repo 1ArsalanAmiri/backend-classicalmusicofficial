@@ -3,7 +3,6 @@ from django.contrib import admin, messages
 from django import forms
 from django.core.exceptions import ValidationError
 from django.utils.html import format_html
-
 from .models import Subscription, SubscriptionHistory
 
 
@@ -49,6 +48,7 @@ class SubscriptionAdminForm(forms.ModelForm):
             cleaned_data["discount_label"] = None
 
         return cleaned_data
+
 
 
 class SubscriptionHistoryAdminForm(forms.ModelForm):
@@ -295,3 +295,4 @@ class SubscriptionHistoryAdmin(admin.ModelAdmin):
             )
 
         return "-"
+

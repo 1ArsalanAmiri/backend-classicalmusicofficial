@@ -28,6 +28,7 @@ class ProfileView(APIView):
         return Response(serializer.data)
 
 
+
 class UpdateProfileView(UpdateAPIView):
     serializer_class = UserProfileUpdateSerializer
     permission_classes = [IsAuthenticated]
