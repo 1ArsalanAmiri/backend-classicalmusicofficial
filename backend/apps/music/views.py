@@ -153,9 +153,11 @@ class AlbumViewSet(viewsets.ReadOnlyModelViewSet):
 
 class TrackViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [AllowAny]
+    pagination_class = ClassicalMusicPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+
     queryset = Track.objects.filter(status=PublishStatus.PUBLISHED).select_related('album', 'composer', 'singer')
     serializer_class = TrackSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
 
     filterset_fields = ['instrument', 'album__slug']
     search_fields = ['title', 'composer__name', 'singer__name']

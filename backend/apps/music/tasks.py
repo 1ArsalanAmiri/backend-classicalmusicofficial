@@ -49,9 +49,42 @@ def process_album_archive_task(upload_record_id: int):
         if total_files == 0:
             raise ValueError("no file exist in archive")
 
+        cover_extracted = False
+        if album.cover_image:
+            cover_extracted = True
+
         storage_connector = MockStorageConnector()
 
         for index, file_path in enumerate(audio_files):
+            if not cover_extracted:
+                audio_raw = MutagenFile(file_path)
+                image_data = None
+                mime_type = None
+
+                if audio_raw:
+                    if hasattr(audio_raw, 'tags') and audio_raw.tags:
+                        for tag in audio_raw.tags.values():
+                            if tag.__class__.__name__ == 'APIC':
+                                image_data = tag.data
+                                mime_type = tag.mime
+                                break
+
+                    if not image_data and hasattr(audio_raw, 'pictures') and audio_raw.pictures:
+                        pic = audio_raw.pictures[0]
+                        image_data = pic.data
+                        mime_type = pic.mime
+
+                if image_data:
+                    ext = 'jpg'
+                    if mime_type == 'image/png':
+                        ext = 'png'
+                    elif mime_type == 'image/webp':
+                        ext = 'webp'
+
+                    filename = f"album_cover_{album.id or uuid4().hex[:8]}.{ext}"
+                    album.cover_image.save(filename, ContentFile(image_data), save=True)
+                    cover_extracted = True
+
             audio_meta = MutagenFile(file_path, easy=True)
 
             title = audio_meta.get('title', [os.path.basename(file_path)])[0]
@@ -66,20 +99,17 @@ def process_album_archive_task(upload_record_id: int):
                 defaults={'slug': slugify(artist_name)}
             )
 
-            # فرمت: tracks/{album_slug}/{filename}
+            #tracks/{album_slug}/{filename}
             filename = os.path.basename(file_path)
             target_relative_path = f"tracks/{album.slug}/{filename}"
 
             final_path = storage_connector.upload_chunked(file_path, target_relative_path)
 
             raw_title = title or "Untitled"
-
             safe_title = raw_title[:95]
-
 
             raw_slug = slugify(raw_title, allow_unicode=True)
             safe_slug = raw_slug[:95]
-
 
             Track.objects.update_or_create(
                 album=album,
@@ -110,6 +140,7 @@ def process_album_archive_task(upload_record_id: int):
         if 'temp_dir' in locals() and os.path.exists(temp_dir):
             import shutil
             shutil.rmtree(temp_dir)
+
 
 
 def send_status_to_websocket(album_slug, status, message, download_url=None):
@@ -193,3 +224,27 @@ def cleanup_old_zip_exports():
         deleted_count += 1
 
     return f"Deleted {deleted_count} old zip files."
+
+
+@shared_task
+def extract_track_metadata_task(track_id):
+    try:
+        track = Track.objects.get(id=track_id)
+
+        old_title = track.title
+
+        track.extract_metadata()
+
+        update_fields_list = [
+            'title', 'duration_ms', 'singer', 'composer',
+            'genre', 'track_number', 'release_date', 'cover_image'
+        ]
+
+        if track.title != old_title and not track.slug:
+            track.slug = slugify(track.title, allow_unicode=True)
+            update_fields_list.append('slug')
+
+        track.save(update_fields=update_fields_list)
+
+    except Track.DoesNotExist:
+        pass

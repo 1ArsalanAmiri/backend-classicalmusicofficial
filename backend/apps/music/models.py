@@ -8,6 +8,12 @@ from apps.common.models import (TimeStampedModel, ArchiveUploadStatus, PublishSt
     AlbumQuerySet , upload_path_handler )
 
 from uuid import uuid4
+from os import path
+from mutagen import File as MutagenFile, MutagenError
+import datetime
+from re import search
+from django.utils.text import slugify
+from django.core.files.base import ContentFile
 
 
 # =========================================================
@@ -123,7 +129,7 @@ class Artist(TimeStampedModel):
 class Album(TimeStampedModel):
     composer = models.CharField(_("نام آهنگساز"), max_length=255, blank=True)
     title = models.CharField(_("عنوان آلبوم"), max_length=300 , blank = True,default="untitled")
-    slug = models.SlugField(_("اسلاگ"), max_length=120, unique=True, blank=True, allow_unicode=True)
+    slug = models.SlugField(_("اسلاگ"), max_length=300, unique=True, blank=True, allow_unicode=True)
     source_path = models.CharField(max_length=500, unique=True , null=True)
     cover_image = models.ImageField(_("تصویر آلبوم"),upload_to=album_cover_path,null=True,blank=True,validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])])
     release_date = models.DateField(_("تاریخ انتشار"), null=True, blank=True)
@@ -208,10 +214,10 @@ class AlbumZipExport(TimeStampedModel):
 class Track(TimeStampedModel):
 
     album = models.ForeignKey(Album, on_delete=models.CASCADE, related_name="tracks", null=True, blank=True, verbose_name=_("آلبوم"))
-    title = models.CharField(_("عنوان ترک"), max_length=300)
+    title = models.CharField(_("عنوان ترک"), max_length=300 , blank=True, default="Untitled")
     slug = models.SlugField(_("اسلاگ"), max_length=300, unique=True, blank=True, allow_unicode=True)
-    genre = models.ForeignKey(Genre, on_delete=models.SET_NULL, null=True, blank=True, related_name="tracks", verbose_name=_("ژانر") , default="null")
-    audio_file = models.FileField(_("فایل صوتی"), upload_to="protected/tracks/%Y/%m/", validators=[FileExtensionValidator(["mp3", "wav", "flac"])])
+    genre = models.ForeignKey(Genre, on_delete=models.SET_NULL, null=True, blank=True, related_name="tracks", verbose_name=_("ژانر"))
+    audio_file = models.FileField(_("فایل صوتی"), upload_to="protected/tracks/%Y/%m/", validators=[FileExtensionValidator(["mp3", "wav", "flac"])],max_length=500)
     cover_image = models.ImageField(_("کاور اختصاصی ترک"), upload_to=track_cover_path, null=True, blank=True, help_text=_("اگر سینگل ترک است، حتماً کاور آپلود شود. در صورت داشتن آلبوم، کاور آلبوم اولویت دارد."))
     release_date = models.DateField(_("تاریخ انتشار ترک"), null=True, blank=True, help_text=_("مخصوص سینگل ترک‌ها"))
     composer = models.ForeignKey(Artist, on_delete=models.SET_NULL, null=True, blank=True, related_name="composed_tracks", verbose_name=_("آهنگساز"))
@@ -220,7 +226,7 @@ class Track(TimeStampedModel):
     description = models.TextField(_("توضیحات"), blank=True)
     track_number = models.PositiveIntegerField(_("شماره ترک در آلبوم"), null=True, blank=True)
     status = models.CharField(_("وضعیت انتشار"), max_length=20, choices=PublishStatus.choices, default=PublishStatus.PUBLISHED, db_index=True)
-    instrument = models.ForeignKey(Instrument,on_delete=models.SET_NULL,related_name="tracks",verbose_name=_("ساز"), max_length=20, null=True, blank=True)
+    instrument = models.ForeignKey(Instrument,on_delete=models.SET_NULL,related_name="tracks",verbose_name=_("ساز"),null=True, blank=True)
 
     class Meta:
         verbose_name = _("ترک")
@@ -234,10 +240,104 @@ class Track(TimeStampedModel):
             )
         ]
 
+    def extract_metadata(self):
+        if not self.audio_file:
+            return
+
+        try:
+            file_path = self.audio_file.path
+
+
+            audio_easy = MutagenFile(file_path, easy=True)
+            audio_raw = MutagenFile(file_path)
+
+            if audio_easy is None or audio_raw is None:
+                return
+
+            if hasattr(audio_easy, 'info') and not self.duration_ms:
+                self.duration_ms = int(getattr(audio_easy.info, 'length', 0) * 1000)
+
+            def get_safe_string(tag_name, max_length=255):
+                value = audio_easy.get(tag_name)
+                if value and isinstance(value, list) and value[0]:
+                    cleaned_value = str(value[0]).strip()
+                    return cleaned_value[:max_length]
+                return None
+
+            if not self.title or self.title == "Untitled":
+                extracted_title = get_safe_string('title')
+                if extracted_title:
+                    self.title = extracted_title
+
+            tag_artist = get_safe_string('artist')
+            if not self.singer and tag_artist:
+                self.singer, _ = Artist.objects.get_or_create(name=tag_artist)
+
+            tag_composer = get_safe_string('composer')
+            if not self.composer and tag_composer:
+                self.composer, _ = Artist.objects.get_or_create(name=tag_composer)
+
+            tag_genre = get_safe_string('genre', max_length=100)
+
+            if not self.genre and tag_genre:
+                genre_slug = slugify(tag_genre.strip(), allow_unicode=True)
+                self.genre = Genre.objects.filter(slug=genre_slug).first()
+
+
+            if not self.track_number:
+                tag_track = get_safe_string('tracknumber')
+                if tag_track:
+                    match = search(r'\d+', tag_track)
+                    if match:
+                        self.track_number = int(match.group())
+
+            if not self.release_date:
+                tag_date = get_safe_string('date')
+                if tag_date:
+                    year_match = search(r'(19|20)\d{2}', tag_date)
+                    if year_match:
+                        self.release_date = datetime.date(int(year_match.group()), 1, 1)
+
+
+            if not self.cover_image:
+                image_data = None
+                mime_type = None
+
+                if hasattr(audio_raw, 'tags') and audio_raw.tags:
+                    for tag in audio_raw.tags.values():
+                        if tag.__class__.__name__ == 'APIC':
+                            image_data = tag.data
+                            mime_type = tag.mime
+                            break
+
+                if not image_data and hasattr(audio_raw, 'pictures') and audio_raw.pictures:
+                    pic = audio_raw.pictures[0]
+                    image_data = pic.data
+                    mime_type = pic.mime
+
+                if image_data:
+                    ext = 'jpg'
+                    if mime_type == 'image/png':
+                        ext = 'png'
+                    elif mime_type in ['image/jpeg', 'image/jpg']:
+                        ext = 'jpg'
+                    elif mime_type == 'image/webp':
+                        ext = 'webp'
+
+                    filename = f"track_cover_{self.id or uuid4().hex[:8]}.{ext}"
+
+                    self.cover_image.save(filename, ContentFile(image_data), save=False)
+
+        except MutagenError as e:
+            print(f"MutagenError extracting metadata: {e}")
+
+        except Exception as e:
+            # sentry_sdk.capture_exception(e)
+            print(f"General Error extracting metadata: {e}")
+
     @property
     def is_single(self):
         return self.album is None
-
 
     @property
     def effective_cover_image(self):
@@ -245,14 +345,17 @@ class Track(TimeStampedModel):
             return self.album.cover_image
         return self.cover_image
 
-
     def save(self, *args, **kwargs):
-        if not self.slug:
-            self.slug = unique_slugify(self, "slug", self.title)
+        is_new = self.pk is None
+
         super().save(*args, **kwargs)
 
+        if is_new and self.audio_file:
+            from .tasks import extract_track_metadata_task
+            from django.db import transaction
+
+            transaction.on_commit(lambda: extract_track_metadata_task.delay(self.pk))
 
     def __str__(self):
         return f"{self.title} (Single)" if self.is_single else f"{self.title} - {self.album.title}"
-
 
