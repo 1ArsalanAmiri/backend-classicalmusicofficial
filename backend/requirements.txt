@@ -12,6 +12,8 @@ phonenumbers
 django-redis
 psycopg2-binary==2.9.9
 redis==5.2.1
+lz4
+mimetype
 celery
 django-environ
 gunicorn

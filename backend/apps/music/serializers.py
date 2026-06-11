@@ -1,6 +1,6 @@
 from django.urls import reverse
 from rest_framework import serializers
-from .models import Artist, Album, Track
+from .models import Artist, Album, Track,Genre, Instrument
 
 
 
@@ -26,7 +26,7 @@ class TrackSerializer(serializers.ModelSerializer):
     class Meta:
         model = Track
         fields = [
-            'title', 'slug', 'audio_file', 'cover_image', 'release_date',
+            'title', 'slug', 'cover_image', 'release_date',
             'duration_seconds', 'instrument_name',
             'composer_name','singer_name','status'
         ]
@@ -39,16 +39,6 @@ class TrackSerializer(serializers.ModelSerializer):
 
         request = self.context.get('request')
         return request.build_absolute_uri(reverse('track-stream', kwargs={'slug': obj.slug}))
-
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-
-        has_stream_access = self.context.get("has_stream_access", False)
-
-        if not has_stream_access:
-            data.pop("audio_file", None)
-
-        return data
 
     def get_duration_seconds(self, obj):
         if not obj.duration_ms:
@@ -88,3 +78,21 @@ class AlbumDetailSerializer(serializers.ModelSerializer):
             'on_this_album', 'total_tracks', 'total_duration_ms', 'status',
             'tracks'
         ]
+
+
+
+class GenreSerializer(serializers.ModelSerializer):
+    track_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Genre
+        fields = ['id', 'name', 'slug', 'track_count']
+
+
+
+class InstrumentSerializer(serializers.ModelSerializer):
+    track_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Instrument
+        fields = ['id', 'name', 'slug', 'track_count']

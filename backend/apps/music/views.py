@@ -1,4 +1,6 @@
 from django.http import HttpResponse, Http404
+import mimetypes
+from urllib.parse import quote
 from django.urls import reverse
 from rest_framework.permissions import AllowAny , IsAuthenticated
 from rest_framework.views import APIView
@@ -21,8 +23,12 @@ from apps.subscriptions.services import (SubscriptionHistory, get_active_subscri
         user_has_download_access, user_has_stream_access ,
         user_has_video_stream_access ,Q)
 
-from apps.common.permissions import HasStreamSubscription , user_has_download_access , user_has_stream_access
+from apps.common.permissions import HasStreamSubscription , user_has_download_access , user_has_stream_access , HasAllSubscription , HasDownloadSubscription
 from apps.common.models import PublishStatus
+from django.db.models import Count
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
+
 
 
 class AlbumBatchUploadAPIView(APIView):
@@ -149,6 +155,14 @@ class AlbumViewSet(viewsets.ReadOnlyModelViewSet):
 
         return response
 
+    @method_decorator(cache_page(60 * 15))
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @method_decorator(cache_page(60 * 30))
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
 
 
 class TrackViewSet(viewsets.ReadOnlyModelViewSet):
@@ -157,6 +171,7 @@ class TrackViewSet(viewsets.ReadOnlyModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
 
     queryset = Track.objects.filter(status=PublishStatus.PUBLISHED).select_related('album', 'composer', 'singer')
+
     serializer_class = TrackSerializer
 
     filterset_fields = ['instrument', 'album__slug']
@@ -164,22 +179,98 @@ class TrackViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ['track_number', 'release_date']
     lookup_field = 'slug'
 
-
-    @action(detail=True, methods=['get'], url_path='stream', permission_classes=[HasStreamSubscription])
+    @action(detail=True, methods=['get'], url_path='stream',permission_classes=[(HasStreamSubscription | HasAllSubscription)])
     def stream(self, request, slug=None):
         track = self.get_object()
 
         if not track.audio_file:
             raise Http404("Audio not found")
 
+        audio_path = track.audio_file.name
+
+        content_type, _ = mimetypes.guess_type(audio_path)
+        content_type = content_type or 'audio/mpeg'
+
         response = HttpResponse()
 
-        response['X-Accel-Redirect'] = f'/protected_media/{track.audio_file.name}'
-
-        response['Content-Type'] = 'audio/mpeg'
+        response['X-Accel-Redirect'] = f"/protected_media/{audio_path}"
+        response['Content-Type'] = content_type
         response['Content-Disposition'] = 'inline'
         response['Accept-Ranges'] = 'bytes'
-
         return response
 
 
+    @action(detail=True, methods=['get'], url_path='download',permission_classes=[(HasDownloadSubscription | HasAllSubscription)])
+    def download(self , request, slug=None):
+        track = self.get_object()
+
+        if not track.audio_file:
+            raise Http404("Audio file not found")
+
+        audio_path = track.audio_file.name
+
+        content_type, _ = mimetypes.guess_type(audio_path)
+        content_type = content_type or 'audio/mpeg'
+
+        filename = audio_path.split('/')[-1]
+        encoded_filename = quote(filename)
+
+        response = HttpResponse()
+        response['X-Accel-Redirect'] = f"/protected_media/{audio_path}"
+        response['Content-Disposition'] = f"attachment; filename*=UTF-8''{encoded_filename}"
+        response['Content-Type'] = content_type
+        return response
+
+
+
+class GenreViewSet(viewsets.ReadOnlyModelViewSet):
+
+    serializer_class = GenreSerializer
+    lookup_field = 'slug'
+
+    def get_queryset(self):
+        return Genre.objects.annotate(
+            track_count=Count('tracks')
+        ).order_by('-track_count', 'name')
+
+    @method_decorator(cache_page(60 * 60 * 24))
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @method_decorator(cache_page(60 * 60 * 24))
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+
+
+class InstrumentViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = InstrumentSerializer
+    lookup_field = 'slug'
+
+    def get_queryset(self):
+        return Instrument.objects.annotate(
+            track_count=Count('tracks')
+        ).order_by('-track_count', 'name')
+
+    @method_decorator(cache_page(60 * 60 * 24))
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @method_decorator(cache_page(60 * 60 * 24))
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+
+
+class EraListView(APIView):
+
+    @method_decorator(cache_page(60 * 60 * 24 * 7))
+    def get(self, request):
+        eras = [
+            {
+                "id": key,
+                "name": label
+            }
+            for key, label in EraChoices.choices
+        ]
+        return Response(eras)

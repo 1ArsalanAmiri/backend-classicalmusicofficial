@@ -2,11 +2,11 @@ import os
 import tempfile
 import zipfile
 import rarfile
+import shutil
 from mutagen import File as MutagenFile
 from celery import shared_task
 from django.core.files import File
 from config.settings import SITE_URL
-from .models import *
 from apps.common.connectors import MockStorageConnector
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
@@ -14,6 +14,10 @@ from django.utils.text import slugify
 from django.core.cache import cache
 from datetime import timedelta
 from django.utils import timezone
+from uuid import uuid4
+from django.core.files.base import ContentFile
+from django.db import transaction
+from .models import Album, AlbumArchiveUpload, Track, Artist, AlbumZipExport
 
 
 @shared_task
@@ -21,6 +25,7 @@ def process_album_archive_task(upload_record_id: int):
     try:
         upload_record = AlbumArchiveUpload.objects.get(id=upload_record_id)
         upload_record.status = 'extracting'
+        upload_record.save(update_fields=['status'])
         upload_record.save()
 
         album = upload_record.album
@@ -93,52 +98,50 @@ def process_album_archive_task(upload_record_id: int):
             genre = audio_meta.get('genre', [None])[0]
 
             duration_ms = int(audio_meta.info.length * 1000) if hasattr(audio_meta.info, 'length') else 0
+            with transaction.atomic():
+                artist, _ = Artist.objects.get_or_create(
+                    name=artist_name,
+                    defaults={'slug': slugify(artist_name, allow_unicode=True)}
+                )
 
-            artist, _ = Artist.objects.get_or_create(
-                name=artist_name,
-                defaults={'slug': slugify(artist_name)}
-            )
+                filename = os.path.basename(file_path)
+                target_relative_path = f"tracks/{album.slug}/{filename}"
 
-            #tracks/{album_slug}/{filename}
-            filename = os.path.basename(file_path)
-            target_relative_path = f"tracks/{album.slug}/{filename}"
+                final_path = storage_connector.upload_chunked(file_path, target_relative_path)
 
-            final_path = storage_connector.upload_chunked(file_path, target_relative_path)
+                raw_title = title or "Untitled"
+                safe_title = raw_title[:450]
 
-            raw_title = title or "Untitled"
-            safe_title = raw_title[:95]
+                raw_slug = slugify(raw_title, allow_unicode=True)
+                safe_slug = raw_slug[:450]
 
-            raw_slug = slugify(raw_title, allow_unicode=True)
-            safe_slug = raw_slug[:95]
-
-            Track.objects.update_or_create(
-                album=album,
-                track_number=track_number.split('/')[0],
-                defaults={
-                    'title': safe_title,
-                    'slug': safe_slug,
-                    'genre': genre,
-                    'composer': artist,
-                    'duration_ms': duration_ms,
-                    'audio_file': final_path,
-                }
-            )
+                Track.objects.update_or_create(
+                    album=album,
+                    track_number=track_number.split('/')[0],
+                    defaults={
+                        'title': safe_title,
+                        'slug': safe_slug,
+                        'genre': genre,
+                        'composer': artist,
+                        'duration_ms': duration_ms,
+                        'audio_file': final_path,
+                    }
+                )
 
             progress = int(((index + 1) / total_files) * 100)
             upload_record.progress = progress
-            upload_record.save()
+            upload_record.save(update_fields=['progress'])
 
         upload_record.status = 'completed'
-        upload_record.save()
+        upload_record.save(update_fields=['status'])
 
     except Exception as e:
         upload_record.status = 'failed'
         upload_record.error_log = str(e)
-        upload_record.save()
+        upload_record.save(update_fields=['status', 'error_log'])
 
     finally:
         if 'temp_dir' in locals() and os.path.exists(temp_dir):
-            import shutil
             shutil.rmtree(temp_dir)
 
 

@@ -31,8 +31,6 @@ def user_has_stream_access(user):
 
     return sub.subscription.subscription_type in [
         "online",
-        "both",
-        "all"
     ]
 
 
@@ -45,8 +43,6 @@ def user_has_download_access(user):
 
     return sub.subscription.subscription_type in [
         "download",
-        "both",
-        "all"
     ]
 
 
@@ -59,4 +55,17 @@ def user_has_video_stream_access(user):
     return sub.subscription.subscription_type in [
         "video",
         "all"
+    ]
+
+
+def user_has_all_access(user):
+    sub = get_active_subscription(user)
+    if not sub:
+        return False
+    return sub.subscription.subscription_type in [
+        "online",
+        "download",
+        "both",
+        "all",
+        "video"
     ]

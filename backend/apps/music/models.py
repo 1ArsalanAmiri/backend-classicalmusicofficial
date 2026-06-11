@@ -14,6 +14,11 @@ import datetime
 from re import search
 from django.utils.text import slugify
 from django.core.files.base import ContentFile
+from logging import getLogger
+
+logger = getLogger(__name__)
+
+
 
 
 # =========================================================
@@ -137,7 +142,7 @@ class Album(TimeStampedModel):
     orchestra = models.CharField(_("نام ارکستر"), max_length=255, blank=True)
     soloist = models.CharField(_("نام نوازنده"), max_length=255, blank=True)
     ensemble = models.CharField(_("نام گروه موسیقی"), max_length=255, blank=True)
-    status = models.CharField(_("وضعیت انتشار"),max_length=20,choices=PublishStatus.choices,default=PublishStatus.PUBLISHED,db_index=True)
+    status = models.CharField(_("وضعیت انتشار"),max_length=20,choices=PublishStatus.choices,default=PublishStatus.DRAFT,db_index=True)
 
     objects = AlbumManager()
 
@@ -217,7 +222,7 @@ class Track(TimeStampedModel):
     title = models.CharField(_("عنوان ترک"), max_length=300 , blank=True, default="Untitled")
     slug = models.SlugField(_("اسلاگ"), max_length=300, unique=True, blank=True, allow_unicode=True)
     genre = models.ForeignKey(Genre, on_delete=models.SET_NULL, null=True, blank=True, related_name="tracks", verbose_name=_("ژانر"))
-    audio_file = models.FileField(_("فایل صوتی"), upload_to="protected/tracks/%Y/%m/", validators=[FileExtensionValidator(["mp3", "wav", "flac"])],max_length=500)
+    audio_file = models.FileField(_("فایل صوتی"),upload_to=track_audio_path, validators=[FileExtensionValidator(["mp3", "wav", "flac"])],max_length=500)
     cover_image = models.ImageField(_("کاور اختصاصی ترک"), upload_to=track_cover_path, null=True, blank=True, help_text=_("اگر سینگل ترک است، حتماً کاور آپلود شود. در صورت داشتن آلبوم، کاور آلبوم اولویت دارد."))
     release_date = models.DateField(_("تاریخ انتشار ترک"), null=True, blank=True, help_text=_("مخصوص سینگل ترک‌ها"))
     composer = models.ForeignKey(Artist, on_delete=models.SET_NULL, null=True, blank=True, related_name="composed_tracks", verbose_name=_("آهنگساز"))
@@ -225,7 +230,7 @@ class Track(TimeStampedModel):
     duration_ms = models.PositiveIntegerField(_("مدت زمان (میلی‌ثانیه)"), null=True, blank=True)
     description = models.TextField(_("توضیحات"), blank=True)
     track_number = models.PositiveIntegerField(_("شماره ترک در آلبوم"), null=True, blank=True)
-    status = models.CharField(_("وضعیت انتشار"), max_length=20, choices=PublishStatus.choices, default=PublishStatus.PUBLISHED, db_index=True)
+    status = models.CharField(_("وضعیت انتشار"), max_length=20, choices=PublishStatus.choices, default=PublishStatus.DRAFT, db_index=True)
     instrument = models.ForeignKey(Instrument,on_delete=models.SET_NULL,related_name="tracks",verbose_name=_("ساز"),null=True, blank=True)
 
     class Meta:
@@ -329,11 +334,9 @@ class Track(TimeStampedModel):
                     self.cover_image.save(filename, ContentFile(image_data), save=False)
 
         except MutagenError as e:
-            print(f"MutagenError extracting metadata: {e}")
-
+            logger.warning(f"MutagenError extracting metadata for track {self.id}: {e}")
         except Exception as e:
-            # sentry_sdk.capture_exception(e)
-            print(f"General Error extracting metadata: {e}")
+            logger.error(f"General Error extracting metadata for track {self.id}: {e}", exc_info=True)
 
     @property
     def is_single(self):
