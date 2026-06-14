@@ -17,6 +17,14 @@ class ArtistSerializer(serializers.ModelSerializer):
 
 
 
+class RelatedArtistSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = Artist
+        fields = ["id", "name", "slug", "image"]
+
+
+
 class TrackSerializer(serializers.ModelSerializer):
     singer_name = serializers.CharField(source='singer.name', read_only=True)
     composer_name = serializers.CharField(source='composer.name', read_only=True)
@@ -26,7 +34,7 @@ class TrackSerializer(serializers.ModelSerializer):
     class Meta:
         model = Track
         fields = [
-            'title', 'slug', 'cover_image', 'release_date',
+            'id','title', 'slug', 'cover_image', 'release_date',
             'duration_seconds', 'instrument_name',
             'composer_name','singer_name','status'
         ]
@@ -56,8 +64,8 @@ class AlbumListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Album
         fields = [
-            'id', 'title', 'slug', 'cover_image', 'composer',
-            'release_date', 'total_tracks', 'status'
+            'id', 'title', 'slug', 'cover_image',
+            'release_date', 'total_tracks'
         ]
 
 

@@ -23,6 +23,8 @@ urlpatterns = [
 
     path("music/", include("apps.music.urls"), name="music"),
 
+    path("playlist/" , include("apps.playlists.urls") , name="playlist"),
+
     # path('sentry-debug/', trigger_error),
 
 ]

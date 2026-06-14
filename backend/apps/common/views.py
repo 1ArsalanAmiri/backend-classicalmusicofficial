@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -11,6 +12,7 @@ from apps.profiles.models import UserProfile
 
 
 User = get_user_model()
+
 
 OTP_EXPIRY_SECONDS = 300
 MAX_OTP_ATTEMPTS = 3
@@ -79,13 +81,15 @@ class VerifyOTPView(APIView):
 
                 return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
 
+
+            with transaction.atomic():
+                user, created = User.objects.get_or_create(phone_number=phone_number)
+                UserProfile.objects.get_or_create(user=user)
+
+
             cache.delete(cache_key_otp)
             cache.delete(cache_key_attempts)
 
-            user, created = User.objects.get_or_create(phone_number=phone_number)
-
-            if created:
-                UserProfile.objects.create(user=user)
 
             refresh = RefreshToken.for_user(user)
 

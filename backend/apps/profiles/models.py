@@ -8,6 +8,7 @@ import jdatetime
 from apps.music.models import *
 from datetime import timedelta
 
+
 class UserProfile(models.Model):
     class Meta:
         verbose_name = 'پروفایل کاربر'
@@ -20,7 +21,6 @@ class UserProfile(models.Model):
 
     def __str__(self):
         return str(self.user.phone_number)
-
 
 
 class ArtistProfile(models.Model):

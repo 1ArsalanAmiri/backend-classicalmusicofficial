@@ -1,18 +1,15 @@
-from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
-from rest_framework import serializers, status
-from rest_framework.response import Response
-from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
-from apps.music.models import Artist
+from rest_framework import serializers
+from apps.music.models import Artist, Album , Track
 from apps.profiles.models import UserProfile, ArtistProfile
-from django.shortcuts import get_object_or_404
 from django.db.models import Q
 import jdatetime
-
+from apps.music.serializers import AlbumDetailSerializer , TrackSerializer
+from apps.playlists.models import Playlist
+from apps.playlists.serializers import PlaylistListSerializer
 
 
 User = get_user_model()
@@ -203,7 +200,37 @@ class ArtistSerializer(serializers.ModelSerializer):
 class ArtistProfileSerializer(serializers.ModelSerializer):
 
     artist = ArtistSerializer(read_only=True)
+    albums = serializers.SerializerMethodField()
+    singles = serializers.SerializerMethodField()
+    playlists = serializers.SerializerMethodField()
+    related_artists = serializers.SerializerMethodField()
 
     class Meta:
         model = ArtistProfile
-        fields = ["artist",]
+        fields = [
+            "artist",
+            "albums",
+            "singles",
+            "playlists",
+            "related_artists",
+        ]
+
+
+    def get_albums(self, obj):
+        albums = Album.objects.filter(artist=obj.artist).order_by("-release_date")[:10]
+        return AlbumDetailSerializer(albums, many=True).data
+
+
+    def get_singles(self, obj):
+        singles = Track.objects.filter(
+            artist=obj.artist,
+            is_single=True
+        ).order_by("-release_date")[:10]
+
+        return TrackSerializer(singles, many=True).data
+
+
+    def get_playlists(self, obj):
+        playlists = Playlist.objects.filter(artists=obj.artist)[:10]
+        return PlaylistListSerializer(playlists, many=True).data
+

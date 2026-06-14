@@ -64,12 +64,8 @@ class ArtistProfileViewSet(ReadOnlyModelViewSet):
     lookup_field = "slug"
     lookup_url_kwarg = "slug"
 
-    queryset = ArtistProfile.objects.select_related("artist")
+    queryset = ArtistProfile.objects.select_related("artist").prefetch_related("artist__albums","artist__tracks","artist__related_artists")
 
     def get_object(self):
         slug = self.kwargs.get(self.lookup_url_kwarg)
-
-        return get_object_or_404(
-            self.queryset,
-            artist__slug=slug
-        )
+        return get_object_or_404(self.queryset,artist__slug=slug)

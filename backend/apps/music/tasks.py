@@ -20,129 +20,167 @@ from django.db import transaction
 from .models import Album, AlbumArchiveUpload, Track, Artist, AlbumZipExport
 
 
-@shared_task
-def process_album_archive_task(upload_record_id: int):
+@shared_task(bind=True, max_retries=3)
+def process_album_archive_task(self, upload_record_id: int):
+    temp_dir = None
+
     try:
-        upload_record = AlbumArchiveUpload.objects.get(id=upload_record_id)
-        upload_record.status = 'extracting'
-        upload_record.save(update_fields=['status'])
-        upload_record.save()
-
+        upload_record = AlbumArchiveUpload.objects.select_related("album").get(id=upload_record_id)
         album = upload_record.album
-        archive_path = upload_record.archive_file.path
 
+        upload_record.status = "extracting"
+        upload_record.save(update_fields=["status"])
+
+        archive_path = upload_record.archive_file.path
         temp_dir = tempfile.mkdtemp()
 
-        if archive_path.endswith('.zip'):
-            with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+        # -------- Extract --------
+        if archive_path.endswith(".zip"):
+            with zipfile.ZipFile(archive_path, "r") as zip_ref:
                 zip_ref.extractall(temp_dir)
-        elif archive_path.endswith('.rar'):
-            with rarfile.RarFile(archive_path, 'r') as rar_ref:
+        elif archive_path.endswith(".rar"):
+            with rarfile.RarFile(archive_path, "r") as rar_ref:
                 rar_ref.extractall(temp_dir)
+        else:
+            raise ValueError("Unsupported archive format")
 
-        upload_record.status = 'processing'
-        upload_record.save()
+        upload_record.status = "processing"
+        upload_record.save(update_fields=["status"])
 
-        audio_extensions = ('.mp3', '.flac', '.wav', '.m4a')
-        audio_files = []
-        for root, dirs, files in os.walk(temp_dir):
-            for file in files:
-                if file.lower().endswith(audio_extensions):
-                    audio_files.append(os.path.join(root, file))
+        # -------- Collect audio files --------
+        audio_extensions = (".mp3", ".flac", ".wav", ".m4a")
+        audio_files = [
+            os.path.join(root, f)
+            for root, _, files in os.walk(temp_dir)
+            for f in files
+            if f.lower().endswith(audio_extensions)
+        ]
+
+        if not audio_files:
+            raise ValueError("No audio files found in archive")
 
         total_files = len(audio_files)
-        if total_files == 0:
-            raise ValueError("no file exist in archive")
-
-        cover_extracted = False
-        if album.cover_image:
-            cover_extracted = True
+        cover_extracted = bool(album.cover_image)
 
         storage_connector = MockStorageConnector()
 
-        for index, file_path in enumerate(audio_files):
-            if not cover_extracted:
-                audio_raw = MutagenFile(file_path)
-                image_data = None
-                mime_type = None
+        # -------- Artist cache --------
+        artist_cache = {}
 
-                if audio_raw:
-                    if hasattr(audio_raw, 'tags') and audio_raw.tags:
+        # -------- Bulk track list --------
+        tracks_to_update = []
+
+        for index, file_path in enumerate(audio_files):
+            try:
+                audio_raw = MutagenFile(file_path)
+                audio_meta = MutagenFile(file_path, easy=True)
+
+                if not audio_meta:
+                    continue
+
+                # -------- Extract cover once --------
+                if not cover_extracted and audio_raw:
+                    image_data = None
+                    mime_type = None
+
+                    if hasattr(audio_raw, "tags") and audio_raw.tags:
                         for tag in audio_raw.tags.values():
-                            if tag.__class__.__name__ == 'APIC':
+                            if tag.__class__.__name__ == "APIC":
                                 image_data = tag.data
                                 mime_type = tag.mime
                                 break
 
-                    if not image_data and hasattr(audio_raw, 'pictures') and audio_raw.pictures:
+                    if not image_data and hasattr(audio_raw, "pictures") and audio_raw.pictures:
                         pic = audio_raw.pictures[0]
                         image_data = pic.data
                         mime_type = pic.mime
 
-                if image_data:
-                    ext = 'jpg'
-                    if mime_type == 'image/png':
-                        ext = 'png'
-                    elif mime_type == 'image/webp':
-                        ext = 'webp'
+                    if image_data:
+                        ext = {
+                            "image/png": "png",
+                            "image/webp": "webp",
+                        }.get(mime_type, "jpg")
 
-                    filename = f"album_cover_{album.id or uuid4().hex[:8]}.{ext}"
-                    album.cover_image.save(filename, ContentFile(image_data), save=True)
-                    cover_extracted = True
+                        filename = f"album_cover_{album.id}.{ext}"
+                        album.cover_image.save(filename, ContentFile(image_data), save=True)
+                        cover_extracted = True
 
-            audio_meta = MutagenFile(file_path, easy=True)
+                # -------- Metadata --------
+                title = audio_meta.get("title", [os.path.basename(file_path)])[0]
+                track_number = audio_meta.get("tracknumber", [str(index + 1)])[0].split("/")[0]
+                artist_name = audio_meta.get("artist", [None])[0]
+                genre = audio_meta.get("genre", [None])[0]
 
-            title = audio_meta.get('title', [os.path.basename(file_path)])[0]
-            track_number = audio_meta.get('tracknumber', [str(index + 1)])[0]
-            artist_name = audio_meta.get('artist', ['Unknown Artist'])[0]
-            genre = audio_meta.get('genre', [None])[0]
-
-            duration_ms = int(audio_meta.info.length * 1000) if hasattr(audio_meta.info, 'length') else 0
-            with transaction.atomic():
-                artist, _ = Artist.objects.get_or_create(
-                    name=artist_name,
-                    defaults={'slug': slugify(artist_name, allow_unicode=True)}
+                duration_ms = (
+                    int(audio_meta.info.length * 1000)
+                    if hasattr(audio_meta.info, "length")
+                    else 0
                 )
 
+                # -------- Artist lookup (cached) --------
+                artist = None
+                if artist_name:
+                    if artist_name not in artist_cache:
+                        artist_cache[artist_name] = Artist.objects.filter(
+                            name=artist_name
+                        ).only("id").first()
+                    artist = artist_cache[artist_name]
+
+                # -------- Upload file --------
                 filename = os.path.basename(file_path)
                 target_relative_path = f"tracks/{album.slug}/{filename}"
-
-                final_path = storage_connector.upload_chunked(file_path, target_relative_path)
-
-                raw_title = title or "Untitled"
-                safe_title = raw_title[:450]
-
-                raw_slug = slugify(raw_title, allow_unicode=True)
-                safe_slug = raw_slug[:450]
-
-                Track.objects.update_or_create(
-                    album=album,
-                    track_number=track_number.split('/')[0],
-                    defaults={
-                        'title': safe_title,
-                        'slug': safe_slug,
-                        'genre': genre,
-                        'composer': artist,
-                        'duration_ms': duration_ms,
-                        'audio_file': final_path,
-                    }
+                final_path = storage_connector.upload_chunked(
+                    file_path, target_relative_path
                 )
 
-            progress = int(((index + 1) / total_files) * 100)
-            upload_record.progress = progress
-            upload_record.save(update_fields=['progress'])
+                safe_title = (title or "Untitled")[:450]
+                safe_slug = slugify(safe_title, allow_unicode=True)[:450]
 
-        upload_record.status = 'completed'
-        upload_record.save(update_fields=['status'])
+                tracks_to_update.append({
+                    "album": album,
+                    "track_number": track_number,
+                    "title": safe_title,
+                    "slug": safe_slug,
+                    "genre": genre,
+                    "composer": artist,
+                    "duration_ms": duration_ms,
+                    "audio_file": final_path,
+                })
+
+                # -------- Progress update (batched) --------
+                if index % 5 == 0:
+                    progress = int(((index + 1) / total_files) * 100)
+                    AlbumArchiveUpload.objects.filter(id=upload_record_id).update(
+                        progress=progress
+                    )
+
+            except Exception as track_error:
+                print(f"Track processing error: {track_error}")
+                continue
+
+        # -------- Bulk DB operation --------
+        with transaction.atomic():
+            for data in tracks_to_update:
+                Track.objects.update_or_create(
+                    album=data["album"],
+                    track_number=data["track_number"],
+                    defaults=data,
+                )
+
+        upload_record.status = "completed"
+        upload_record.progress = 100
+        upload_record.save(update_fields=["status", "progress"])
 
     except Exception as e:
-        upload_record.status = 'failed'
+        upload_record.status = "failed"
         upload_record.error_log = str(e)
-        upload_record.save(update_fields=['status', 'error_log'])
+        upload_record.save(update_fields=["status", "error_log"])
+        raise self.retry(exc=e, countdown=10)
 
     finally:
-        if 'temp_dir' in locals() and os.path.exists(temp_dir):
+        if temp_dir and os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
+
 
 
 

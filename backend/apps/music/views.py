@@ -77,7 +77,7 @@ class ArtistViewSet(viewsets.ReadOnlyModelViewSet):
 
 class AlbumViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [AllowAny]
-    queryset = Album.objects.filter(status=PublishStatus.PUBLISHED).prefetch_related('tracks')
+    queryset = Album.objects.filter(status=PublishStatus.PUBLISHED).prefetch_related("tracks").annotate(annotated_total_tracks=Count("tracks"))
     pagination_class = ClassicalMusicPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = AlbumFilter

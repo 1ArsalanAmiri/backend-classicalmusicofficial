@@ -7,6 +7,8 @@ django-nested-admin
 django-admin-inline-paginator
 django-admin-extra-buttons
 django-filter
+django-admin-sortable2
+
 
 phonenumbers
 django-redis

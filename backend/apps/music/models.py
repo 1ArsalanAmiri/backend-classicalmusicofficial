@@ -94,6 +94,8 @@ class Artist(TimeStampedModel):
         db_index=True
     )
 
+    related_artists = models.ManyToManyField("self",blank=True,symmetrical=False)
+
     era = models.CharField(
         _("دوره زمانی"),
         max_length=20,
@@ -142,7 +144,7 @@ class Album(TimeStampedModel):
     orchestra = models.CharField(_("نام ارکستر"), max_length=255, blank=True)
     soloist = models.CharField(_("نام نوازنده"), max_length=255, blank=True)
     ensemble = models.CharField(_("نام گروه موسیقی"), max_length=255, blank=True)
-    status = models.CharField(_("وضعیت انتشار"),max_length=20,choices=PublishStatus.choices,default=PublishStatus.DRAFT,db_index=True)
+    status = models.CharField(_("وضعیت انتشار"),max_length=20,choices=PublishStatus.choices,default=PublishStatus.PUBLISHED,db_index=True)
 
     objects = AlbumManager()
 
@@ -230,8 +232,9 @@ class Track(TimeStampedModel):
     duration_ms = models.PositiveIntegerField(_("مدت زمان (میلی‌ثانیه)"), null=True, blank=True)
     description = models.TextField(_("توضیحات"), blank=True)
     track_number = models.PositiveIntegerField(_("شماره ترک در آلبوم"), null=True, blank=True)
-    status = models.CharField(_("وضعیت انتشار"), max_length=20, choices=PublishStatus.choices, default=PublishStatus.DRAFT, db_index=True)
+    status = models.CharField(_("وضعیت انتشار"), max_length=20, choices=PublishStatus.choices, default=PublishStatus.PUBLISHED, db_index=True)
     instrument = models.ForeignKey(Instrument,on_delete=models.SET_NULL,related_name="tracks",verbose_name=_("ساز"),null=True, blank=True)
+    is_chosen = models.BooleanField(default=False, help_text=_("منتخب"))
 
     class Meta:
         verbose_name = _("ترک")
