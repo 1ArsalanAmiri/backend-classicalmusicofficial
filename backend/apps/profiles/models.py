@@ -19,6 +19,20 @@ class UserProfile(models.Model):
     joined_date = jmodels.jDateField(auto_now_add=True, verbose_name="تاریخ عضویت")
 
 
+    def subscribe(self, subscription):
+        from apps.subscriptions.models import SubscriptionHistory
+
+        today = jdatetime.date.today()
+        end_date = today + jdatetime.timedelta(days=subscription.duration_days)
+
+        SubscriptionHistory.objects.create(
+            user_profile=self,
+            subscription=subscription,
+            start_date=today,
+            end_date=end_date
+        )
+
+
     def __str__(self):
         return str(self.user.phone_number)
 

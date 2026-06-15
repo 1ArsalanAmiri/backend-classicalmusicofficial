@@ -65,38 +65,3 @@ class CustomUser(AbstractUser):
 
     def PhoneNumber(self):
         return self.phone_number
-
-
-
-class OTPCode(models.Model):
-
-    phone_number = PhoneNumberField(region="IR")
-    code = models.CharField(max_length=6)
-    attempts = models.IntegerField(default=0)
-    is_used = models.BooleanField(default=False)
-    created_at = jmodels.jDateTimeField(auto_now_add=True , db_index=True)
-    expires_at = models.DateTimeField(blank=True, null=True)
-
-    LOGIN = "LOGIN"
-    RESET_PASSWORD = "RESET_PASSWORD"
-    REGISTER = "REGISTER"
-    CHANGE_PHONE = "CHANGE_PHONE"
-
-    PURPOSE_CHOICES = (
-        (LOGIN, "LOGIN"),
-        (RESET_PASSWORD, "RESET_PASSWORD"),
-        (REGISTER, "REGISTER"),
-        (CHANGE_PHONE, "CHANGE_PHONE"),
-    )
-
-    purpose = models.CharField(max_length=20, choices=PURPOSE_CHOICES , default=LOGIN , db_index=True)
-
-    class Meta:
-        ordering = ["-created_at"]
-        indexes = [models.Index(fields=["phone_number", "purpose", "-created_at"])]
-
-    # def is_expired(self):
-    #     return timezone.now() >= self.expires_at
-
-    def __str__(self):
-        return f"{self.phone_number} - {self.code}"

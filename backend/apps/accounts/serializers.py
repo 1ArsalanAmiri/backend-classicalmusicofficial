@@ -3,7 +3,7 @@ from django.core.cache import cache
 from django.utils import timezone
 from phonenumber_field.serializerfields import PhoneNumberField
 from rest_framework import serializers
-from .models import CustomUser, OTPCode
+from .models import CustomUser
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 

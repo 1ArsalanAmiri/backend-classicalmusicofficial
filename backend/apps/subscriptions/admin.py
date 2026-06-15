@@ -4,6 +4,7 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.utils.html import format_html
 from .models import Subscription, SubscriptionHistory
+from django.utils import timezone
 
 
 # -----------------------------
@@ -77,10 +78,10 @@ class SubscriptionAdmin(admin.ModelAdmin):
 
     list_display = (
         "name",
+        "id",
         "price_display",
         "duration_days",
         "subscription_type",
-        "discount_status",
         "discounted_price_display",
         "discount_percentage_display",
     )
@@ -147,12 +148,10 @@ class SubscriptionAdmin(admin.ModelAdmin):
     @admin.display(description="وضعیت تخفیف")
     def discount_status(self, obj):
         if obj.has_permanent_discount:
-            return format_html(
-                '<span style="color: #198754; font-weight: bold;">فعال</span>'
-            )
-        return format_html(
-            '<span style="color: #dc3545; font-weight: bold;">غیرفعال</span>'
-        )
+            # [اصلاح شد]
+            return format_html('<span style="color: #198754; font-weight: bold;">{}</span>', 'فعال')
+        # [اصلاح شد]
+        return format_html('<span style="color: #dc3545; font-weight: bold;">{}</span>', 'غیرفعال')
 
     @admin.display(description="پیش‌نمایش تخفیف")
     def discount_preview(self, obj):
@@ -161,6 +160,10 @@ class SubscriptionAdmin(admin.ModelAdmin):
 
         if obj.has_permanent_discount and obj.discounted_price and obj.discount_percentage is not None:
             label = obj.discount_label or "بدون برچسب"
+
+            formatted_price = f"{obj.price:,.0f}"
+            formatted_discounted_price = f"{obj.discounted_price:,.0f}"
+
             return format_html(
                 '<div style="line-height: 1.9;">'
                 '<strong>قیمت اصلی:</strong> {} تومان<br>'
@@ -168,8 +171,8 @@ class SubscriptionAdmin(admin.ModelAdmin):
                 '<strong>درصد تخفیف:</strong> {}٪<br>'
                 '<strong>برچسب:</strong> {}'
                 '</div>',
-                f"{obj.price:,.0f}",
-                f"{obj.discounted_price:,.0f}",
+                formatted_price,
+                formatted_discounted_price,
                 obj.discount_percentage,
                 label
             )
@@ -223,12 +226,12 @@ class SubscriptionHistoryAdmin(admin.ModelAdmin):
     form = SubscriptionHistoryAdminForm
 
     list_display = (
-        "user_display",
+        "user_profile__user__phone_number",
         "subscription",
         "subscription_type_display",
         "start_date",
         "end_date",
-        "is_active_display",
+        # "is_active_display",
     )
     list_filter = (
         "subscription__subscription_type",
@@ -243,7 +246,6 @@ class SubscriptionHistoryAdmin(admin.ModelAdmin):
         "subscription__name",
     )
     autocomplete_fields = (
-        # "user_profile",
         "subscription",
     )
     ordering = ("-start_date",)
@@ -260,39 +262,54 @@ class SubscriptionHistoryAdmin(admin.ModelAdmin):
 
     @admin.display(description="کاربر")
     def user_display(self, obj):
-        user = obj.user_profile.user
-        full_name = user.get_full_name().strip()
-        if full_name:
-            return f"{full_name} ({user.username})"
-        return user.username
+        if obj.user_profile and obj.user_profile.user:
+            user = obj.user_profile.user
+            full_name = user.get_full_name().strip()
+            if full_name:
+                return f"{full_name} ({user.username})"
+            return user.username
+        return "کاربر نامشخص"
 
     @admin.display(description="نوع اشتراک")
     def subscription_type_display(self, obj):
-        return obj.subscription.get_subscription_type_display()
+        if obj.subscription:
+            return obj.subscription.get_subscription_type_display()
+        return "اشتراک نامشخص"
 
     @admin.display(description="وضعیت")
     def is_active_display(self, obj):
         today = jdatetime.date.today()
 
-        if obj.start_date and obj.start_date > today:
+        start_date = obj.start_date
+        end_date = obj.end_date
+
+        if start_date and start_date > today:
+            # [اصلاح شد]
             return format_html(
-                '<span style="color: #fd7e14; font-weight: bold;">هنوز شروع نشده</span>'
+                '<span style="color: #fd7e14; font-weight: bold;">{}</span>', 'هنوز شروع نشده'
             )
-
-        if obj.end_date is None:
+        elif end_date is None:
+            if start_date and start_date <= today:
+                # [اصلاح شد]
+                return format_html(
+                    '<span style="color: #0d6efd; font-weight: bold;">{}</span>', 'فعال بدون تاریخ پایان'
+                )
+            else:
+                # [اصلاح شد]
+                return format_html(
+                    '<span style="color: #fd7e14; font-weight: bold;">{}</span>', 'هنوز شروع نشده'
+                )
+        elif start_date and start_date <= today <= end_date:
+            # [اصلاح شد]
             return format_html(
-                '<span style="color: #0d6efd; font-weight: bold;">فعال بدون تاریخ پایان</span>'
+                '<span style="color: #198754; font-weight: bold;">{}</span>', 'فعال'
             )
-
-        if obj.start_date <= today <= obj.end_date:
+        elif end_date < today:
+            # [اصلاح شد]
             return format_html(
-                '<span style="color: #198754; font-weight: bold;">فعال</span>'
+                '<span style="color: #dc3545; font-weight: bold;">{}</span>', 'منقضی‌شده'
             )
-
-        if obj.end_date < today:
+        else:
             return format_html(
-                '<span style="color: #dc3545; font-weight: bold;">منقضی‌شده</span>'
+                '<span style="color: #dc3545; font-weight: bold;">{}</span>', 'منقضی‌شده'
             )
-
-        return "-"
-

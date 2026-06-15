@@ -25,6 +25,8 @@ urlpatterns = [
 
     path("playlist/" , include("apps.playlists.urls") , name="playlist"),
 
+    path("payments/", include("apps.payments.urls") , name="payment"),
+
     # path('sentry-debug/', trigger_error),
 
 ]

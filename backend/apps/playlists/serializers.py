@@ -59,6 +59,7 @@ class PlaylistDetailSerializer(serializers.ModelSerializer):
 
 
 class PlaylistCreateUpdateSerializer(serializers.ModelSerializer):
+    track_slug = serializers.CharField(source="track.slug")
     class Meta:
         model = Playlist
-        fields = ["title", "description", "cover_image", "is_public","track_slug"]
+        fields = ['track_slug',"title", "description", "cover_image", "is_public"]

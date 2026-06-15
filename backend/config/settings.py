@@ -17,9 +17,17 @@ env = environ.Env(DEBUG=(bool, False),ALLOWED_HOSTS=(list, []),)
 
 environ.Env.read_env(BASE_DIR / '.env')
 
+ZP_MERCHANT_ID = env('ZP_MERCHANT_ID', default='c05db87d-9881-4de4-af7f-d998a00d5e48')
+
+ZP_SANDBOX = env.bool('ZP_SANDBOX', default=False)
+
 SECRET_KEY = env('SECRET_KEY')
 
 DEBUG = env('DEBUG')
+
+FRONTEND_URL = "http://localhost:3000"
+
+BACKEND_URL= "http://localhost/"
 
 ALLOWED_HOSTS = ["*"]
 
@@ -166,6 +174,7 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
+
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "Classical Music API",

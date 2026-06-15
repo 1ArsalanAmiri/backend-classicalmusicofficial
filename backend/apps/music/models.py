@@ -16,9 +16,8 @@ from django.utils.text import slugify
 from django.core.files.base import ContentFile
 from logging import getLogger
 
+
 logger = getLogger(__name__)
-
-
 
 
 # =========================================================

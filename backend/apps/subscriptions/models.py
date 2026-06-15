@@ -19,11 +19,11 @@ class Subscription(models.Model):
 
         constraints = [
             models.CheckConstraint(
-                check=models.Q(price__gte=0),
+                condition=models.Q(price__gte=0),
                 name='subscription_price_gte_0'
             ),
             models.CheckConstraint(
-                check=models.Q(duration_days__gt=0),
+                condition=models.Q(duration_days__gt=0),
                 name='subscription_duration_gt_0'
             ),
         ]
@@ -89,5 +89,3 @@ class SubscriptionHistory(models.Model):
 
     def __str__(self):
         return f"{self.user_profile.user.username} - {self.subscription.name}"
-
-

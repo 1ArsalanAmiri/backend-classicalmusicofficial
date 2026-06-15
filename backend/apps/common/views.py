@@ -23,27 +23,44 @@ class SendOTPView(APIView):
     def post(self, request):
         serializer = SendOTPSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        phone_number = serializer.validated_data["phone_number"].as_e164
+
+        phone_obj = serializer.validated_data["phone_number"]
+        phone_e164 = phone_obj.as_e164
+
+        if phone_e164.startswith('+98'):
+            local_phone = '0' + phone_e164[3:]
+        else:
+            local_phone = phone_e164
 
         otp = generate_otp()
 
-        cache_key_otp = f"otp:{phone_number}"
-        cache_key_attempts = f"otp_attempts:{phone_number}"
+        cache_key_otp = f"otp:{phone_e164}"
+        cache_key_attempts = f"otp_attempts:{phone_e164}"
 
         try:
-            sms_response = send_sms(phone_number, otp)
+            sms_response = send_sms(phone_number=local_phone, code=otp)
+
+            print(f"========== GHASEDAK RAW RESPONSE: {sms_response} ==========")
 
             if sms_response and sms_response.get("isSuccess") is False:
-                return Response({"error": "SMS Provider Error ,try again later", "details": sms_response.get("message")},status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                return Response(
+                    {"error": "SMS Provider Error", "details": sms_response.get("message")},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE
+                )
 
             cache.set(cache_key_otp, otp, timeout=OTP_EXPIRY_SECONDS)
             cache.set(cache_key_attempts, 0, timeout=OTP_EXPIRY_SECONDS)
 
         except Exception as e:
-            return Response({"error": "Failed to send OTP", "details": str(e)},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {"error": "Failed to send OTP", "details": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
-        return Response({"message": f"OTP sent successfully => {otp}"}, status=status.HTTP_200_OK)
-
+        return Response({
+            "message": "OTP sent successfully.",
+            "ghasedak_debug_data": sms_response
+        }, status=status.HTTP_200_OK)
 
 
 class VerifyOTPView(APIView):
