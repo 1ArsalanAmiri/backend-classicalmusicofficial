@@ -30,7 +30,7 @@ class CustomUserManager(BaseUserManager):
 class CustomUser(AbstractUser):
     class Meta:
         verbose_name = 'کاربر'
-        verbose_name_plural = 'کاربران'
+        verbose_name_plural = 'احراز هویت کاربران'
 
 
     phone_number = PhoneNumberField(unique=True,region="IR",verbose_name="شماره موبایل")

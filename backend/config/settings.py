@@ -88,7 +88,10 @@ INSTALLED_APPS = [
     "apps.contacts",
     "apps.notifications",
     "apps.profiles",
+    "apps.interactions"
+
 ]
+
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -153,7 +156,6 @@ MEDIA_ROOT = path.join(BASE_DIR, 'media')
 
 
 # STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.ManifestStaticFilesStorage'
-
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -245,3 +247,16 @@ if not DEBUG and SENTRY_DSN:
         environment="production",
         send_default_pii=True
     )
+
+
+# HSTS SETTINGS
+if not DEBUG:
+    SECURE_HSTS_SECONDS = 31536000
+
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+
+    SECURE_HSTS_PRELOAD = True
+
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = True

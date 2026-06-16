@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import ArtistViewSet, AlbumViewSet, TrackViewSet , GenreViewSet, InstrumentViewSet , EraListView , AlbumBatchUploadAPIView
+from .views import ArtistViewSet, AlbumViewSet, TrackViewSet , GenreViewSet, InstrumentViewSet , EraListView , AlbumBatchUploadAPIView , LabelViewSet
 
 router = DefaultRouter()
 
@@ -9,6 +9,7 @@ router.register(r'albums', AlbumViewSet, basename='album')
 router.register(r'tracks', TrackViewSet, basename='track')
 router.register(r'genres', GenreViewSet, basename='genre')
 router.register(r'instruments', InstrumentViewSet, basename='instrument')
+router.register(r'labels', LabelViewSet, basename='label')
 
 urlpatterns = [
     path('api/v1/', include(router.urls)),

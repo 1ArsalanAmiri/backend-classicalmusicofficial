@@ -1,8 +1,8 @@
-from django.contrib import admin , messages
+from django.contrib import admin, messages
 from django.urls import path
-from django.utils.html import format_html
+from django.utils.html import format_html, mark_safe
 from django.utils.translation import gettext_lazy as _
-from .models import Artist, Album, Track, AlbumArchiveUpload, ArchiveUploadStatus, Genre, Instrument
+from .models import Artist, Album, Track, AlbumArchiveUpload, ArchiveUploadStatus, Genre, Instrument, Label
 from django.http import JsonResponse
 from django.template.response import TemplateResponse
 from admin_extra_buttons.api import ExtraButtonsMixin, button
@@ -11,9 +11,69 @@ from .tasks import process_album_archive_task
 
 
 # =========================================================
+# Track Inline for Album Admin
+# =========================================================
+class TrackInline(admin.TabularInline):
+    model = Track
+    extra = 0
+    fields = ("track_number", "title", "audio_file", "duration_ms", "composer", "singer", "status")
+    autocomplete_fields = ["composer", "singer"]
+    ordering = ["track_number"]
+
+
+class TrackInlineForLabel(admin.TabularInline):
+    model = Track
+    extra = 0
+    show_change_link = True
+    fields = ('title', 'release_date', 'status')
+    classes = ('collapse',)
+    # readonly_fields = ('title', 'release_date', 'is_published')
+
+
+# =========================================================
+# Label Admin (لیبل / ناشر)
+# =========================================================
+@admin.register(Label)
+class LabelAdmin(admin.ModelAdmin):
+    list_display = ('name', 'slug', 'country')
+    search_fields = ('name', 'slug')
+    prepopulated_fields = {'slug': ('name',)}
+
+    inlines = [TrackInlineForLabel]
+
+    readonly_fields = ('display_related_albums',)
+
+    fieldsets = (
+        ('اطلاعات پایه', {
+            'fields': ('name', 'slug', 'logo', 'country', 'website', 'description')
+        }),
+        ('آلبوم‌های مرتبط', {
+            'fields': ('display_related_albums',),
+            'classes': ('collapse',),
+        }),
+    )
+
+    @admin.display(description='آلبوم‌های این لیبل')
+    def display_related_albums(self, obj):
+        if not obj.pk:
+            return "پس از ذخیره لیبل، آلبوم‌ها نمایش داده می‌شوند."
+
+        albums = obj.albums.all()
+
+        if not albums.exists():
+            return "هیچ آلبومی برای این لیبل ثبت نشده است."
+
+        links = []
+        for album in albums:
+            url = reverse('admin:music_album_change', args=[album.pk])
+            link = f'<a href="{url}" target="_blank" style="display: inline-block; padding: 5px 10px; margin: 3px; background-color: #417690; color: white; border-radius: 4px; text-decoration: none; font-size: 13px;">{album.title}</a>'
+            links.append(link)
+
+        return mark_safe('<div style="display: flex; flex-wrap: wrap;">' + ''.join(links) + '</div>')
+
+# =========================================================
 # Artist Admin
 # =========================================================
-
 @admin.register(Artist)
 class ArtistAdmin(admin.ModelAdmin):
     list_display = ("name", "artist_type", "era", "country", "created_at")
@@ -35,26 +95,15 @@ class ArtistAdmin(admin.ModelAdmin):
     )
 
 # =========================================================
-# Track Inline for Album Admin
-# =========================================================
-
-class TrackInline(admin.TabularInline):
-
-    model = Track
-    extra = 0
-    fields = ("track_number", "title", "audio_file", "duration_ms", "composer", "singer", "status")
-    autocomplete_fields = ["composer", "singer"]
-    ordering = ["track_number"]
-
-# =========================================================
 # Track Admin (Standalone)
 # =========================================================
-
 @admin.register(Track)
 class TrackAdmin(ExtraButtonsMixin, admin.ModelAdmin):
-    list_display = ['title', 'get_album_or_single', 'track_number', 'get_duration', 'status']
-    list_filter = ['status', 'album']
-    search_fields = ['title', 'album__title']
+    # فیلد label به نمایش اضافه شد
+    list_display = ['title', 'get_album_or_single', 'label', 'track_number', 'get_duration', 'status']
+    # فیلتر بر اساس لیبل اضافه شد
+    list_filter = ['status', 'album', 'label']
+    search_fields = ['title', 'album__title', 'label__name']
 
     @admin.display(description='آلبوم / سینگل', ordering='album__title')
     def get_album_or_single(self, obj):
@@ -71,22 +120,25 @@ class TrackAdmin(ExtraButtonsMixin, admin.ModelAdmin):
         seconds = seconds % 60
         return f"{minutes:02}:{seconds:02}"
 
-
-
+# =========================================================
+# Album Admin
+# =========================================================
 @admin.register(Album)
 class AlbumAdmin(admin.ModelAdmin):
-    list_display = ('title', 'composer' ,'status', 'upload_archive_button', 'display_cover_image')
-    list_filter = ('status', 'release_date')
-    search_fields = ('title', 'composer', 'conductor', 'orchestra', 'soloist', 'ensemble')
+    list_display = ('title', 'composer', 'label', 'status', 'upload_archive_button', 'display_cover_image')
+    list_filter = ('status', 'release_date', 'label')
+    search_fields = ('title', 'composer', 'conductor', 'orchestra', 'soloist', 'ensemble', 'label__name')
     prepopulated_fields = {"slug": ("title",)}
     readonly_fields = ("created_at", "updated_at")
+
+    inlines = [TrackInline]
 
     def display_cover_image(self, obj):
         if obj.cover_image:
             return format_html('<img src="{}" width="50" height="50" />', obj.cover_image.url)
         return _("بدون کاور")
-    display_cover_image.short_description = _("کاور آلبوم")
 
+    display_cover_image.short_description = _("کاور آلبوم")
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
@@ -97,13 +149,10 @@ class AlbumAdmin(admin.ModelAdmin):
                 track.save()
             messages.success(request, _(f"کاور آلبوم به {tracks_to_update.count()} ترک اختصاص داده شد."))
 
-        elif not obj.cover_image and change:
-             pass
-
-
     def upload_archive_button(self, obj):
         url = reverse('admin:album_batch_upload', args=[obj.pk])
         return format_html('<a class="button" href="{}">آپلود گروهی ترک‌ها (ZIP/RAR)</a>', url)
+
     upload_archive_button.short_description = "آپلود آرشیو"
 
     def get_urls(self):
@@ -158,91 +207,36 @@ class AlbumAdmin(admin.ModelAdmin):
         except AlbumArchiveUpload.DoesNotExist:
             return JsonResponse({'status': 'ERROR', 'error_log': 'Record not found'}, status=404)
 
-
-
+# =========================================================
+# Genre Admin
+# =========================================================
 @admin.register(Genre)
 class GenreAdmin(admin.ModelAdmin):
-
-    list_display = (
-        "name",
-        "slug",
-        "created_at",
-        "updated_at",
-    )
-
-    search_fields = (
-        "name",
-        "slug",
-    )
-
-    prepopulated_fields = {
-        "slug": ("name",)
-    }
-
-    readonly_fields = (
-        "created_at",
-        "updated_at",
-    )
-
-    ordering = (
-        "name",
-    )
+    list_display = ("name", "slug", "created_at", "updated_at")
+    search_fields = ("name", "slug")
+    prepopulated_fields = {"slug": ("name",)}
+    readonly_fields = ("created_at", "updated_at")
+    ordering = ("name",)
 
     fieldsets = (
-        ("اطلاعات ژانر", {
-            "fields": (
-                "name",
-                "slug",
-            )
-        }),
-        ("اطلاعات سیستمی", {
-            "fields": (
-                "created_at",
-                "updated_at",
-            )
-        }),
+        ("اطلاعات ژانر", {"fields": ("name", "slug")}),
+        ("اطلاعات سیستمی", {"fields": ("created_at", "updated_at")}),
     )
 
-
+# =========================================================
+# Instrument Admin
+# =========================================================
 @admin.register(Instrument)
 class InstrumentAdmin(admin.ModelAdmin):
-
-    list_display = (
-        "name",
-        "slug",
-        "created_at",
-        "updated_at",
-    )
-
-    search_fields = (
-        "name",
-        "slug",
-    )
-
-    prepopulated_fields = {
-        "slug": ("name",)
-    }
-
-    readonly_fields = (
-        "created_at",
-        "updated_at",
-    )
-
-    ordering = (
-        "name",
-    )
+    list_display = ("name", "slug", "created_at", "updated_at")
+    search_fields = ("name", "slug")
+    prepopulated_fields = {"slug": ("name",)}
+    readonly_fields = ("created_at", "updated_at")
+    ordering = ("name",)
 
     fieldsets = (
-        ("اطلاعات ساز", {
-            "fields": (
-                "name",
-                "slug",
-            )
-        }),
-        ("اطلاعات سیستمی", {
-            "fields": (
-                "created_at",
-                "updated_at",
-            )
-        }),
+        ("اطلاعات ساز", {"fields": ("name", "slug")}),
+        ("اطلاعات سیستمی", {"fields": ("created_at", "updated_at")}),
     )
+
+

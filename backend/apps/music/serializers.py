@@ -1,6 +1,6 @@
 from django.urls import reverse
 from rest_framework import serializers
-from .models import Artist, Album, Track,Genre, Instrument
+from .models import Artist, Album, Track,Genre, Instrument , Label
 
 
 
@@ -12,8 +12,25 @@ class ArtistSerializer(serializers.ModelSerializer):
         model = Artist
         fields = [
             'id', 'name', 'slug', 'country', 'artist_type', 'artist_type_display',
-            'era', 'era_display', 'image', 'biography'
+            'era', 'era_display', 'image', 'biography','likes_count','followers_count'
         ]
+
+
+
+class LabelListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Label
+        fields = ['id', 'name', 'slug', 'logo' , 'likes_count','followers_count']
+
+
+
+class LabelDetailSerializer(serializers.ModelSerializer):
+    albums_count = serializers.IntegerField(read_only=True)
+    tracks_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Label
+        fields = ['id', 'name', 'slug', 'logo', 'country', 'website', 'description', 'albums_count', 'tracks_count']
 
 
 
@@ -36,7 +53,7 @@ class TrackSerializer(serializers.ModelSerializer):
         fields = [
             'id','title', 'slug', 'cover_image', 'release_date',
             'duration_seconds', 'instrument_name',
-            'composer_name','singer_name','status'
+            'composer_name','singer_name','status','likes_count'
         ]
 
 
@@ -84,7 +101,7 @@ class AlbumDetailSerializer(serializers.ModelSerializer):
             'id', 'title', 'slug', 'cover_image', 'release_date',
             'composer', 'conductor', 'orchestra', 'soloist', 'ensemble',
             'on_this_album', 'total_tracks', 'total_duration_ms', 'status',
-            'tracks'
+            'tracks','likes_count','comments_count',
         ]
 
 

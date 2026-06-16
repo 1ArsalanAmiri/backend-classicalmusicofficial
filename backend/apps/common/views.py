@@ -58,7 +58,7 @@ class SendOTPView(APIView):
             )
 
         return Response({
-            "message": "OTP sent successfully.",
+            "message": f"OTP sent successfully. {otp}",
             "ghasedak_debug_data": sms_response
         }, status=status.HTTP_200_OK)
 

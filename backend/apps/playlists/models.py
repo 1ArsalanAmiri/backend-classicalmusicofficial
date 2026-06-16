@@ -52,8 +52,8 @@ class Playlist(TimeStampedModel):
     )
 
     class Meta:
-        verbose_name = "Playlist"
-        verbose_name_plural = "Playlists"
+        verbose_name = "پلی لیست"
+        verbose_name_plural = "پلی لیست ها"
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['owner', 'is_public']),
@@ -114,8 +114,8 @@ class PlaylistTrack(models.Model):
     added_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        verbose_name = "Playlist Track"
-        verbose_name_plural = "Playlist Tracks"
+        verbose_name = "ترک پلی لیست"
+        verbose_name_plural = "ترک های پلی لیست"
         ordering = ['order']
         unique_together = ('playlist', 'track')
         indexes = [

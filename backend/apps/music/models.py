@@ -15,6 +15,7 @@ from re import search
 from django.utils.text import slugify
 from django.core.files.base import ContentFile
 from logging import getLogger
+from apps.interactions.mixins import LikableMixin , CommentableMixin , FollowableMixin
 
 
 logger = getLogger(__name__)
@@ -75,12 +76,11 @@ class Instrument(TimeStampedModel):
     def __str__(self):
         return self.name
 
-
 # =========================================================
-# Artist Model
+# Artist & Label Model
 # =========================================================
 
-class Artist(TimeStampedModel):
+class Artist(TimeStampedModel , LikableMixin , FollowableMixin):
     name = models.CharField(_("نام آرتیست"), max_length=255)
     slug = models.SlugField(_("اسلاگ"), max_length=120, unique=True, blank=True, allow_unicode=True)
     country = models.CharField(_("ملیت/کشور"), max_length=100, blank=True)
@@ -114,6 +114,9 @@ class Artist(TimeStampedModel):
 
     biography = models.TextField(_("بیوگرافی"), blank=True)
 
+    likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
+    followers_count = models.PositiveIntegerField(_("تعداد فالوور"), default=0)
+
 
     class Meta:
         verbose_name = _("آرتیست")
@@ -128,11 +131,43 @@ class Artist(TimeStampedModel):
     def __str__(self):
         return f"{self.name} ({self.get_artist_type_display()})"
 
+
+class Label(TimeStampedModel , LikableMixin , FollowableMixin):
+    name = models.CharField(_("نام لیبل"), max_length=255, unique=True)
+    slug = models.SlugField(_("اسلاگ"), max_length=300, unique=True, allow_unicode=True)
+    logo = models.ImageField(
+        _("لوگوی لیبل"),
+        upload_to="labels/logos/",
+        null=True,
+        blank=True,
+        validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])]
+    )
+    country = models.CharField(_("کشور"), max_length=100, blank=True)
+    website = models.URLField(_("وب‌سایت"), max_length=200, blank=True)
+    description = models.TextField(_("توضیحات"), blank=True)
+
+    likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
+    followers_count = models.PositiveIntegerField(_("تعداد فالوور"), default=0)
+
+
+    class Meta:
+        verbose_name = _("لیبل (ناشر)")
+        verbose_name_plural = _("لیبل‌ها")
+        ordering = ["name"]
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = unique_slugify(self, "slug", self.name)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
 # =========================================================
 # Album Model
 # =========================================================
 
-class Album(TimeStampedModel):
+class Album(TimeStampedModel ,LikableMixin, CommentableMixin ):
     composer = models.CharField(_("نام آهنگساز"), max_length=255, blank=True)
     title = models.CharField(_("عنوان آلبوم"), max_length=300 , blank = True,default="untitled")
     slug = models.SlugField(_("اسلاگ"), max_length=300, unique=True, blank=True, allow_unicode=True)
@@ -144,6 +179,10 @@ class Album(TimeStampedModel):
     soloist = models.CharField(_("نام نوازنده"), max_length=255, blank=True)
     ensemble = models.CharField(_("نام گروه موسیقی"), max_length=255, blank=True)
     status = models.CharField(_("وضعیت انتشار"),max_length=20,choices=PublishStatus.choices,default=PublishStatus.PUBLISHED,db_index=True)
+    label = models.ForeignKey(Label,on_delete=models.SET_NULL,null=True, blank=True,related_name="albums", verbose_name=_("لیبل ناشر"))
+
+    likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
+    comments_count = models.PositiveIntegerField(_("تعداد کامنت"), default=0)
 
     objects = AlbumManager()
 
@@ -183,7 +222,6 @@ class Album(TimeStampedModel):
         return self.title if self.title else _("بدون عنوان")
 
 
-
 class AlbumArchiveUpload(TimeStampedModel):
     album = models.ForeignKey(Album, on_delete=models.CASCADE, related_name="archive_uploads")
     archive_file = models.FileField(upload_to="protected/tmp/archives/")
@@ -195,7 +233,6 @@ class AlbumArchiveUpload(TimeStampedModel):
     class Meta:
         verbose_name = _("آپلود گروهی آلبوم")
         verbose_name_plural = _("آپلودهای گروهی آلبوم")
-
 
 
 class AlbumZipExport(TimeStampedModel):
@@ -217,7 +254,7 @@ class AlbumZipExport(TimeStampedModel):
 # Track Model
 # =========================================================
 
-class Track(TimeStampedModel):
+class Track(TimeStampedModel , LikableMixin):
 
     album = models.ForeignKey(Album, on_delete=models.CASCADE, related_name="tracks", null=True, blank=True, verbose_name=_("آلبوم"))
     title = models.CharField(_("عنوان ترک"), max_length=300 , blank=True, default="Untitled")
@@ -234,6 +271,10 @@ class Track(TimeStampedModel):
     status = models.CharField(_("وضعیت انتشار"), max_length=20, choices=PublishStatus.choices, default=PublishStatus.PUBLISHED, db_index=True)
     instrument = models.ForeignKey(Instrument,on_delete=models.SET_NULL,related_name="tracks",verbose_name=_("ساز"),null=True, blank=True)
     is_chosen = models.BooleanField(default=False, help_text=_("منتخب"))
+    label = models.ForeignKey(Label,on_delete=models.SET_NULL,null=True,blank=True,related_name="tracks", verbose_name=_("لیبل ناشر"),help_text=_("برای سینگل‌ترک‌ها یا در صورتی که لیبل ترک با آلبوم متفاوت است."))
+
+    likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
+
 
     class Meta:
         verbose_name = _("ترک")
@@ -364,3 +405,4 @@ class Track(TimeStampedModel):
     def __str__(self):
         return f"{self.title} (Single)" if self.is_single else f"{self.title} - {self.album.title}"
 
+# =========================================================

@@ -13,7 +13,7 @@ from rest_framework import viewsets, filters , status
 from django_filters.rest_framework import DjangoFilterBackend
 from .serializers import *
 from apps.common.pagination import ClassicalMusicPagination
-from apps.common.filters import AlbumFilter
+from apps.common.filters import AlbumFilter,TrackFilter
 from django.db import transaction
 from rest_framework.decorators import action
 from apps.common.throttles import ZipGenerationRateThrottle
@@ -28,6 +28,9 @@ from apps.common.models import PublishStatus
 from django.db.models import Count
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
+
+from apps.interactions.mixins import LikableMixin, CommentableMixin, FollowableMixin
+from rest_framework.viewsets import ReadOnlyModelViewSet
 
 
 
@@ -64,7 +67,7 @@ class AlbumBatchUploadAPIView(APIView):
 
 
 
-class ArtistViewSet(viewsets.ReadOnlyModelViewSet):
+class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
     permission_classes = [AllowAny]
     queryset = Artist.objects.all()
     serializer_class = ArtistSerializer
@@ -75,7 +78,7 @@ class ArtistViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 
-class AlbumViewSet(viewsets.ReadOnlyModelViewSet):
+class AlbumViewSet(LikableMixin, CommentableMixin, ReadOnlyModelViewSet):
     permission_classes = [AllowAny]
     queryset = Album.objects.filter(status=PublishStatus.PUBLISHED).prefetch_related("tracks").annotate(annotated_total_tracks=Count("tracks"))
     pagination_class = ClassicalMusicPagination
@@ -165,10 +168,11 @@ class AlbumViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 
-class TrackViewSet(viewsets.ReadOnlyModelViewSet):
+class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
     permission_classes = [AllowAny]
     pagination_class = ClassicalMusicPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_class = TrackFilter
 
     queryset = Track.objects.filter(status=PublishStatus.PUBLISHED).select_related('album', 'composer', 'singer')
 
@@ -274,3 +278,48 @@ class EraListView(APIView):
             for key, label in EraChoices.choices
         ]
         return Response(eras)
+
+
+
+class LabelViewSet(FollowableMixin, LikableMixin , viewsets.ReadOnlyModelViewSet):
+    lookup_field = 'slug'
+
+    def get_queryset(self):
+        queryset = Label.objects.all()
+        if self.action == 'retrieve':
+            queryset = queryset.annotate(
+                albums_count=Count('albums', distinct=True),
+                tracks_count=Count('tracks', distinct=True)
+            )
+        return queryset
+
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return LabelDetailSerializer
+        return LabelListSerializer
+
+    @action(detail=True, methods=['get'])
+    def tracks(self, request, slug=None):
+        label = self.get_object()
+        tracks = label.tracks.select_related('album').all()
+
+        page = self.paginate_queryset(tracks)
+        if page is not None:
+            serializer = TrackSerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(serializer.data)
+
+        serializer = TrackSerializer(tracks, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'])
+    def albums(self, request, slug=None):
+        label = self.get_object()
+        albums = label.albums.prefetch_related('tracks')
+
+        page = self.paginate_queryset(albums)
+        if page is not None:
+            serializer = AlbumListSerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(serializer.data)
+
+        serializer = AlbumListSerializer(albums, many=True, context={'request': request})
+        return Response(serializer.data)

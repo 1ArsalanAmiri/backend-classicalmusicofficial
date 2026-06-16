@@ -31,6 +31,7 @@ def user_has_stream_access(user):
 
     return sub.subscription.subscription_type in [
         "online",
+        "all"
     ]
 
 
@@ -43,6 +44,7 @@ def user_has_download_access(user):
 
     return sub.subscription.subscription_type in [
         "download",
+        "all"
     ]
 
 
