@@ -1,7 +1,6 @@
 from django.http import HttpResponse, Http404
 import mimetypes
 from urllib.parse import quote
-from django.urls import reverse
 from rest_framework.permissions import AllowAny , IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -18,19 +17,13 @@ from django.db import transaction
 from rest_framework.decorators import action
 from apps.common.throttles import ZipGenerationRateThrottle
 from rest_framework.exceptions import PermissionDenied
-
-from apps.subscriptions.services import (SubscriptionHistory, get_active_subscription ,
-        user_has_download_access, user_has_stream_access ,
-        user_has_video_stream_access ,Q)
-
 from apps.common.permissions import HasStreamSubscription , user_has_download_access , user_has_stream_access , HasAllSubscription , HasDownloadSubscription
 from apps.common.models import PublishStatus
 from django.db.models import Count
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
-
-from apps.interactions.mixins import LikableMixin, CommentableMixin, FollowableMixin
 from rest_framework.viewsets import ReadOnlyModelViewSet
+from apps.interactions.mixins import LikableMixin, FollowableMixin ,CommentableMixin
 
 
 
@@ -78,7 +71,7 @@ class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
 
 
 
-class AlbumViewSet(LikableMixin, CommentableMixin, ReadOnlyModelViewSet):
+class AlbumViewSet(CommentableMixin,LikableMixin,viewsets.ModelViewSet):
     permission_classes = [AllowAny]
     queryset = Album.objects.filter(status=PublishStatus.PUBLISHED).prefetch_related("tracks").annotate(annotated_total_tracks=Count("tracks"))
     pagination_class = ClassicalMusicPagination
@@ -281,7 +274,7 @@ class EraListView(APIView):
 
 
 
-class LabelViewSet(FollowableMixin, LikableMixin , viewsets.ReadOnlyModelViewSet):
+class LabelViewSet(FollowableMixin,LikableMixin,viewsets.ReadOnlyModelViewSet):
     lookup_field = 'slug'
 
     def get_queryset(self):

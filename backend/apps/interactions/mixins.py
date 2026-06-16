@@ -7,7 +7,6 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.contenttypes.models import ContentType
 from .models import Like, Follow, Comment
-from .serializers import CommentSerializer
 
 
 def check_comment_rate_limit(user_id):
@@ -46,7 +45,6 @@ class LikableMixin:
                     return Response({"message": "لایک شد."}, status=status.HTTP_201_CREATED)
                 return Response({"message": "قبلا لایک شده بود."}, status=status.HTTP_200_OK)
             except IntegrityError:
-                # مدیریت Race Condition
                 return Response({"message": "قبلا لایک شده بود."}, status=status.HTTP_200_OK)
 
         elif request.method == 'DELETE':
@@ -56,6 +54,43 @@ class LikableMixin:
             if deleted:
                 return Response({"message": "لایک برداشته شد."}, status=status.HTTP_204_NO_CONTENT)
             return Response({"error": "لایکی یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+class FollowableMixin:
+    @action(detail=True, methods=['post', 'delete'], url_path='follow')
+    def follow_toggle(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            raise NotAuthenticated(detail="برای فالو کردن باید وارد حساب کاربری شوید.")
+
+        obj = self.get_object()
+        content_type = ContentType.objects.get_for_model(obj)
+
+        if request.method == 'POST':
+            try:
+                follow, created = Follow.objects.get_or_create(
+                    user=request.user,
+                    content_type=content_type,
+                    object_id=obj.pk
+                )
+                if created:
+                    return Response({"message": "فالو شد."}, status=status.HTTP_201_CREATED)
+                return Response({"message": "شما قبلا این مورد را فالو کرده‌اید."}, status=status.HTTP_200_OK)
+            except IntegrityError:
+                return Response({"message": "شما قبلا این مورد را فالو کرده‌اید."}, status=status.HTTP_200_OK)
+
+        elif request.method == 'DELETE':
+            deleted, _ = Follow.objects.filter(
+                user=request.user,
+                content_type=content_type,
+                object_id=obj.pk
+            ).delete()
+            if deleted:
+                return Response({"message": "آنفالو شد."}, status=status.HTTP_204_NO_CONTENT)
+            return Response({"error": "فالویی یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
+
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
 class CommentableMixin:
@@ -90,36 +125,4 @@ class CommentableMixin:
                 )
                 return Response({"message": "نظر ثبت شد و در انتظار تایید است."}, status=status.HTTP_201_CREATED)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class FollowableMixin:
-    @action(detail=True, methods=['post', 'delete'], url_path='follow')
-    def follow_toggle(self, request, *args, **kwargs):
-        if not request.user.is_authenticated:
-            raise NotAuthenticated(detail="برای فالو کردن باید وارد حساب کاربری شوید.")
-
-        obj = self.get_object()
-        content_type = ContentType.objects.get_for_model(obj)
-
-        if request.method == 'POST':
-            try:
-                follow, created = Follow.objects.get_or_create(
-                    user=request.user,
-                    content_type=content_type,
-                    object_id=obj.pk
-                )
-                if created:
-                    return Response({"message": "فالو شد."}, status=status.HTTP_201_CREATED)
-                return Response({"message": "شما قبلا این مورد را فالو کرده‌اید."}, status=status.HTTP_200_OK)
-            except IntegrityError:
-                return Response({"message": "شما قبلا این مورد را فالو کرده‌اید."}, status=status.HTTP_200_OK)
-
-        elif request.method == 'DELETE':
-            deleted, _ = Follow.objects.filter(
-                user=request.user,
-                content_type=content_type,
-                object_id=obj.pk
-            ).delete()
-            if deleted:
-                return Response({"message": "آنفالو شد."}, status=status.HTTP_204_NO_CONTENT)
-            return Response({"error": "فالویی یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)

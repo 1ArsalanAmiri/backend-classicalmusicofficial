@@ -1,22 +1,21 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-
 from .views import (
     ProfileView,
-    ArtistProfileViewSet,
     UpdateProfileView,
     ChangePasswordView,
+    ArtistProfileViewSet,
+    UserDashboardViewSet
 )
 
-app_name = "profiles"
-
 router = DefaultRouter()
-router.register(r"artists", ArtistProfileViewSet, basename="artist-profile")
+router.register(r'dashboard', UserDashboardViewSet, basename='user-dashboard')
+router.register(r'artists', ArtistProfileViewSet, basename='artist-profile')
 
 urlpatterns = [
-    path("", include(router.urls)),
+    path('me/', ProfileView.as_view(), name='my-profile'),
+    path('me/update/', UpdateProfileView.as_view(), name='update-profile'),
+    path('me/change-password/', ChangePasswordView.as_view(), name='change-password'),
 
-    path("me/", ProfileView.as_view(), name="profile"),
-    path("me/update/", UpdateProfileView.as_view(), name="change_info"),
-    path("me/change-password/", ChangePasswordView.as_view(), name="change_password"),
+    path('', include(router.urls)),
 ]

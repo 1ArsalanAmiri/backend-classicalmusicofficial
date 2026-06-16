@@ -15,10 +15,11 @@ from .serializers import (
 )
 from apps.common.permissions import IsOwnerOrPublicReadOnly
 from django.db import transaction
+from apps.interactions.mixins import LikableMixin , FollowableMixin
 
 
 
-class PlaylistViewSet(viewsets.ModelViewSet):
+class PlaylistViewSet(LikableMixin,FollowableMixin,viewsets.ModelViewSet):
     permission_classes = [IsOwnerOrPublicReadOnly]
     lookup_field = "slug"
 
@@ -129,6 +130,5 @@ class PlaylistViewSet(viewsets.ModelViewSet):
             return Response({"error": "Track not found in this playlist."}, status=status.HTTP_404_NOT_FOUND)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
-
 
 

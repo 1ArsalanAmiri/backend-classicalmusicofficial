@@ -1,18 +1,27 @@
 from django.contrib.auth import update_session_auth_hash
-from rest_framework import status, generics
-from rest_framework.generics import UpdateAPIView, RetrieveAPIView
-from rest_framework.mixins import RetrieveModelMixin
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.generics import UpdateAPIView
+
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.response import Response
 from rest_framework.views import APIView
 from .serializers import ChangePasswordSerializer
 from apps.profiles.models import UserProfile, ArtistProfile
 from apps.profiles.serializers import UserProfileSerializer, UserProfileUpdateSerializer ,ArtistProfileSerializer
 from django.shortcuts import get_object_or_404
-from apps.music.models import Artist
-from rest_framework.viewsets import ReadOnlyModelViewSet, ViewSet, GenericViewSet
-from django.utils.decorators import method_decorator
-from django.views.decorators.cache import cache_page
+from rest_framework.viewsets import ReadOnlyModelViewSet
+
+
+from django.contrib.contenttypes.models import ContentType
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
+
+from apps.music.models import Album,Artist
+from apps.music.serializers import ArtistSerializer , AlbumListSerializer
+from apps.interactions.models import Like, Comment, Follow
+from ..playlists.models import Playlist
+from ..playlists.serializers import PlaylistListSerializer
 
 
 class ProfileView(APIView):
@@ -69,3 +78,43 @@ class ArtistProfileViewSet(ReadOnlyModelViewSet):
     def get_object(self):
         slug = self.kwargs.get(self.lookup_url_kwarg)
         return get_object_or_404(self.queryset,artist__slug=slug)
+
+
+
+
+class UserDashboardViewSet(viewsets.GenericViewSet):
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['get'], url_path='liked-albums')
+    def liked_albums(self, request):
+        user = request.user
+        album_ct = ContentType.objects.get_for_model(Album)
+        liked_album_ids = Like.objects.filter(user=user, content_type=album_ct).values_list('object_id', flat=True)
+        albums = Album.objects.filter(id__in=liked_album_ids)
+
+        serializer = AlbumListSerializer(albums, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='followed-artists')
+    def followed_artists(self, request):
+        user = request.user
+        artist_ct = ContentType.objects.get_for_model(Artist)
+        followed_artist_ids = Follow.objects.filter(user=user, content_type=artist_ct).values_list('object_id',
+                                                                                                   flat=True)
+        artists = Artist.objects.filter(id__in=followed_artist_ids)
+
+        serializer = ArtistSerializer(artists, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='saved-playlists')
+    def saved_playlists(self, request):
+        user = request.user
+        playlist_ct = ContentType.objects.get_for_model(Playlist)
+        saved_playlist_slugs = Playlist.objects.filter(content_type=playlist_ct).values_list('title', flat=True)
+
+        playlists = Playlist.objects.filter(id__in=saved_playlist_slugs)
+
+        serializer = PlaylistListSerializer(playlists, many=True, context={'request': request})
+        if serializer.data is None:
+            return Response("No playlists found", status=status.HTTP_404_NOT_FOUND)
+        return Response(serializer.data)

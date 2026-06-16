@@ -4,18 +4,15 @@ from django.db.models import Sum
 from django.utils.translation import gettext_lazy as _
 from apps.common.models import (TimeStampedModel, ArchiveUploadStatus, PublishStatus,
     unique_slugify, artist_image_path , album_cover_path,
-    track_cover_path ,track_audio_path, AlbumManager ,
-    AlbumQuerySet , upload_path_handler )
-
+    track_cover_path ,track_audio_path, AlbumManager)
 from uuid import uuid4
-from os import path
 from mutagen import File as MutagenFile, MutagenError
 import datetime
 from re import search
 from django.utils.text import slugify
 from django.core.files.base import ContentFile
 from logging import getLogger
-from apps.interactions.mixins import LikableMixin , CommentableMixin , FollowableMixin
+
 
 
 logger = getLogger(__name__)
@@ -80,7 +77,7 @@ class Instrument(TimeStampedModel):
 # Artist & Label Model
 # =========================================================
 
-class Artist(TimeStampedModel , LikableMixin , FollowableMixin):
+class Artist(TimeStampedModel):
     name = models.CharField(_("نام آرتیست"), max_length=255)
     slug = models.SlugField(_("اسلاگ"), max_length=120, unique=True, blank=True, allow_unicode=True)
     country = models.CharField(_("ملیت/کشور"), max_length=100, blank=True)
@@ -132,7 +129,7 @@ class Artist(TimeStampedModel , LikableMixin , FollowableMixin):
         return f"{self.name} ({self.get_artist_type_display()})"
 
 
-class Label(TimeStampedModel , LikableMixin , FollowableMixin):
+class Label(TimeStampedModel):
     name = models.CharField(_("نام لیبل"), max_length=255, unique=True)
     slug = models.SlugField(_("اسلاگ"), max_length=300, unique=True, allow_unicode=True)
     logo = models.ImageField(
@@ -167,7 +164,7 @@ class Label(TimeStampedModel , LikableMixin , FollowableMixin):
 # Album Model
 # =========================================================
 
-class Album(TimeStampedModel ,LikableMixin, CommentableMixin ):
+class Album(TimeStampedModel):
     composer = models.CharField(_("نام آهنگساز"), max_length=255, blank=True)
     title = models.CharField(_("عنوان آلبوم"), max_length=300 , blank = True,default="untitled")
     slug = models.SlugField(_("اسلاگ"), max_length=300, unique=True, blank=True, allow_unicode=True)
@@ -254,7 +251,7 @@ class AlbumZipExport(TimeStampedModel):
 # Track Model
 # =========================================================
 
-class Track(TimeStampedModel , LikableMixin):
+class Track(TimeStampedModel):
 
     album = models.ForeignKey(Album, on_delete=models.CASCADE, related_name="tracks", null=True, blank=True, verbose_name=_("آلبوم"))
     title = models.CharField(_("عنوان ترک"), max_length=300 , blank=True, default="Untitled")
