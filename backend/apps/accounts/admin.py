@@ -27,7 +27,11 @@ class CustomUserAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.prefetch_related('userprofile_set','userprofile_set__subscriptionhistory_set__subscription')
+        return qs.select_related(
+            'profile'
+        ).prefetch_related(
+            'profile__subscriptionhistory_set'
+        )
 
     @admin.display(description="پروفایل")
     def profile_link(self, obj):
@@ -70,3 +74,4 @@ class CustomUserAdmin(admin.ModelAdmin):
     @admin.display(description="آخرین ورود")
     def display_last_login(self, obj):
         return obj.last_login.strftime("%Y-%m-%d %H:%M:%S") if obj.last_login else "Never logged in"
+
