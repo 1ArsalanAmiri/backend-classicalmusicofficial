@@ -1,10 +1,11 @@
 from django.contrib.auth import authenticate
-from rest_framework import status
+from rest_framework import status, serializers
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
-from .serializers import *
+from .serializers import LogoutSerializer, ChangePhoneNumberSerializer, ResetPasswordSerializer
+from .models import CustomUser
 from rest_framework_simplejwt.tokens import  RefreshToken
 
 
@@ -72,7 +73,7 @@ class ChangePhoneNumberView(APIView):
         user = request.user
         new_phone_number = serializer.validated_data["new_phone_number"]
 
-        if User.objects.filter(phone_number=new_phone_number).exists():
+        if CustomUser.objects.filter(phone_number=new_phone_number).exists():
             return Response({"error": "Phone number already used"}, status=400)
 
         user.phone_number = new_phone_number

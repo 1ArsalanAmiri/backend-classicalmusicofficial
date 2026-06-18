@@ -49,10 +49,7 @@ class AlbumViewSet(CommentableMixin,viewsets.ReadOnlyModelViewSet):
             serializer = CommentSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             serializer.save(user=request.user, album=album)
-            return Response(
-                {"message": "کامنت شما ثبت شد و پس از تایید نمایش داده خواهد شد.", "data": serializer.data},
-                status=201
-            )
+            return Response({"message": "کامنت شما ثبت شد و پس از تایید نمایش داده خواهد شد.", "data": serializer.data},status=201)
 
 
 class TrackViewSet(LikableMixin, viewsets.ReadOnlyModelViewSet):

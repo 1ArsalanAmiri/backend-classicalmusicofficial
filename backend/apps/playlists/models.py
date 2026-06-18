@@ -4,52 +4,26 @@ from django.conf import settings
 from django.utils.text import slugify
 from apps.common.models import TimeStampedModel
 from apps.music.models import Track
+from django.contrib.contenttypes.fields import GenericRelation
+
 
 
 def playlist_cover_path(instance, filename):
     return f"playlists/{instance.owner.username}/{instance.slug}/{filename}"
 
 
-
 class Playlist(TimeStampedModel):
 
-    owner = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='playlists',
-        verbose_name="Owner"
-    )
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.CASCADE,related_name='playlists',verbose_name="Owner")
     title = models.CharField(max_length=255, verbose_name="Title")
-
-    slug = models.SlugField(
-        max_length=255,
-        unique=True,
-        allow_unicode=True,
-        blank=True,
-        verbose_name="Slug"
-    )
-
+    slug = models.SlugField(max_length=255,unique=True,allow_unicode=True,blank=True,verbose_name="Slug")
     description = models.TextField(blank=True, null=True, verbose_name="Description")
-    cover_image = models.ImageField(
-        upload_to=playlist_cover_path,
-        blank=True,
-        null=True,
-        verbose_name="Cover Image"
-    )
+    cover_image = models.ImageField(upload_to=playlist_cover_path,blank=True,null=True,verbose_name="Cover Image")
+    is_public = models.BooleanField(default=True,help_text="If false, only the owner can see this playlist.",verbose_name="Is Public")
+    tracks = models.ManyToManyField(Track,through='PlaylistTrack',related_name='playlists',blank=True,verbose_name="Tracks")
 
-    is_public = models.BooleanField(
-        default=True,
-        help_text="If false, only the owner can see this playlist.",
-        verbose_name="Is Public"
-    )
-
-    tracks = models.ManyToManyField(
-        Track,
-        through='PlaylistTrack',
-        related_name='playlists',
-        blank=True,
-        verbose_name="Tracks"
-    )
+    likes = GenericRelation('interactions.Like', related_query_name='playlist')
+    follows = GenericRelation('interactions.Follow', related_query_name='playlist')
 
     class Meta:
         verbose_name = "پلی لیست"
@@ -92,7 +66,6 @@ class Playlist(TimeStampedModel):
         return result['total'] or 0
 
 
-
 class PlaylistTrack(models.Model):
 
     playlist = models.ForeignKey(
@@ -131,6 +104,4 @@ class PlaylistTrack(models.Model):
 
     def __str__(self):
         return f"{self.playlist.title} - {self.track.title} (Order: {self.order})"
-
-
 

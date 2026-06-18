@@ -25,9 +25,10 @@ class PlaylistViewSet(LikableMixin,FollowableMixin,viewsets.ModelViewSet):
 
 
     def get_permissions(self):
-        if self.action == "create":
+        if self.action in ['like_toggle','follow_toggle','create']:
             return [IsAuthenticated()]
         return [IsOwnerOrPublicReadOnly()]
+
 
     def get_queryset(self):
         user = self.request.user
@@ -55,12 +56,14 @@ class PlaylistViewSet(LikableMixin,FollowableMixin,viewsets.ModelViewSet):
 
         return queryset
 
+
     def get_serializer_class(self):
         if self.action in ["create", "update", "partial_update"]:
             return PlaylistCreateUpdateSerializer
         elif self.action == "retrieve":
             return PlaylistDetailSerializer
         return PlaylistListSerializer
+
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -88,8 +91,10 @@ class PlaylistViewSet(LikableMixin,FollowableMixin,viewsets.ModelViewSet):
             status=status.HTTP_200_OK
         )
 
+
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
+
 
     @action(detail=True, methods=['post'], url_path='add-track')
     def add_track(self, request, slug=None):
@@ -111,6 +116,7 @@ class PlaylistViewSet(LikableMixin,FollowableMixin,viewsets.ModelViewSet):
             if not created:
                 return Response({"detail": "این ترک از قبل در پلی‌لیست وجود دارد."},status=status.HTTP_400_BAD_REQUEST,)
         return Response({"detail": "ترک با موفقیت اضافه شد."},status=status.HTTP_201_CREATED,)
+
 
     @action(detail=True, methods=['post'], url_path='remove-track')
     def remove_track(self, request, slug=None):

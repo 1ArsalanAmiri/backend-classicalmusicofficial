@@ -25,6 +25,10 @@ class CustomUserAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "last_login", "date_joined")
     save_on_top = True
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.prefetch_related('userprofile_set','userprofile_set__subscriptionhistory_set__subscription')
+
     @admin.display(description="پروفایل")
     def profile_link(self, obj):
         profile = UserProfile.objects.filter(user=obj).first()
@@ -35,11 +39,12 @@ class CustomUserAdmin(admin.ModelAdmin):
         add_url = reverse("admin:profiles_userprofile_add")
         return format_html('<a href="{}?user={}">ساخت پروفایل</a>', add_url, obj.pk)
 
+
     @admin.display(description="تعداد اشتراک‌ها")
     def subscriptions_count(self, obj):
         profile = UserProfile.objects.filter(user=obj).first()
         if not profile:
-            return format_html('<span style="color: gray;">بدون پروفایل</span>')
+            return format_html('<span style="color: gray;">{}</span>', 'بدون پروفایل')
 
         count = profile.subscriptionhistory_set.count()
         if count > 0:
@@ -47,7 +52,8 @@ class CustomUserAdmin(admin.ModelAdmin):
                 '<span style="color: green; font-weight: bold;">{}</span>',
                 count
             )
-        return format_html('<span style="color: red;">بدون اشتراک</span>')
+        return format_html('<span style="color: red;">{}</span>', 'بدون اشتراک')
+
 
     @admin.display(description="آخرین اشتراک")
     def latest_subscription(self, obj):
@@ -59,6 +65,7 @@ class CustomUserAdmin(admin.ModelAdmin):
         if latest:
             return latest.subscription.name
         return "-"
+
 
     @admin.display(description="آخرین ورود")
     def display_last_login(self, obj):

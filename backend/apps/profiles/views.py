@@ -109,12 +109,8 @@ class UserDashboardViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=['get'], url_path='saved-playlists')
     def saved_playlists(self, request):
         user = request.user
-        playlist_ct = ContentType.objects.get_for_model(Playlist)
-        saved_playlist_slugs = Playlist.objects.filter(content_type=playlist_ct).values_list('title', flat=True)
+        liked_playlists = Playlist.objects.filter(likes__user=user)
+        followed_playlists = Playlist.objects.filter(follows__user=user)
+        saved_playlist_titles = liked_playlists.values_list('title', flat=True)
 
-        playlists = Playlist.objects.filter(id__in=saved_playlist_slugs)
-
-        serializer = PlaylistListSerializer(playlists, many=True, context={'request': request})
-        if serializer.data is None:
-            return Response("No playlists found", status=status.HTTP_404_NOT_FOUND)
-        return Response(serializer.data)
+        return Response({"saved_playlists": list(saved_playlist_titles)})

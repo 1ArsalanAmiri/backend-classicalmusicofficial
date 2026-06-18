@@ -7,6 +7,8 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.contenttypes.models import ContentType
 from .models import Like, Follow, Comment
+from .serializers import CommentSerializer
+
 
 
 def check_comment_rate_limit(user_id):
@@ -23,6 +25,7 @@ def check_comment_rate_limit(user_id):
 
     valid_timestamps.append(now)
     cache.set(cache_key, valid_timestamps, timeout=600)
+
 
 
 class LikableMixin:

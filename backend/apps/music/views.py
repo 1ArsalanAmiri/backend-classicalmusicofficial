@@ -218,6 +218,21 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         response['Content-Type'] = content_type
         return response
 
+    @action(detail=False, methods=['get'], url_path='chosen')
+    def chosen(self, request):
+
+        queryset = self.filter_queryset(self.get_queryset().filter(is_chosen=True))
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+
+
 
 
 class GenreViewSet(viewsets.ReadOnlyModelViewSet):
@@ -316,3 +331,6 @@ class LabelViewSet(FollowableMixin,LikableMixin,viewsets.ReadOnlyModelViewSet):
 
         serializer = AlbumListSerializer(albums, many=True, context={'request': request})
         return Response(serializer.data)
+
+
+
