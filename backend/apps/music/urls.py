@@ -16,7 +16,7 @@ urlpatterns = [
     path('api/v1/', include(router.urls)),
     path('eras/', EraListView.as_view(), name='era-list'),
     path('api/v1/albums/<int:album_id>/batch-upload/', AlbumBatchUploadAPIView.as_view(), name='api-album-batch-upload'),
-    path('music/search/', GlobalSearchView.as_view(), name='global-search'),
+    path('search/', GlobalSearchView.as_view(), name='global-search'),
 
 ]
 
