@@ -10,7 +10,11 @@ ENV PYTHONUNBUFFERED=1
 COPY requirements.txt .
 
 #RUN pip install --no-cache-dir -r requirements.txt
+
 #RUN pip install -i https://package-mirror.liara.ir/repository/pypi/simple --no-cache-dir -r requirements.txt
+
+#RUN pip install -i https://package-mirror.liara.ir/repository/pypi/simple --no-cache-dir -r requirements.txt
+
 #RUN pip install -i https://mirror-pypi.runflare.com/simple --no-cache-dir -r requirements.txt
 #RUN pip install -i https://mirror.abrha.net/repository/pypi/simple --no-cache-dir -r requirements.txt
 
