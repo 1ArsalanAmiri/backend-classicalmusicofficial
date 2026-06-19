@@ -9,13 +9,14 @@ from .views import (
 )
 
 router = DefaultRouter()
+
 router.register(r'dashboard', UserDashboardViewSet, basename='user-dashboard')
+
 router.register(r'artists', ArtistViewSet, basename='artist')
 
 urlpatterns = [
     path('me/', ProfileView.as_view(), name='my-profile'),
     path('me/update/', UpdateProfileView.as_view(), name='update-profile'),
     path('me/change-password/', ChangePasswordView.as_view(), name='change-password'),
-
     path('', include(router.urls)),
 ]

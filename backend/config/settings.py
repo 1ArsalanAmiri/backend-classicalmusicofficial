@@ -2,7 +2,6 @@ from pathlib import Path
 import environ
 from datetime import timedelta
 from os import path
-from django.urls import reverse_lazy
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 from sentry_sdk.integrations.celery import CeleryIntegration
