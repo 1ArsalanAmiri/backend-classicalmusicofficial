@@ -20,10 +20,9 @@ def send_sms(phone_number, code, username=None):
                     mobile=phone_number,
                 )
             ],
-            template_name='newOTP',
+            template_name='backend',
             inputs=[
                 ghasedak_sms.SendOtpInput.OtpInput(param='Code', value=code),
-                ghasedak_sms.SendOtpInput.OtpInput(param='Name', value=username),
             ],
             udh=False
         )

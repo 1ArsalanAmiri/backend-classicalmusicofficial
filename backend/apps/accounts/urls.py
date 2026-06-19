@@ -19,6 +19,10 @@ urlpatterns = [
 
     path("logout/", LogoutView.as_view() , name = "logout"),
 
+    path('delete-account/verify/', VerifyDeleteAccountView.as_view(), name='verify_delete_account'),
+
+    path("delete-account/", DeleteAccountView.as_view(), name = "delete_account"),
+
     path("login-password/", LoginView.as_view(), name = "login"),
 
     path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),

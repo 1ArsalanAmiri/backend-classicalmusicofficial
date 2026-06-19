@@ -1,6 +1,6 @@
 from django.urls import reverse
 from rest_framework import serializers
-from .models import Artist, Album, Track,Genre, Instrument , Label
+from .models import Artist, Album, Track,Genre, Instrument , Label , PlayHistory
 
 
 
@@ -121,3 +121,12 @@ class InstrumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Instrument
         fields = ['id', 'name', 'slug', 'track_count']
+
+
+
+class PlayHistorySerializer(serializers.ModelSerializer):
+    track = TrackSerializer(read_only=True)
+
+    class Meta:
+        model = PlayHistory
+        fields = ['id', 'track', 'last_played_at', 'play_count']

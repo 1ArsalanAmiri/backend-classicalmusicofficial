@@ -1,4 +1,3 @@
-from datetime import timedelta
 from django.core.cache import cache
 from django.utils import timezone
 from phonenumber_field.serializerfields import PhoneNumberField
@@ -6,16 +5,42 @@ from rest_framework import serializers
 from .models import CustomUser
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
+import jdatetime
+from rest_framework_simplejwt.tokens import RefreshToken, TokenError
+from django.utils.translation import gettext_lazy as _
 
 
 User = get_user_model()
 
 
-class UserSerializer(serializers.ModelSerializer):
+class UserProfileSerializer(serializers.ModelSerializer):
+
+    date_joined_jalali = serializers.SerializerMethodField()
+
     class Meta:
         model = CustomUser
-        fields = ["first_name" , "last_name" , "phone_number" , "date_joined" , "email" ]
-        read_only_fields = [ "phone_number" ,"date_joined" ]
+        fields = ['id', 'phone_number', 'username', 'date_joined', 'date_joined_jalali']
+
+    def get_date_joined_jalali(self, obj):
+        if not obj.date_joined:
+            return None
+
+        local_time = timezone.localtime(obj.date_joined)
+        jalali_date = jdatetime.datetime.fromgregorian(datetime=local_time)
+        return jalali_date.strftime("%Y/%m/%d")
+
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+
+        if instance.date_joined:
+            local_time = timezone.localtime(instance.date_joined)
+
+            jalali_date = jdatetime.datetime.fromgregorian(datetime=local_time)
+
+            representation['date_joined'] = jalali_date.strftime("%Y/%m/%d %H:%M:%S")
+
+        return representation
 
 
 
@@ -26,8 +51,8 @@ class LoginSerializer(serializers.Serializer):
 
 
 class LogoutSerializer(serializers.Serializer):
-    phone_number = PhoneNumberField(region="IR")
-    refresh = serializers.CharField()
+    phone_number = PhoneNumberField(region="IR", required=False)
+    refresh = serializers.CharField(required=True)
 
 
 
@@ -91,3 +116,33 @@ class ResetPasswordSerializer(serializers.Serializer):
 
         return user
 
+
+
+class VerifyDeleteAccountSerializer(serializers.Serializer):
+    otp = serializers.CharField(
+        max_length=6,
+        required=True,
+        help_text=_("کد تایید ارسال شده به شماره موبایل")
+    )
+    refresh = serializers.CharField(
+        required=True,
+        help_text=_("توکن Refresh برای باطل کردن نشست فعلی")
+    )
+
+    def validate_refresh(self, value):
+        try:
+            RefreshToken(value)
+        except TokenError:
+            raise serializers.ValidationError(_("توکن نامعتبر است یا قبلاً منقضی شده است."))
+        return value
+
+
+class DeleteAccountSerializer(serializers.Serializer):
+    password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+    refresh = serializers.CharField(write_only=True, required=True, help_text="توکن رفرش برای خروج کامل کاربر")
+
+    def validate_password(self, value):
+        user = self.context['request'].user
+        if not user.check_password(value):
+            raise serializers.ValidationError("رمز عبور وارد شده اشتباه است.")
+        return value

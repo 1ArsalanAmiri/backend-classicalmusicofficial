@@ -4,9 +4,18 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
-from .serializers import LogoutSerializer, ChangePhoneNumberSerializer, ResetPasswordSerializer
+from .serializers import LogoutSerializer, ChangePhoneNumberSerializer, ResetPasswordSerializer , DeleteAccountSerializer
 from .models import CustomUser
-from rest_framework_simplejwt.tokens import  RefreshToken
+import uuid
+import time
+from django.core.cache import cache
+from rest_framework import status
+from rest_framework_simplejwt.tokens import RefreshToken
+
+
+
+OTP_EXPIRY_SECONDS = 300
+MAX_OTP_ATTEMPTS = 3
 
 
 
@@ -16,7 +25,7 @@ class LoginView(APIView):
         phone_number = request.data.get('phone_number')
         password = request.data.get('password')
 
-        user = authenticate(username=phone_number,password=password)
+        user = authenticate(request, username=phone_number, password=password)
         if not user :
             raise serializers.ValidationError("Username or password is incorrect.")
 
@@ -37,7 +46,7 @@ class LogoutView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         phone_number = serializer.validated_data["phone_number"]
-        refresh_token_string = serializer.validated_data.get("refresh_token") or request.data.get("refresh")
+        refresh_token_string = serializer.validated_data.get("refresh")
 
         if not refresh_token_string:
             return Response({"error": "Refresh Token is Required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -92,3 +101,117 @@ class ResetPasswordView(APIView):
 
         serializer.save()
         return Response({"message": "Password has been reset successfully."},status=status.HTTP_200_OK)
+
+
+
+class DeleteAccountView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        serializer = DeleteAccountSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        refresh_token_string = serializer.validated_data['refresh']
+
+        try:
+            token = RefreshToken(refresh_token_string)
+            token.blacklist()
+        except TokenError:
+            pass
+
+        user.is_active = False
+
+        fake_identifier = str(uuid.uuid4())[:8]
+        user.phone_number = f"+98000{fake_identifier}"
+        user.first_name = "Deleted"
+        user.last_name = "User"
+        user.email = ""
+        user.username = None
+
+        user.save()
+
+        return Response(
+            {"message": "حساب کاربری شما با موفقیت غیرفعال و حذف شد."},
+            status=status.HTTP_204_NO_CONTENT
+        )
+
+
+
+class VerifyDeleteAccountView(APIView):
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        otp_input = request.data.get("otp")
+        refresh_token = request.data.get("refresh")
+
+        if not otp_input or not refresh_token:
+            return Response(
+                {"error": "فیلدهای otp و refresh الزامی هستند."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        otp_input = str(otp_input).strip()
+
+        phone_number = str(request.user.phone_number)
+
+        cache_key_otp = f"otp:{phone_number}"
+        cache_key_attempts = f"otp_attempts:{phone_number}"
+
+        try:
+            cached_otp = cache.get(cache_key_otp)
+            attempts = cache.get(cache_key_attempts, 0)
+
+            if not cached_otp:
+                return Response(
+                    {"error": "OTP not found or expired."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            if attempts >= MAX_OTP_ATTEMPTS:
+                cache.delete(cache_key_otp)
+                cache.delete(cache_key_attempts)
+                return Response(
+                    {"error": "Max attempts reached. Request a new OTP."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            if str(cached_otp) != otp_input:
+                try:
+                    cache.incr(cache_key_attempts)
+                except ValueError:
+                    cache.set(cache_key_attempts, attempts + 1, timeout=OTP_EXPIRY_SECONDS)
+
+                return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+            try:
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+            except TokenError:
+                return Response(
+                    {"error": "توکن نامعتبر است یا قبلاً منقضی شده است."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            user = request.user
+            user.is_active = False
+            user.phone_number = f"deleted_{user.id}_{int(time.time())}"
+            user.first_name = ""
+            user.last_name = ""
+            user.save()
+
+            cache.delete(cache_key_otp)
+            cache.delete(cache_key_attempts)
+
+            return Response(
+                {"notice": "حساب کاربری شما با موفقیت حذف شد."},
+                status=status.HTTP_204_NO_CONTENT
+            )
+
+        except Exception as e:
+            return Response(
+                {"error": "An unexpected error occurred.", "details": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

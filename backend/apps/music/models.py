@@ -12,7 +12,8 @@ from re import search
 from django.utils.text import slugify
 from django.core.files.base import ContentFile
 from logging import getLogger
-
+from django.conf import settings
+from django.utils import timezone
 
 
 logger = getLogger(__name__)
@@ -271,6 +272,7 @@ class Track(TimeStampedModel):
     label = models.ForeignKey(Label,on_delete=models.SET_NULL,null=True,blank=True,related_name="tracks", verbose_name=_("لیبل ناشر"),help_text=_("برای سینگل‌ترک‌ها یا در صورتی که لیبل ترک با آلبوم متفاوت است."))
 
     likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
+    play_count = models.PositiveBigIntegerField(_("تعداد کل پخش"), default=0)
 
 
     class Meta:
@@ -403,3 +405,33 @@ class Track(TimeStampedModel):
         return f"{self.title} (Single)" if self.is_single else f"{self.title} - {self.album.title}"
 
 # =========================================================
+# PlayHistory Model
+# =========================================================
+
+class PlayHistory(TimeStampedModel):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="play_history",
+        verbose_name=_("کاربر")
+    )
+    track = models.ForeignKey(
+        Track,
+        on_delete=models.CASCADE,
+        related_name="play_history",
+        verbose_name=_("ترک")
+    )
+    last_played_at = models.DateTimeField(_("آخرین زمان پخش"), default=timezone.now)
+    play_count = models.PositiveIntegerField(_("تعداد پخش کاربر"), default=1)
+
+    class Meta:
+        verbose_name = _("تاریخچه پخش")
+        verbose_name_plural = _("تاریخچه پخش‌ها")
+        unique_together = ('user', 'track')
+        ordering = ['-last_played_at']
+        indexes = [
+            models.Index(fields=['user', '-last_played_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.user} listened to {self.track.title}"

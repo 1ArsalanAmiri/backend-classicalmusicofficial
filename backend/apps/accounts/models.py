@@ -1,9 +1,8 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
-from django_jalali.db import models as jmodels
 from phonenumber_field.modelfields import PhoneNumberField
 from django.utils import timezone
-
+from django.utils.translation import gettext_lazy as _
 
 
 class CustomUserManager(BaseUserManager):
@@ -49,7 +48,7 @@ class CustomUser(AbstractUser):
 
     is_superuser = models.BooleanField(default=False, verbose_name="مدیر کل")
 
-    date_joined = jmodels.jDateField(auto_now_add=True, verbose_name="تاریخ عضویت")
+    date_joined = models.DateTimeField(default=timezone.now, verbose_name=_("تاریخ عضویت"))
 
     last_login = models.DateTimeField(null=True, blank=True, verbose_name="آخرین ورود")
 
@@ -58,6 +57,11 @@ class CustomUser(AbstractUser):
     USERNAME_FIELD = 'phone_number'
     REQUIRED_FIELDS = []
 
+
+    def save(self, *args, **kwargs):
+        if not self.username:
+            self.username = None
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return str(self.phone_number)

@@ -24,6 +24,8 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 from rest_framework.viewsets import ReadOnlyModelViewSet
 from apps.interactions.mixins import LikableMixin, FollowableMixin ,CommentableMixin
+from django.db.models import F
+
 
 
 
@@ -196,7 +198,6 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         response['Accept-Ranges'] = 'bytes'
         return response
 
-
     @action(detail=True, methods=['get'], url_path='download',permission_classes=[(HasDownloadSubscription | HasAllSubscription)])
     def download(self , request, slug=None):
         track = self.get_object()
@@ -231,7 +232,41 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated], url_path='record-play')
+    def record_play(self, request, slug=None):
+        track = self.get_object()
 
+        Track.objects.filter(id=track.id).update(play_count=F('play_count') + 1)
+
+        history, created = PlayHistory.objects.get_or_create(
+            user=request.user,
+            track=track,
+            defaults={'play_count': 1, 'last_played_at': timezone.now()}
+        )
+
+        if not created:
+            history.play_count = F('play_count') + 1
+            history.last_played_at = timezone.now()
+            history.save(update_fields=['play_count', 'last_played_at'])
+
+        return Response({"message": "پخش با موفقیت ثبت شد."}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='history')
+    def history(self, request):
+        queryset = PlayHistory.objects.filter(user=request.user).select_related(
+            'track__album',
+            'track__composer',
+            'track__singer',
+            'track__instrument'
+        ).order_by('-last_played_at')
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = PlayHistorySerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(serializer.data)
+
+        serializer = PlayHistorySerializer(queryset, many=True, context={'request': request})
+        return Response(serializer.data)
 
 
 
@@ -331,6 +366,5 @@ class LabelViewSet(FollowableMixin,LikableMixin,viewsets.ReadOnlyModelViewSet):
 
         serializer = AlbumListSerializer(albums, many=True, context={'request': request})
         return Response(serializer.data)
-
 
 
