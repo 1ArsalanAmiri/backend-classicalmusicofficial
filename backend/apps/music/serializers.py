@@ -51,7 +51,7 @@ class TrackSerializer(serializers.ModelSerializer):
     class Meta:
         model = Track
         fields = [
-            'id','title', 'slug', 'cover_image', 'release_date',
+            'id','title','album','singer','composer', 'slug', 'cover_image', 'release_date',
             'duration_seconds', 'instrument_name',
             'composer_name','singer_name','status','likes_count'
         ]

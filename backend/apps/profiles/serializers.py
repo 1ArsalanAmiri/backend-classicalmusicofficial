@@ -3,6 +3,8 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
+from rest_framework.fields import SerializerMethodField
+
 from apps.music.models import Artist, Album , Track
 from apps.profiles.models import UserProfile, ArtistProfile
 from django.db.models import Q
@@ -10,6 +12,7 @@ import jdatetime
 from apps.music.serializers import AlbumDetailSerializer , TrackSerializer
 from apps.playlists.models import Playlist
 from apps.playlists.serializers import PlaylistListSerializer
+from apps.music.serializers import AlbumListSerializer
 
 
 User = get_user_model()
@@ -181,56 +184,24 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 
 
-class ArtistSerializer(serializers.ModelSerializer):
+class ArtistListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Artist
+        fields = ['slug', 'name', 'image']
+
+
+
+class ArtistDetailSerializer(serializers.ModelSerializer):
+    albums = AlbumListSerializer(many=True, read_only=True)
+    sung_tracks = TrackSerializer(many=True, read_only=True)
+    composed_tracks = TrackSerializer(many=True, read_only=True)
+
+    related_artists = ArtistListSerializer(many=True, read_only=True)
 
     class Meta:
         model = Artist
         fields = [
-            "name",
-            "slug",
-            "country",
-            "artist_type",
-            "era",
-            "image",
-            "biography",
+            'slug', 'name', 'biography', 'image',
+            'albums', 'sung_tracks', 'composed_tracks', 'related_artists'
         ]
-
-
-
-class ArtistProfileSerializer(serializers.ModelSerializer):
-
-    artist = ArtistSerializer(read_only=True)
-    albums = serializers.SerializerMethodField()
-    singles = serializers.SerializerMethodField()
-    playlists = serializers.SerializerMethodField()
-    related_artists = serializers.SerializerMethodField()
-
-    class Meta:
-        model = ArtistProfile
-        fields = [
-            "artist",
-            "albums",
-            "singles",
-            "playlists",
-            "related_artists",
-        ]
-
-
-    def get_albums(self, obj):
-        albums = Album.objects.filter(artist=obj.artist).order_by("-release_date")[:10]
-        return AlbumDetailSerializer(albums, many=True).data
-
-
-    def get_singles(self, obj):
-        singles = Track.objects.filter(
-            artist=obj.artist,
-            is_single=True
-        ).order_by("-release_date")[:10]
-
-        return TrackSerializer(singles, many=True).data
-
-
-    def get_playlists(self, obj):
-        playlists = Playlist.objects.filter(artists=obj.artist)[:10]
-        return PlaylistListSerializer(playlists, many=True).data
 

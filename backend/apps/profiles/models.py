@@ -1,12 +1,7 @@
-from django.utils import timezone
-from django.db import models
-from django.apps import apps
-from jdatetime import datetime
 from django_jalali.db import models as jmodels
-from django.conf import settings
 import jdatetime
+
 from apps.music.models import *
-from datetime import timedelta
 
 
 class UserProfile(models.Model):

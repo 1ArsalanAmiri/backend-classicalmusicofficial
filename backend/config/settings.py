@@ -74,6 +74,8 @@ INSTALLED_APPS = [
     "admin_extra_buttons",
     'django_filters',
     'channels',
+    'django.contrib.postgres',
+    'debug_toolbar',
 
 
     #my-apps
@@ -95,6 +97,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'debug_toolbar.middleware.DebugToolbarMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -260,3 +263,21 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_SSL_REDIRECT = True
+
+
+#DJANGO DEBUG TOOLBAR
+if DEBUG:
+    import socket
+    hostname, _, ips = socket.gethostbyname_ex(socket.gethostname())
+    INTERNAL_IPS = [ip[: ip.rfind(".")] + ".1" for ip in ips] + ["127.0.0.1", "10.0.2.2"]
+
+
+def show_toolbar(request):
+    return DEBUG
+
+DEBUG_TOOLBAR_CONFIG = {
+    "SHOW_TOOLBAR_CALLBACK": "config.settings.show_toolbar",
+    "INSERT_BEFORE": "</body>",}
+
+import mimetypes
+mimetypes.add_type("application/javascript", ".js", True)

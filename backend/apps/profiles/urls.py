@@ -4,13 +4,13 @@ from .views import (
     ProfileView,
     UpdateProfileView,
     ChangePasswordView,
-    ArtistProfileViewSet,
-    UserDashboardViewSet
+    UserDashboardViewSet,
+    ArtistViewSet
 )
 
 router = DefaultRouter()
 router.register(r'dashboard', UserDashboardViewSet, basename='user-dashboard')
-router.register(r'artists', ArtistProfileViewSet, basename='artist-profile')
+router.register(r'artists', ArtistViewSet, basename='artist')
 
 urlpatterns = [
     path('me/', ProfileView.as_view(), name='my-profile'),

@@ -74,61 +74,10 @@ class Instrument(TimeStampedModel):
     def __str__(self):
         return self.name
 
+
 # =========================================================
 # Artist & Label Model
 # =========================================================
-
-class Artist(TimeStampedModel):
-    name = models.CharField(_("نام آرتیست"), max_length=255)
-    slug = models.SlugField(_("اسلاگ"), max_length=120, unique=True, blank=True, allow_unicode=True)
-    country = models.CharField(_("ملیت/کشور"), max_length=100, blank=True)
-
-    artist_type = models.CharField(
-        _("نوع آرتیست"),
-        max_length=20,
-        choices=ArtistType.choices,
-        default=ArtistType.PERSON,
-        db_index=True
-    )
-
-    related_artists = models.ManyToManyField("self",blank=True,symmetrical=False)
-
-    era = models.CharField(
-        _("دوره زمانی"),
-        max_length=20,
-        choices=EraChoices.choices,
-        null=True,
-        blank=True,
-        db_index=True
-    )
-
-    image = models.ImageField(
-        _("عکس"),
-        upload_to=artist_image_path,
-        null=True,
-        blank=True,
-        validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])]
-    )
-
-    biography = models.TextField(_("بیوگرافی"), blank=True)
-
-    likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
-    followers_count = models.PositiveIntegerField(_("تعداد فالوور"), default=0)
-
-
-    class Meta:
-        verbose_name = _("آرتیست")
-        verbose_name_plural = _("آرتیست‌ها")
-        ordering = ["name"]
-
-    def save(self, *args, **kwargs):
-        if not self.slug:
-            self.slug = unique_slugify(self, "slug", self.name)
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return f"{self.name} ({self.get_artist_type_display()})"
-
 
 class Label(TimeStampedModel):
     name = models.CharField(_("نام لیبل"), max_length=255, unique=True)
@@ -161,9 +110,6 @@ class Label(TimeStampedModel):
     def __str__(self):
         return self.name
 
-# =========================================================
-# Album Model
-# =========================================================
 
 class Album(TimeStampedModel):
     composer = models.CharField(_("نام آهنگساز"), max_length=255, blank=True)
@@ -177,7 +123,8 @@ class Album(TimeStampedModel):
     soloist = models.CharField(_("نام نوازنده"), max_length=255, blank=True)
     ensemble = models.CharField(_("نام گروه موسیقی"), max_length=255, blank=True)
     status = models.CharField(_("وضعیت انتشار"),max_length=20,choices=PublishStatus.choices,default=PublishStatus.PUBLISHED,db_index=True)
-    label = models.ForeignKey(Label,on_delete=models.SET_NULL,null=True, blank=True,related_name="albums", verbose_name=_("لیبل ناشر"))
+
+    label = models.ForeignKey(Label, on_delete=models.SET_NULL, null=True, blank=True, related_name="albums_by_label",verbose_name=_("لیبل ناشر"))
 
     likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
     comments_count = models.PositiveIntegerField(_("تعداد کامنت"), default=0)
@@ -219,6 +166,45 @@ class Album(TimeStampedModel):
     def __str__(self):
         return self.title if self.title else _("بدون عنوان")
 
+
+class Artist(TimeStampedModel):
+    name = models.CharField(_("نام آرتیست"), max_length=255)
+    slug = models.SlugField(_("اسلاگ"), max_length=120, unique=True, blank=True, allow_unicode=True)
+    country = models.CharField(_("ملیت/کشور"), max_length=100, blank=True)
+    artist_type = models.CharField(_("نوع آرتیست"),max_length=20,choices=ArtistType.choices,default=ArtistType.PERSON,db_index=True)
+    related_artists = models.ManyToManyField("self",blank=True,symmetrical=False)
+    era = models.CharField(_("دوره زمانی"),max_length=20,choices=EraChoices.choices,null=True,blank=True,db_index=True)
+    image = models.ImageField(_("عکس"),upload_to=artist_image_path,null=True,blank=True,validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])])
+    biography = models.TextField(_("بیوگرافی"), blank=True)
+    albums = models.ManyToManyField(Album,blank=True,related_name="artists")
+
+    likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
+    followers_count = models.PositiveIntegerField(_("تعداد فالوور"), default=0)
+
+
+    class Meta:
+        verbose_name = _("آرتیست")
+        verbose_name_plural = _("آرتیست‌ها")
+        ordering = ["name"]
+
+    @property
+    def all_related_tracks(self):
+        track_pks = set()
+        track_pks.update(self.composed_tracks.values_list('pk', flat=True))
+        track_pks.update(self.sung_tracks.values_list('pk', flat=True))
+        return Track.objects.filter(pk__in=list(track_pks))
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = unique_slugify(self, "slug", self.name)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.name} ({self.get_artist_type_display()})"
+
+# =========================================================
+# Album Model
+# =========================================================
 
 class AlbumArchiveUpload(TimeStampedModel):
     album = models.ForeignKey(Album, on_delete=models.CASCADE, related_name="archive_uploads")

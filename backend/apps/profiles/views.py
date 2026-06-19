@@ -1,37 +1,31 @@
 from django.contrib.auth import update_session_auth_hash
 from rest_framework import status
-from rest_framework.decorators import action
 from rest_framework.generics import UpdateAPIView
-
-from rest_framework.permissions import IsAuthenticated, AllowAny
+from django.db.models import Prefetch
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
-from .serializers import ChangePasswordSerializer
-from apps.profiles.models import UserProfile, ArtistProfile
-from apps.profiles.serializers import UserProfileSerializer, UserProfileUpdateSerializer ,ArtistProfileSerializer
+from .serializers import ChangePasswordSerializer, ArtistListSerializer,ArtistDetailSerializer
+from apps.profiles.models import UserProfile
+from apps.profiles.serializers import UserProfileSerializer, UserProfileUpdateSerializer
 from django.shortcuts import get_object_or_404
-from rest_framework.viewsets import ReadOnlyModelViewSet
-
 
 from django.contrib.contenttypes.models import ContentType
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from apps.music.models import Album,Artist
-from apps.music.serializers import ArtistSerializer , AlbumListSerializer
-from apps.interactions.models import Like, Comment, Follow
+from apps.music.models import Album,Artist,Track
+from apps.music.serializers import ArtistSerializer, AlbumListSerializer, TrackSerializer
+from apps.interactions.models import Like, Follow
 from ..playlists.models import Playlist
-from ..playlists.serializers import PlaylistListSerializer
+
 
 
 class ProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        profile = get_object_or_404(
-            UserProfile.objects.select_related("user"),
-            user=request.user
-        )
+        profile = get_object_or_404(UserProfile.objects.select_related("user"),user=request.user)
 
         serializer = UserProfileSerializer(profile)
         return Response(serializer.data)
@@ -67,18 +61,34 @@ class ChangePasswordView(APIView):
 
 
 
-class ArtistProfileViewSet(ReadOnlyModelViewSet):
-    serializer_class = ArtistProfileSerializer
-    permission_classes = [AllowAny]
-    lookup_field = "slug"
-    lookup_url_kwarg = "slug"
+class ArtistViewSet(viewsets.ReadOnlyModelViewSet):
 
-    queryset = ArtistProfile.objects.select_related("artist").prefetch_related("artist__albums","artist__tracks","artist__related_artists")
+    lookup_field = 'slug'
 
-    def get_object(self):
-        slug = self.kwargs.get(self.lookup_url_kwarg)
-        return get_object_or_404(self.queryset,artist__slug=slug)
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return ArtistListSerializer
+        return ArtistDetailSerializer
 
+    def get_queryset(self):
+
+        if self.action == 'list':
+            return Artist.objects.only('slug', 'name', 'image')
+
+        if self.action == 'retrieve':
+
+            tracks_queryset = Track.objects.select_related('composer', 'singer', 'album')
+
+            albums_queryset = Album.objects.select_related('label')
+
+            return Artist.objects.prefetch_related(
+                Prefetch('albums', queryset=albums_queryset),
+                Prefetch('sung_tracks', queryset=tracks_queryset),
+                Prefetch('composed_tracks', queryset=tracks_queryset),
+                Prefetch('related_artists', queryset=Artist.objects.only('slug', 'name', 'image'))
+            )
+
+        return Artist.objects.all()
 
 
 
