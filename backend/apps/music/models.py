@@ -113,6 +113,7 @@ class Label(TimeStampedModel):
 
 class Album(TimeStampedModel):
     composer = models.CharField(_("نام آهنگساز"), max_length=255, blank=True)
+    artist = models.ForeignKey('Artist',on_delete=models.SET_NULL,null=True,blank=True,verbose_name="آرتیست",related_name="albums")
     title = models.CharField(_("عنوان آلبوم"), max_length=300 , blank = True,default="untitled")
     slug = models.SlugField(_("اسلاگ"), max_length=300, unique=True, blank=True, allow_unicode=True)
     source_path = models.CharField(max_length=500, unique=True , blank=True ,null=True)
@@ -158,13 +159,10 @@ class Album(TimeStampedModel):
         return [name.strip() for name in names if name and name.strip()]
 
     def save(self, *args, **kwargs):
-        if not self.slug:
-            slug_source = self.title if self.title.strip() else f"untitled-{uuid4().hex[:8]}"
-            self.slug = unique_slugify(self, "slug", slug_source)
-
-        if not self.source_path:
-            self.source_path = f"albums/{self.slug}-{uuid4().hex[:6]}"
-
+        if not self.artist:
+            from .models import Artist
+            unknown_artist, _ = Artist.objects.get_or_create(name="Unknown Artist",defaults={"artist_type": "unknown"})
+            self.artist = unknown_artist
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -180,7 +178,6 @@ class Artist(TimeStampedModel):
     era = models.CharField(_("دوره زمانی"),max_length=20,choices=EraChoices.choices,null=True,blank=True,db_index=True)
     image = models.ImageField(_("عکس"),upload_to=artist_image_path,null=True,blank=True,validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])])
     biography = models.TextField(_("بیوگرافی"), blank=True)
-    albums = models.ManyToManyField(Album,blank=True,related_name="artists")
 
     likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
     followers_count = models.PositiveIntegerField(_("تعداد فالوور"), default=0)

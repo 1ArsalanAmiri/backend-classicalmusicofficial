@@ -130,6 +130,8 @@ class AlbumAdmin(admin.ModelAdmin):
     search_fields = ('title', 'composer', 'conductor', 'orchestra', 'soloist', 'ensemble', 'label__name')
     prepopulated_fields = {"slug": ("title",)}
     readonly_fields = ("created_at", "updated_at")
+    autocomplete_fields = ['artist']
+
 
     inlines = [TrackInline]
 

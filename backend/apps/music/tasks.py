@@ -126,15 +126,18 @@ def process_album_archive_task(self, upload_record_id: int):
                 except (ValueError, TypeError, AttributeError):
                     track_number = index + 1
 
-                # 3. Artist & Genre
+                # 3. Artist -------------
 
-                artist_name = audio_meta.get("artist", [None])[0]
-                artist = None
-                if artist_name:
-                    if artist_name not in artist_cache:
-                        artist_cache[artist_name] = Artist.objects.filter(name=artist_name).only("id").first()
-                    artist = artist_cache[artist_name]
+                raw_artist_name = audio_meta.get("artist", [None])[0]
+                album_artist_name = raw_artist_name.strip() if raw_artist_name else None
+                artist_obj = None
+                if album_artist_name:
+                    artist_obj = Artist.objects.filter(name__iexact=album_artist_name).first()
 
+                if not artist_obj:
+                    artist_obj, _ = Artist.objects.get_or_create(name="Unknown Artist",defaults={"artist_type": "unknown"})
+
+                # Genre ------------
                 genre_name = audio_meta.get("genre", [None])[0]
                 genre_obj = None
                 if genre_name:
@@ -153,16 +156,17 @@ def process_album_archive_task(self, upload_record_id: int):
                 target_relative_path = f"tracks/{album.slug}/{filename}"
                 final_path = storage_connector.upload_chunked(file_path, target_relative_path)
 
-                # آماده سازی برای ثبت در دیتابیس
                 tracks_to_update.append({
                     "album": album,
                     "track_number": track_number,
-                    "title": safe_title,
-                    "slug": safe_slug,
-                    "genre": genre_obj,
-                    "composer": artist,
-                    "duration_ms": duration_ms,
-                    "audio_file": final_path,
+                    "defaults": {
+                        "title": safe_title,
+                        "slug": safe_slug,
+                        "genre": genre_obj,
+                        "composer": artist_obj,
+                        "duration_ms": duration_ms,
+                        "audio_file": final_path,
+                    }
                 })
 
                 # -------- Progress update --------
@@ -183,8 +187,9 @@ def process_album_archive_task(self, upload_record_id: int):
                     Track.objects.update_or_create(
                         album=data["album"],
                         track_number=data["track_number"],
-                        defaults=data,
+                        defaults=data["defaults"],
                     )
+
                 saved_tracks_count += 1
             except Exception as db_err:
                 logger.error(f"DB Update failed for track {data.get('title')}: {db_err}")
