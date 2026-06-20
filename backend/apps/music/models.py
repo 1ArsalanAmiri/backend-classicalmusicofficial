@@ -161,6 +161,10 @@ class Album(TimeStampedModel):
         if not self.slug:
             slug_source = self.title if self.title.strip() else f"untitled-{uuid4().hex[:8]}"
             self.slug = unique_slugify(self, "slug", slug_source)
+
+        if not self.source_path:
+            self.source_path = f"albums/{self.slug}-{uuid4().hex[:6]}"
+
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -273,99 +277,6 @@ class Track(TimeStampedModel):
             )
         ]
 
-    def extract_metadata(self):
-        if not self.audio_file:
-            return
-
-        try:
-            file_path = self.audio_file.path
-
-
-            audio_easy = MutagenFile(file_path, easy=True)
-            audio_raw = MutagenFile(file_path)
-
-            if audio_easy is None or audio_raw is None:
-                return
-
-            if hasattr(audio_easy, 'info') and not self.duration_ms:
-                self.duration_ms = int(getattr(audio_easy.info, 'length', 0) * 1000)
-
-            def get_safe_string(tag_name, max_length=255):
-                value = audio_easy.get(tag_name)
-                if value and isinstance(value, list) and value[0]:
-                    cleaned_value = str(value[0]).strip()
-                    return cleaned_value[:max_length]
-                return None
-
-            if not self.title or self.title == "Untitled":
-                extracted_title = get_safe_string('title')
-                if extracted_title:
-                    self.title = extracted_title
-
-            tag_artist = get_safe_string('artist')
-            if not self.singer and tag_artist:
-                self.singer, _ = Artist.objects.get_or_create(name=tag_artist)
-
-            tag_composer = get_safe_string('composer')
-            if not self.composer and tag_composer:
-                self.composer, _ = Artist.objects.get_or_create(name=tag_composer)
-
-            tag_genre = get_safe_string('genre', max_length=100)
-
-            if not self.genre and tag_genre:
-                genre_slug = slugify(tag_genre.strip(), allow_unicode=True)
-                self.genre = Genre.objects.filter(slug=genre_slug).first()
-
-
-            if not self.track_number:
-                tag_track = get_safe_string('tracknumber')
-                if tag_track:
-                    match = search(r'\d+', tag_track)
-                    if match:
-                        self.track_number = int(match.group())
-
-            if not self.release_date:
-                tag_date = get_safe_string('date')
-                if tag_date:
-                    year_match = search(r'(19|20)\d{2}', tag_date)
-                    if year_match:
-                        self.release_date = datetime.date(int(year_match.group()), 1, 1)
-
-
-            if not self.cover_image:
-                image_data = None
-                mime_type = None
-
-                if hasattr(audio_raw, 'tags') and audio_raw.tags:
-                    for tag in audio_raw.tags.values():
-                        if tag.__class__.__name__ == 'APIC':
-                            image_data = tag.data
-                            mime_type = tag.mime
-                            break
-
-                if not image_data and hasattr(audio_raw, 'pictures') and audio_raw.pictures:
-                    pic = audio_raw.pictures[0]
-                    image_data = pic.data
-                    mime_type = pic.mime
-
-                if image_data:
-                    ext = 'jpg'
-                    if mime_type == 'image/png':
-                        ext = 'png'
-                    elif mime_type in ['image/jpeg', 'image/jpg']:
-                        ext = 'jpg'
-                    elif mime_type == 'image/webp':
-                        ext = 'webp'
-
-                    filename = f"track_cover_{self.id or uuid4().hex[:8]}.{ext}"
-
-                    self.cover_image.save(filename, ContentFile(image_data), save=False)
-
-        except MutagenError as e:
-            logger.warning(f"MutagenError extracting metadata for track {self.id}: {e}")
-        except Exception as e:
-            logger.error(f"General Error extracting metadata for track {self.id}: {e}", exc_info=True)
-
     @property
     def is_single(self):
         return self.album is None
@@ -377,15 +288,10 @@ class Track(TimeStampedModel):
         return self.cover_image
 
     def save(self, *args, **kwargs):
-        is_new = self.pk is None
-
+        if not self.slug:
+            slug_source = self.title if self.title and self.title.strip() else f"track-{uuid4().hex[:8]}"
+            self.slug = unique_slugify(self, "slug", slug_source)
         super().save(*args, **kwargs)
-
-        if is_new and self.audio_file:
-            from .tasks import extract_track_metadata_task
-            from django.db import transaction
-
-            transaction.on_commit(lambda: extract_track_metadata_task.delay(self.pk))
 
     def __str__(self):
         return f"{self.title} (Single)" if self.is_single else f"{self.title} - {self.album.title}"

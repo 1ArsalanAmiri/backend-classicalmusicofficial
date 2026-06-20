@@ -14,15 +14,20 @@ from django.utils.text import slugify
 from django.core.cache import cache
 from datetime import timedelta
 from django.utils import timezone
-from uuid import uuid4
+import uuid
 from django.core.files.base import ContentFile
 from django.db import transaction
 from .models import Album, AlbumArchiveUpload, Track, Artist, AlbumZipExport ,Genre
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 @shared_task(bind=True, max_retries=3)
 def process_album_archive_task(self, upload_record_id: int):
     temp_dir = None
+    upload_record = None
 
     try:
         upload_record = AlbumArchiveUpload.objects.select_related("album").get(id=upload_record_id)
@@ -34,16 +39,15 @@ def process_album_archive_task(self, upload_record_id: int):
         archive_path = upload_record.archive_file.path
         temp_dir = tempfile.mkdtemp()
 
-
         # -------- Extract --------
-        if archive_path.endswith(".zip"):
+        if archive_path.lower().endswith(".zip"):
             with zipfile.ZipFile(archive_path, "r") as zip_ref:
                 zip_ref.extractall(temp_dir)
-        elif archive_path.endswith(".rar"):
+        elif archive_path.lower().endswith(".rar"):
             with rarfile.RarFile(archive_path, "r") as rar_ref:
                 rar_ref.extractall(temp_dir)
         else:
-            raise ValueError("Unsupported archive format")
+            raise ValueError("فرمت فایل آرشیو پشتیبانی نمی‌شود. فقط zip و rar مجاز است.")
 
         upload_record.status = "processing"
         upload_record.save(update_fields=["status"])
@@ -58,92 +62,98 @@ def process_album_archive_task(self, upload_record_id: int):
         ]
 
         if not audio_files:
-            raise ValueError("No audio files found in archive")
+            raise ValueError("هیچ فایل صوتی مجازی در آرشیو یافت نشد.")
 
         total_files = len(audio_files)
         cover_extracted = bool(album.cover_image)
-
         storage_connector = MockStorageConnector()
-
-        # -------- Artist cache --------
         artist_cache = {}
-
-        # -------- Bulk track list --------
         tracks_to_update = []
+        task_warnings = []
 
         for index, file_path in enumerate(audio_files):
             try:
-                audio_raw = MutagenFile(file_path)
-                audio_meta = MutagenFile(file_path, easy=True)
+                try:
+                    audio_raw = MutagenFile(file_path)
+                    audio_meta = MutagenFile(file_path, easy=True)
+                except Exception as meta_error:
+                    logger.warning(f"Skipping {file_path}: Metadata read error - {meta_error}")
+                    task_warnings.append(f"خطا در خواندن فایل {os.path.basename(file_path)}")
+                    continue
 
                 if not audio_meta:
                     continue
 
-                # -------- Extract cover once --------
+                # -------- Extract cover once ایمن --------
                 if not cover_extracted and audio_raw:
-                    image_data = None
-                    mime_type = None
+                    try:
+                        image_data, mime_type = None, None
 
-                    if hasattr(audio_raw, "tags") and audio_raw.tags:
-                        for tag in audio_raw.tags.values():
-                            if tag.__class__.__name__ == "APIC":
-                                image_data = tag.data
-                                mime_type = tag.mime
-                                break
+                        if hasattr(audio_raw, "tags") and audio_raw.tags:
+                            for tag in audio_raw.tags.values():
+                                if tag.__class__.__name__ == "APIC":
+                                    image_data = tag.data
+                                    mime_type = tag.mime
+                                    break
 
-                    if not image_data and hasattr(audio_raw, "pictures") and audio_raw.pictures:
-                        pic = audio_raw.pictures[0]
-                        image_data = pic.data
-                        mime_type = pic.mime
+                        if not image_data and hasattr(audio_raw, "pictures") and audio_raw.pictures:
+                            pic = audio_raw.pictures[0]
+                            image_data = pic.data
+                            mime_type = pic.mime
 
-                    if image_data:
-                        ext = {
-                            "image/png": "png",
-                            "image/webp": "webp",
-                        }.get(mime_type, "jpg")
+                        if image_data:
+                            ext = {"image/png": "png", "image/webp": "webp"}.get(mime_type, "jpg")
+                            filename = f"album_cover_{album.id}_{uuid.uuid4().hex[:6]}.{ext}"
+                            album.cover_image.save(filename, ContentFile(image_data), save=True)
+                            cover_extracted = True
+                    except Exception as cover_error:
+                        logger.warning(f"Failed to extract cover from {file_path}: {cover_error}")
 
-                        filename = f"album_cover_{album.id}.{ext}"
-                        album.cover_image.save(filename, ContentFile(image_data), save=True)
-                        cover_extracted = True
+                # -------- Metadata Extraction --------
+                # 1. Title & Slug
+                raw_title = audio_meta.get("title", [os.path.basename(file_path)])[0]
+                safe_title = (raw_title or "Untitled")[:450]
+                safe_slug = slugify(safe_title, allow_unicode=True)[:450]
+                if not safe_slug:
+                    safe_slug = f"track-{uuid.uuid4().hex[:10]}"
 
-                # -------- Metadata --------
-                title = audio_meta.get("title", [os.path.basename(file_path)])[0]
-                track_number = audio_meta.get("tracknumber", [str(index + 1)])[0].split("/")[0]
+                # 2. Track Number (تبدیل ایمن به عدد)
+                raw_track_number = audio_meta.get("tracknumber", [str(index + 1)])[0]
+                try:
+                    # مثلا اگر "1/12" باشد فقط "1" را میگیرد
+                    clean_track_str = str(raw_track_number).split("/")[0].strip()
+                    track_number = int(clean_track_str) if clean_track_str.isdigit() else (index + 1)
+                except (ValueError, TypeError, AttributeError):
+                    track_number = index + 1
+
+                # 3. Artist & Genre
+
                 artist_name = audio_meta.get("artist", [None])[0]
-                genre_name = audio_meta.get("genre", [None])[0]
-
-                genre_obj = None
-
-                if genre_name:
-                    genre_obj = Genre.objects.filter(
-                        name=genre_name
-                    ).only("id").first()
-
-                duration_ms = (
-                    int(audio_meta.info.length * 1000)
-                    if hasattr(audio_meta.info, "length")
-                    else 0
-                )
-
-                # -------- Artist lookup (cached) --------
                 artist = None
                 if artist_name:
                     if artist_name not in artist_cache:
-                        artist_cache[artist_name] = Artist.objects.filter(
-                            name=artist_name
-                        ).only("id").first()
+                        artist_cache[artist_name] = Artist.objects.filter(name=artist_name).only("id").first()
                     artist = artist_cache[artist_name]
+
+                genre_name = audio_meta.get("genre", [None])[0]
+                genre_obj = None
+                if genre_name:
+                    genre_obj = Genre.objects.filter(name=genre_name).only("id").first()
+
+                # 4. Duration
+                duration_ms = 0
+                if audio_meta.info and hasattr(audio_meta.info, "length"):
+                    try:
+                        duration_ms = int(audio_meta.info.length * 1000)
+                    except (ValueError, TypeError):
+                        pass
 
                 # -------- Upload file --------
                 filename = os.path.basename(file_path)
                 target_relative_path = f"tracks/{album.slug}/{filename}"
-                final_path = storage_connector.upload_chunked(
-                    file_path, target_relative_path
-                )
+                final_path = storage_connector.upload_chunked(file_path, target_relative_path)
 
-                safe_title = (title or "Untitled")[:450]
-                safe_slug = slugify(safe_title, allow_unicode=True)[:450]
-
+                # آماده سازی برای ثبت در دیتابیس
                 tracks_to_update.append({
                     "album": album,
                     "track_number": track_number,
@@ -155,41 +165,65 @@ def process_album_archive_task(self, upload_record_id: int):
                     "audio_file": final_path,
                 })
 
-                # -------- Progress update (batched) --------
-                if index % 5 == 0:
-                    progress = int(((index + 1) / total_files) * 100)
-                    AlbumArchiveUpload.objects.filter(id=upload_record_id).update(
-                        progress=progress
-                    )
+                # -------- Progress update --------
+                if index % 5 == 0 or index == total_files - 1:
+                    progress = int(((index + 1) / total_files) * 90)  # رزرو 10 درصد آخر برای ذخیره دیتابیس
+                    AlbumArchiveUpload.objects.filter(id=upload_record_id).update(progress=progress)
 
             except Exception as track_error:
-                print(f"Track processing error: {track_error}")
+                logger.error(f"Track processing error on {file_path}: {track_error}")
+                task_warnings.append(f"خطا در پردازش کامل فایل {os.path.basename(file_path)}")
                 continue
 
-        # -------- Bulk DB operation --------
-        with transaction.atomic():
-            for data in tracks_to_update:
-                Track.objects.update_or_create(
-                    album=data["album"],
-                    track_number=data["track_number"],
-                    defaults=data,
-                )
 
+        saved_tracks_count = 0
+        for data in tracks_to_update:
+            try:
+                with transaction.atomic():
+                    Track.objects.update_or_create(
+                        album=data["album"],
+                        track_number=data["track_number"],
+                        defaults=data,
+                    )
+                saved_tracks_count += 1
+            except Exception as db_err:
+                logger.error(f"DB Update failed for track {data.get('title')}: {db_err}")
+                task_warnings.append(f"خطای دیتابیس برای ترک {data.get('title')}")
+
+        # بروزرسانی وضعیت نهایی
         upload_record.status = "completed"
         upload_record.progress = 100
-        upload_record.save(update_fields=["status", "progress"])
+
+        # اگر در طول پروسه هشداری داشتیم، آن را در لاگ ذخیره میکنیم تا مدیر ببیند
+        if task_warnings:
+            upload_record.error_log = "هشدارهای تسک:\n" + "\n".join(task_warnings)
+
+        upload_record.save(update_fields=["status", "progress", "error_log"])
+
+    except ValueError as ve:
+        # خطاهای منطقی (مثل فرمت اشتباه) نیازی به Retry ندارند
+        if upload_record:
+            upload_record.status = "failed"
+            upload_record.error_log = str(ve)
+            upload_record.save(update_fields=["status", "error_log"])
+        logger.error(f"Validation Error in task {upload_record_id}: {ve}")
 
     except Exception as e:
-        upload_record.status = "failed"
-        upload_record.error_log = str(e)
-        upload_record.save(update_fields=["status", "error_log"])
+        # خطاهای پیش بینی نشده (شبکه، دیتابیس اصلی، پر شدن هارد) نیاز به Retry دارند
+        if upload_record:
+            upload_record.status = "failed"
+            upload_record.error_log = str(e)
+            upload_record.save(update_fields=["status", "error_log"])
+        logger.exception(f"Unexpected error in task {upload_record_id}")
         raise self.retry(exc=e, countdown=10)
 
     finally:
+        # حذف ایمن پوشه موقت
         if temp_dir and os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-
-
+            try:
+                shutil.rmtree(temp_dir)
+            except Exception as cleanup_err:
+                logger.error(f"Failed to delete temp dir {temp_dir}: {cleanup_err}")
 
 
 def send_status_to_websocket(album_slug, status, message, download_url=None):
