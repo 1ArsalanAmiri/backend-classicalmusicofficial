@@ -115,7 +115,7 @@ class Album(TimeStampedModel):
     composer = models.CharField(_("نام آهنگساز"), max_length=255, blank=True)
     title = models.CharField(_("عنوان آلبوم"), max_length=300 , blank = True,default="untitled")
     slug = models.SlugField(_("اسلاگ"), max_length=300, unique=True, blank=True, allow_unicode=True)
-    source_path = models.CharField(max_length=500, unique=True , null=True)
+    source_path = models.CharField(max_length=500, unique=True , blank=True ,null=True)
     cover_image = models.ImageField(_("تصویر آلبوم"),upload_to=album_cover_path,null=True,blank=True,validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])])
     release_date = models.DateField(_("تاریخ انتشار"), null=True, blank=True)
     conductor = models.CharField(_("نام رهبر ارکستر"), max_length=255, blank=True)
