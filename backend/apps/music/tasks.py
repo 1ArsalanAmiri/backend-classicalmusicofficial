@@ -17,7 +17,7 @@ from django.utils import timezone
 from uuid import uuid4
 from django.core.files.base import ContentFile
 from django.db import transaction
-from .models import Album, AlbumArchiveUpload, Track, Artist, AlbumZipExport
+from .models import Album, AlbumArchiveUpload, Track, Artist, AlbumZipExport ,Genre
 
 
 @shared_task(bind=True, max_retries=3)
@@ -33,6 +33,7 @@ def process_album_archive_task(self, upload_record_id: int):
 
         archive_path = upload_record.archive_file.path
         temp_dir = tempfile.mkdtemp()
+
 
         # -------- Extract --------
         if archive_path.endswith(".zip"):
@@ -109,7 +110,14 @@ def process_album_archive_task(self, upload_record_id: int):
                 title = audio_meta.get("title", [os.path.basename(file_path)])[0]
                 track_number = audio_meta.get("tracknumber", [str(index + 1)])[0].split("/")[0]
                 artist_name = audio_meta.get("artist", [None])[0]
-                genre = audio_meta.get("genre", [None])[0]
+                genre_name = audio_meta.get("genre", [None])[0]
+
+                genre_obj = None
+
+                if genre_name:
+                    genre_obj = Genre.objects.filter(
+                        name=genre_name
+                    ).only("id").first()
 
                 duration_ms = (
                     int(audio_meta.info.length * 1000)
@@ -141,7 +149,7 @@ def process_album_archive_task(self, upload_record_id: int):
                     "track_number": track_number,
                     "title": safe_title,
                     "slug": safe_slug,
-                    "genre": genre,
+                    "genre": genre_obj,
                     "composer": artist,
                     "duration_ms": duration_ms,
                     "audio_file": final_path,

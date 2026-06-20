@@ -6,6 +6,8 @@ import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 from sentry_sdk.integrations.celery import CeleryIntegration
 from sentry_sdk.integrations.redis import RedisIntegration
+import rarfile
+
 
 
 SITE_URL = "http://localhost"  # در سرور واقعی این را به https://yourdomain.com تغییر دهید
@@ -218,11 +220,10 @@ AUTH_USER_MODEL = "accounts.CustomUser"
 
 
 #MAXIMUM DJANGO MEMORY DATA SET IN ONE REQUEST (10MB)
-FILE_UPLOAD_MAX_MEMORY_SIZE = 10485760
+FILE_UPLOAD_MAX_MEMORY_SIZE = 524288000
 
 #MAXIMUM DATA SIZE (MUST BE SET WITH NGINX)
 DATA_UPLOAD_MAX_MEMORY_SIZE = 524288000
-
 
 CHANNEL_LAYERS = {
     'default': {
@@ -280,3 +281,7 @@ DEBUG_TOOLBAR_CONFIG = {
 
 import mimetypes
 mimetypes.add_type("application/javascript", ".js", True)
+
+
+#UNRAR FILES FOR BULK UPLOAD
+rarfile.ORIGINAL_RARPATH = '/usr/bin/unrar'

@@ -96,17 +96,22 @@ document.addEventListener('DOMContentLoaded', function() {
         // رویداد پس از اتمام آپلود
         xhr.onload = function() {
             if (xhr.status === 200) {
-                const data = JSON.parse(xhr.responseText);
-                if (data.success) {
-                    statusText.textContent = 'آپلود کامل شد. در انتظار پردازش توسط سرور...';
-                    progressBar.style.backgroundColor = '#ffc107'; // رنگ زرد برای انتظار
-                    // شروع نظارت بر پیشرفت پردازش سلری
-                    pollCeleryProgress(data.progress_url);
-                } else {
-                    showError(data.error || 'خطای ناشناخته از سرور.');
+                try {
+                    const data = JSON.parse(xhr.responseText);
+                    if (data.success) {
+                        statusText.textContent = 'آپلود کامل شد. در انتظار پردازش...';
+                        progressBar.style.backgroundColor = '#ffc107';
+                        pollCeleryProgress(data.progress_url);
+                    } else {
+                        showError(data.error || 'خطای ناشناخته از سمت سرور.');
+                    }
+                } catch (e) {
+                    showError('پاسخ نامعتبر از سرور (ممکن است سرور کرش کرده باشد).');
+                    console.error('Response Parsing Error:', e, xhr.responseText);
                 }
             } else {
-                showError(`خطای سرور: ${xhr.status} ${xhr.statusText}`);
+                showError(`خطای سرور: ${xhr.status} - فایل به سرور نرسید یا سرور تایم‌اوت شد.`);
+                console.error('Server Error:', xhr.status, xhr.responseText);
             }
         };
 
