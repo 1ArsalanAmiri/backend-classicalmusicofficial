@@ -82,13 +82,12 @@ class Discount(models.Model):
 
 class DiscountUsage(models.Model):
     discount = models.ForeignKey(Discount, on_delete=models.PROTECT, related_name='usages', verbose_name="تخفیف")
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='discount_usages',
-                             verbose_name="کاربر")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='discount_usages',verbose_name="کاربر")
     used_at = models.DateTimeField(auto_now_add=True, verbose_name="تاریخ استفاده")
 
     class Meta:
         verbose_name = 'استفاده از تخفیف'
-        verbose_name_plural = 'استفاده‌های تخفیف'
+        verbose_name_plural = 'تخفیف های استفاده شده'
 
 
 class PaymentStatus(models.TextChoices):

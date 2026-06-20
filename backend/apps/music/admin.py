@@ -151,7 +151,7 @@ class AlbumAdmin(admin.ModelAdmin):
 
     def upload_archive_button(self, obj):
         url = reverse('admin:album_batch_upload', args=[obj.pk])
-        return format_html('<a class="button" href="{}">آپلود گروهی ترک‌ها (ZIP/RAR)</a>', url)
+        return format_html('<a class="button" href="{}">Bulk Upload</a>', url)
 
     upload_archive_button.short_description = "آپلود آرشیو"
 
@@ -167,8 +167,12 @@ class AlbumAdmin(admin.ModelAdmin):
 
     def batch_upload_view(self, request, album_id):
         album = self.get_object(request, album_id)
-        if request.method == 'POST' and request.FILES.get('archive_file'):
-            archive_file = request.FILES['archive_file']
+
+        if request.method == 'POST':
+            archive_file = request.FILES.get('archive_file')
+            if not archive_file:
+                return JsonResponse({'error': 'No file provided.'}, status=400)
+
             upload_record = AlbumArchiveUpload.objects.create(
                 album=album,
                 archive_file=archive_file,
@@ -180,19 +184,14 @@ class AlbumAdmin(admin.ModelAdmin):
             upload_record.save()
 
             progress_url = reverse('admin:album_upload_progress', args=[upload_record.id])
-            context = dict(
-                self.admin_site.each_context(request),
-                album=album,
-                upload_record_id=upload_record.id,
-                progress_url=progress_url,
-                is_uploading=True,
-            )
-            return TemplateResponse(request, "admin/music/track/batch_zip_upload.html", context)
-
+            return JsonResponse({
+                'success': True,
+                'upload_record_id': upload_record.id,
+                'progress_url': progress_url
+            })
         context = dict(
             self.admin_site.each_context(request),
             album=album,
-            is_uploading=False,
         )
         return TemplateResponse(request, "admin/music/track/batch_zip_upload.html", context)
 

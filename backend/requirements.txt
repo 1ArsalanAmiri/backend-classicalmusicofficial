@@ -26,6 +26,7 @@ daphne
 channels-redis
 channels
 sentry-sdk
+faker
 
 
 drf-spectacular

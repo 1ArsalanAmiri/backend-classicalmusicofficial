@@ -1,6 +1,7 @@
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from .models import Like, Follow, Comment
+from django.core.exceptions import ObjectDoesNotExist
 
 
 
@@ -33,11 +34,11 @@ def update_followers_count(sender, instance, **kwargs):
 @receiver(post_save, sender=Comment)
 @receiver(post_delete, sender=Comment)
 def update_comment_count(sender, instance, **kwargs):
-    target_album = instance.album
-    if hasattr(target_album, 'comments_count'):
-        count = Comment.objects.filter(
-            album=target_album,
-            is_approved=True
-        ).count()
-        target_album.comments_count = count
-        target_album.save(update_fields=['comments_count'])
+    try:
+        target_album = instance.album
+
+        target_album.comment_count = target_album.comments.count()
+        target_album.save()
+
+    except ObjectDoesNotExist:
+        pass

@@ -178,6 +178,24 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
     ordering_fields = ['track_number', 'release_date']
     lookup_field = 'slug'
 
+    @action(detail=False, methods=['get'], url_path='singles')
+    def singles(self, request):
+
+        queryset = Track.objects.filter(
+            status=PublishStatus.PUBLISHED,
+            album__isnull=True
+        ).select_related('composer', 'singer', 'instrument')
+
+        filtered_queryset = self.filter_queryset(queryset)
+
+        page = self.paginate_queryset(filtered_queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(filtered_queryset, many=True)
+        return Response(serializer.data)
+
     @action(detail=True, methods=['get'], url_path='stream',permission_classes=[(HasStreamSubscription | HasAllSubscription)])
     def stream(self, request, slug=None):
         track = self.get_object()
