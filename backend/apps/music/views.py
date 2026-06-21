@@ -1,7 +1,7 @@
 from django.http import HttpResponse, Http404
 import mimetypes
 from urllib.parse import quote
-from rest_framework.permissions import AllowAny , IsAuthenticated
+from rest_framework.permissions import AllowAny , IsAuthenticated , IsAuthenticatedOrReadOnly
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -26,6 +26,8 @@ from rest_framework.viewsets import ReadOnlyModelViewSet
 from apps.interactions.mixins import LikableMixin, FollowableMixin ,CommentableMixin
 from django.db.models import F
 
+from ..interactions.models import Comment
+from ..interactions.serializers import CommentSerializer , CommentCreateSerializer
 
 
 
@@ -82,6 +84,33 @@ class AlbumViewSet(CommentableMixin,LikableMixin,viewsets.ModelViewSet):
     search_fields = ['title', 'composer__name', 'conductor__name']
     ordering_fields = ['release_date', 'title']
     lookup_field = 'slug'
+
+    @action(detail=True,methods=["get", "post"],url_path="comments",permission_classes=[IsAuthenticatedOrReadOnly],)
+    def comments(self, request, slug=None):
+        album = self.get_object()
+
+        if request.method == "GET":
+            comments = Comment.objects.filter(
+                album=album,
+                is_approved=True,
+            ).select_related("user").order_by("-created_at")
+
+            page = self.paginate_queryset(comments)
+
+            if page is not None:
+                serializer = CommentSerializer(page, many=True, context={"request": request})
+                return self.get_paginated_response(serializer.data)
+
+            serializer = CommentSerializer(comments, many=True, context={"request": request})
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        serializer = CommentCreateSerializer(data=request.data, context={"request": request})
+
+        if serializer.is_valid():
+            serializer.save(user=request.user, album=album)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def get_serializer_context(self):
         context = super().get_serializer_context()

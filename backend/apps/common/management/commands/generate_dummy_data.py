@@ -1,276 +1,357 @@
 import random
-import uuid
-from uuid import uuid4
-from django.core.management.base import BaseCommand
-from django.db import transaction
-from django.core.files.base import ContentFile
-from django.contrib.auth import get_user_model
 from faker import Faker
+from django.core.management.base import BaseCommand
+from django.contrib.contenttypes.models import ContentType
+from django.utils import timezone
 from django.utils.text import slugify
 
-# Import Models
+from apps.accounts.models import CustomUser
+from apps.profiles.models import UserProfile
 from apps.music.models import (
-    Genre, Instrument, Label, Artist, Album, Track, PlayHistory,
-    ArtistType, EraChoices
+    Artist, Album, Track, Genre, Instrument, Label
 )
-from apps.common.models import PublishStatus
-from apps.profiles.models import UserProfile, ArtistProfile
-from apps.payments.models import Payment, DiscountUsage
+from apps.interactions.models import Comment, Like, Follow
+from apps.playlists.models import Playlist, PlaylistTrack
+from apps.payments.models import Discount
 
-User = get_user_model()
-
-
-# ==========================================
-# Helpers for Mock Files
-# ==========================================
-def get_mock_image():
-    gif_data = b'GIF89a\x01\x00\x01\x00\x00\xff\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x00;'
-    return ContentFile(gif_data, name=f"mock_image_{uuid4().hex[:8]}.jpg")
-
-
-def get_mock_audio():
-    audio_data = b'ID3 DUMMY AUDIO DATA'
-    return ContentFile(audio_data, name=f"mock_audio_{uuid4().hex[:8]}.mp3")
-
-
-def get_valid_iran_phone():
-    return f"+989{random.randint(10, 39)}{random.randint(1000000, 9999999)}"
-
-
-# ==========================================
-# Classical Music Metadata Generators
-# ==========================================
-CLASSICAL_LABELS = [
-    'Deutsche Grammophon', 'Decca Classics', 'Sony Classical',
-    'Warner Classics', 'Naxos Records', 'Harmonia Mundi',
-    'ECM New Series', 'Pentatone', 'Chandos Records', 'Hyperion'
-]
-
-COMPOSERS = [
-    'Johann Sebastian Bach', 'Wolfgang Amadeus Mozart', 'Ludwig van Beethoven',
-    'Pyotr Ilyich Tchaikovsky', 'Frédéric Chopin', 'Johannes Brahms',
-    'Antonio Vivaldi', 'Claude Debussy', 'Franz Schubert', 'Gustav Mahler',
-    'Richard Wagner', 'Igor Stravinsky', 'Giuseppe Verdi', 'Sergei Rachmaninoff'
-]
-
-PERFORMERS_ORCHESTRAS = [
-    'Berlin Philharmonic', 'Vienna Philharmonic', 'London Symphony Orchestra',
-    'Herbert von Karajan', 'Martha Argerich', 'Yo-Yo Ma', 'Leonard Bernstein',
-    'Itzhak Perlman', 'Glenn Gould', 'Maria Callas', 'Arthur Rubinstein',
-    'Chicago Symphony Orchestra', 'Royal Concertgebouw Orchestra'
-]
-
-FORMS = ['Symphony', 'Concerto', 'Sonata', 'String Quartet', 'Prelude', 'Fugue', 'Etude', 'Waltz', 'Nocturne']
-KEYS = ['C Major', 'C Minor', 'D Major', 'D Minor', 'E-flat Major', 'E Minor', 'F Major', 'F Minor', 'G Major',
-        'G Minor', 'A Major', 'A Minor', 'B-flat Major', 'B Minor']
-MOVEMENTS = ['I. Allegro', 'II. Adagio', 'III. Scherzo', 'IV. Presto', 'I. Andante', 'II. Largo', 'III. Rondo',
-             'I. Moderato']
-
-
-def generate_classical_title(is_track=False):
-    form = random.choice(FORMS)
-    number = random.randint(1, 41)
-    key = random.choice(KEYS)
-    opus = random.randint(1, 130)
-
-    base_title = f"{form} No. {number} in {key}, Op. {opus}"
-
-    if is_track:
-        movement = random.choice(MOVEMENTS)
-        return f"{base_title}: {movement}"
-    return base_title
+fake = Faker()
 
 
 class Command(BaseCommand):
-    help = 'Generate specialized Classical Music dummy data (like Apple Music Classical).'
-
-    def add_arguments(self, parser):
-        parser.add_argument('--users', type=int, default=50, help='Number of users to create')
-        parser.add_argument('--albums', type=int, default=100, help='Number of albums to create')
-        parser.add_argument('--tracks-per-album', type=int, default=4,
-                            help='Avg tracks per album (usually 3-4 for a Symphony/Concerto)')
-        parser.add_argument('--clear', action='store_true', help='Clear existing data before generating')
+    help = "Generate dummy data for development"
 
     def handle(self, *args, **kwargs):
-        fake_fa = Faker('fa_IR')
-        fake_en = Faker('en_US')
 
-        num_users = kwargs['users']
-        num_albums = kwargs['albums']
-        tracks_per_album = kwargs['tracks_per_album']
-        clear_db = kwargs['clear']
+        self.stdout.write(self.style.SUCCESS("Generating dummy data..."))
 
-        if clear_db:
-            self.stdout.write(self.style.WARNING("Clearing old data..."))
-            with transaction.atomic():
-                # Fix: ابتدا رکوردهای مالی که مانع حذف یوزرها می‌شوند پاک می‌شوند
-                Payment.objects.filter(user__is_superuser=False).delete()
-                DiscountUsage.objects.filter(user__is_superuser=False).delete()
+        users = self.create_users(20)
+        genres = self.create_genres()
+        instruments = self.create_instruments()
+        labels = self.create_labels(5)
+        artists = self.create_artists(30)
+        albums = self.create_albums(25, artists, labels)
+        tracks = self.create_tracks(120, albums, artists, genres, instruments, labels)
 
-                # سپس سایر دیتاها به ترتیب از فرزند به والد پاک می‌شوند
-                PlayHistory.objects.all().delete()
-                Track.objects.all().delete()
-                Album.objects.all().delete()
-                Artist.objects.all().delete()
-                Label.objects.all().delete()
-                Genre.objects.all().delete()
-                Instrument.objects.all().delete()
-                User.objects.exclude(is_superuser=True).delete()
-            self.stdout.write(self.style.SUCCESS("Database cleared!"))
+        playlists = self.create_playlists(users, tracks)
 
-        with transaction.atomic():
-            # 1. Base Data (Classical Genres & Instruments)
-            self.stdout.write("Generating Classical Genres and Instruments...")
-            genres = []
-            classical_genres = ['Baroque', 'Classical Period', 'Romantic', '20th Century', 'Choral', 'Opera',
-                                'Chamber Music', 'Symphonic']
-            for name in classical_genres:
-                genre, _ = Genre.objects.get_or_create(name=name)
-                genres.append(genre)
+        self.create_comments(users, albums)
+        self.create_likes(users, artists, albums, tracks, playlists)
+        self.create_follows(users, artists, playlists)
 
-            instruments = []
-            classical_instruments = ['Piano', 'Violin', 'Cello', 'Viola', 'Flute', 'Oboe', 'Clarinet', 'Bassoon',
-                                     'French Horn', 'Trumpet', 'Timpani', 'Harpsichord', 'Pipe Organ']
-            for name in classical_instruments:
-                instrument, _ = Instrument.objects.get_or_create(name=name)
-                instruments.append(instrument)
+        self.create_discounts()
 
-            # 2. Classical Labels
-            self.stdout.write("Generating Classical Labels...")
-            labels = []
-            for label_name in CLASSICAL_LABELS:
-                label = Label.objects.create(
-                    name=label_name,
-                    country=fake_en.country(),
-                    website=fake_en.url(),
-                    description=fake_en.text(),
-                    logo=get_mock_image()
+        self.stdout.write(self.style.SUCCESS("Dummy data generated successfully ✅"))
+
+    # -------------------------------------------------
+    # USERS
+    # -------------------------------------------------
+
+    def create_users(self, count):
+
+        users = []
+
+        for i in range(count):
+
+            phone = f"+989{random.randint(100000000,999999999)}"
+
+            user, _ = CustomUser.objects.get_or_create(
+                phone_number=phone,
+                defaults={
+                    "username": f"user{i}",
+                    "first_name": fake.first_name(),
+                    "last_name": fake.last_name(),
+                    "email": fake.email(),
+                }
+            )
+
+            user.set_password("password123")
+            user.save()
+
+            UserProfile.objects.get_or_create(user=user)
+
+            users.append(user)
+
+        return users
+
+    # -------------------------------------------------
+    # GENRES
+    # -------------------------------------------------
+
+    def create_genres(self):
+
+        names = [
+            "Classical",
+            "Baroque",
+            "Romantic",
+            "Opera",
+            "Symphony",
+            "Chamber Music",
+        ]
+
+        genres = []
+
+        for name in names:
+
+            genre, _ = Genre.objects.get_or_create(
+                name=name,
+                defaults={"slug": name.lower().replace(" ", "-")}
+            )
+
+            genres.append(genre)
+
+        return genres
+
+    # -------------------------------------------------
+    # INSTRUMENTS
+    # -------------------------------------------------
+
+    def create_instruments(self):
+
+        names = [
+            "Piano",
+            "Violin",
+            "Cello",
+            "Flute",
+            "Clarinet",
+            "Harp"
+        ]
+
+        instruments = []
+
+        for name in names:
+
+            inst, _ = Instrument.objects.get_or_create(
+                name=name,
+                defaults={"slug": name.lower()}
+            )
+
+            instruments.append(inst)
+
+        return instruments
+
+    # -------------------------------------------------
+    # LABELS
+    # -------------------------------------------------
+
+    def create_labels(self, count):
+
+        labels = []
+
+        for _ in range(count):
+
+            name = fake.company()
+
+            label, _ = Label.objects.get_or_create(
+                name=name,
+                defaults={
+                    "slug": name.lower().replace(" ", "-"),
+                    "country": fake.country(),
+                }
+            )
+
+            labels.append(label)
+
+        return labels
+
+    # -------------------------------------------------
+    # ARTISTS
+    # -------------------------------------------------
+
+    def create_artists(self, count):
+
+        artists = []
+
+        for _ in range(count):
+
+            name = fake.name()
+
+            artist = Artist.objects.create(
+                name=name,
+                country=fake.country(),
+                biography=fake.text(max_nb_chars=300),
+                artist_type=random.choice(["person", "ensemble", "orchestra"])
+            )
+
+            artists.append(artist)
+
+        return artists
+
+    # -------------------------------------------------
+    # ALBUMS
+    # -------------------------------------------------
+
+    def create_albums(self, count, artists, labels):
+
+        albums = []
+
+        album_title = fake.sentence(nb_words=3)
+        from django.db import IntegrityError
+
+        base_slug = slugify(album_title)
+        album_slug = base_slug
+        counter = 1
+        while True:
+            try:
+                Album.objects.get(slug=album_slug)
+                album_slug = f"{base_slug}-{counter}"
+                counter += 1
+            except Album.DoesNotExist:
+                break
+            except IntegrityError:
+                self.stdout.write(
+                    self.style.WARNING(f"IntegrityError encountered for slug: {album_slug}. Trying next..."))
+                album_slug = f"{base_slug}-{counter}"
+                counter += 1
+
+        for _ in range(count):
+
+            album = Album.objects.create(
+                title=album_title,
+                slug=album_slug,
+                composer=fake.name(),
+                artist=random.choice(artists),
+                conductor=fake.name(),
+                orchestra=fake.company(),
+                soloist=fake.name(),
+                ensemble=fake.company(),
+                release_date=fake.date_between("-30y", "today"),
+                label=random.choice(labels),
+            )
+
+            albums.append(album)
+
+        return albums
+
+    # -------------------------------------------------
+    # TRACKS
+    # -------------------------------------------------
+
+    def create_tracks(self, count, albums, artists, genres, instruments, labels):
+
+        tracks = []
+
+        for i in range(count):
+
+            album = random.choice(albums)
+
+            track = Track.objects.create(
+                album=album,
+                title=fake.sentence(nb_words=3),
+                genre=random.choice(genres),
+                instrument=random.choice(instruments),
+                composer=random.choice(artists),
+                singer=random.choice(artists),
+                track_number=random.randint(1, 12),
+                duration_ms=random.randint(60000, 500000),
+                description=fake.text(100),
+                label=random.choice(labels),
+                audio_file="dummy.mp3",
+            )
+
+            tracks.append(track)
+
+        return tracks
+
+    # -------------------------------------------------
+    # PLAYLISTS
+    # -------------------------------------------------
+
+    def create_playlists(self, users, tracks):
+
+        playlists = []
+
+        for user in users:
+
+            for _ in range(random.randint(1, 3)):
+
+                playlist = Playlist.objects.create(
+                    owner=user,
+                    title=fake.sentence(nb_words=3),
+                    description=fake.text(100),
+                    is_public=True
                 )
-                labels.append(label)
 
-            # 3. Users & Profiles
-            self.stdout.write(f"Generating {num_users} Users...")
-            users = []
-            for _ in range(num_users):
-                try:
-                    user = User.objects.create_user(
-                        phone_number=get_valid_iran_phone(),
-                        password="password123",
-                        first_name=fake_fa.first_name(),
-                        last_name=fake_fa.last_name(),
-                        email=fake_en.email()
+                sample_tracks = random.sample(tracks, random.randint(5, 15))
+
+                for order, track in enumerate(sample_tracks):
+
+                    PlaylistTrack.objects.create(
+                        playlist=playlist,
+                        track=track,
+                        order=order
                     )
-                    UserProfile.objects.get_or_create(
-                        user=user,
-                        defaults={'profile_image': get_mock_image()}
-                    )
-                    users.append(user)
-                except Exception:
-                    pass
 
-            # 4. Artists (Composers & Performers)
-            self.stdout.write("Generating Classical Composers and Performers...")
-            db_artists = []
-            db_composers = []
+                playlists.append(playlist)
 
-            # Create Composers
-            for name in COMPOSERS:
-                artist = Artist.objects.create(
-                    name=name,
-                    country=fake_en.country(),
-                    artist_type=ArtistType.COMPOSER if hasattr(ArtistType, 'COMPOSER') else
-                    random.choice(ArtistType.choices)[0],
-                    era=random.choice(EraChoices.choices)[0] if EraChoices.choices else None,
-                    biography=fake_en.text(max_nb_chars=500),
-                    image=get_mock_image()
-                )
-                ArtistProfile.objects.get_or_create(artist=artist)
-                db_composers.append(artist)
-                db_artists.append(artist)
+        return playlists
 
-            # Create Performers / Orchestras
-            db_performers = []
-            for name in PERFORMERS_ORCHESTRAS:
-                artist = Artist.objects.create(
-                    name=name,
-                    country=fake_en.country(),
-                    artist_type=random.choice(ArtistType.choices)[0],
-                    biography=fake_en.text(max_nb_chars=500),
-                    image=get_mock_image()
-                )
-                ArtistProfile.objects.get_or_create(artist=artist)
-                db_performers.append(artist)
-                db_artists.append(artist)
+    # -------------------------------------------------
+    # COMMENTS
+    # -------------------------------------------------
 
-            # 5. Albums & Tracks
-            self.stdout.write(f"Generating {num_albums} Classical Albums and Tracks...")
-            all_tracks = []
-            for _ in range(num_albums):
-                composer = random.choice(db_composers)
-                label = random.choice(labels)
-                album_performer = random.choice(db_performers)
+    def create_comments(self, users, albums):
 
-                album_title = f"{composer.name}: {generate_classical_title(is_track=False)}"
+        for _ in range(200):
 
-                album = Album.objects.create(
-                    title=album_title,
-                    composer=composer.name,
-                    release_date=fake_en.date_between(start_date='-50y', end_date='today'),
-                    status=PublishStatus.PUBLISHED,
-                    label=label,
-                    cover_image=get_mock_image()
-                )
+            Comment.objects.create(
+                user=random.choice(users),
+                album=random.choice(albums),
+                body=fake.sentence(),
+                is_approved=True
+            )
 
-                album.artists.add(composer, album_performer)
+    # -------------------------------------------------
+    # LIKES
+    # -------------------------------------------------
 
-                num_tracks = random.randint(max(1, tracks_per_album - 1), tracks_per_album + 1)
-                for i in range(1, num_tracks + 1):
-                    track_title = generate_classical_title(is_track=True)
+    def create_likes(self, users, artists, albums, tracks, playlists):
 
-                    # Fix: تولید slug به صورت دستی و کاملاً یکتا برای bulk_create
-                    base_slug = slugify(track_title, allow_unicode=True) or f"track-{i}"
-                    unique_slug = f"{base_slug}-{uuid.uuid4().hex[:8]}"
+        models = artists + albums + tracks + playlists
 
-                    track = Track(
-                        album=album,
-                        title=track_title,
-                        slug=unique_slug,  # <-- جلوگیری از خطای IntegrityError
-                        genre=random.choice(genres),
-                        audio_file=get_mock_audio(),
-                        composer=composer,
-                        singer=album_performer,
-                        duration_ms=random.randint(180000, 900000),
-                        track_number=i,
-                        status=PublishStatus.PUBLISHED,
-                        instrument=random.choice(instruments),
-                    )
-                    all_tracks.append(track)
+        for _ in range(300):
 
-            # Bulk Create Tracks
-            Track.objects.bulk_create(all_tracks, batch_size=200)
-            created_tracks = list(Track.objects.all()[:1000])
+            obj = random.choice(models)
 
-            # 6. Play History
-            if users and created_tracks:
-                self.stdout.write("Generating Play History...")
-                histories = []
-                for user in random.sample(users, min(len(users), 20)):
-                    listened_tracks = random.sample(created_tracks, min(len(created_tracks), 30))
-                    for track in listened_tracks:
-                        histories.append(PlayHistory(
-                            user=user,
-                            track=track,
-                            play_count=random.randint(1, 20)
-                        ))
-                PlayHistory.objects.bulk_create(histories, batch_size=200)
+            Like.objects.get_or_create(
+                user=random.choice(users),
+                content_type=ContentType.objects.get_for_model(obj),
+                object_id=obj.id
+            )
 
-            # 7. Related Artists
-            self.stdout.write("Linking Related Artists...")
-            for artist in db_artists:
-                related = random.sample(db_artists, k=random.randint(0, 3))
-                related = [r for r in related if r != artist]
-                if related:
-                    artist.related_artists.add(*related)
+    # -------------------------------------------------
+    # FOLLOWS
+    # -------------------------------------------------
 
-        self.stdout.write(self.style.SUCCESS(f"Successfully generated specialized Classical Music mock data!"))
+    def create_follows(self, users, artists, playlists):
 
+        models = artists + playlists
+
+        for _ in range(150):
+
+            obj = random.choice(models)
+
+            Follow.objects.get_or_create(
+                user=random.choice(users),
+                content_type=ContentType.objects.get_for_model(obj),
+                object_id=obj.id
+            )
+
+    # -------------------------------------------------
+    # DISCOUNTS
+    # -------------------------------------------------
+
+    def create_discounts(self):
+
+        for i in range(5):
+
+            Discount.objects.create(
+                name=f"Test Discount {i}",
+                code=f"TEST{i}",
+                discount_type="percentage",
+                discount_value=random.randint(5, 30),
+                start_date=timezone.now(),
+                end_date=timezone.now() + timezone.timedelta(days=30),
+                max_uses=100,
+                max_uses_per_user=2,
+                is_active=True
+            )
