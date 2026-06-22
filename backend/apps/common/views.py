@@ -20,6 +20,8 @@ MAX_OTP_ATTEMPTS = 3
 
 class SendOTPView(APIView):
 
+    serializer_class = SendOTPSerializer
+
     def post(self, request):
         serializer = SendOTPSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -64,6 +66,8 @@ class SendOTPView(APIView):
 
 
 class VerifyOTPView(APIView):
+
+    serializer_class = VerifyOTPSerializer
 
     def post(self, request):
         serializer = VerifyOTPSerializer(data=request.data)
@@ -119,4 +123,5 @@ class VerifyOTPView(APIView):
                     "refresh": str(refresh)}, status=status_code)
         except Exception as e:
             return Response({"error": "An unexpected error occurred.", "details": str(e)},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 

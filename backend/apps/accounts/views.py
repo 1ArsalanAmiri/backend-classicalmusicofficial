@@ -4,7 +4,8 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
-from .serializers import LogoutSerializer, ChangePhoneNumberSerializer, ResetPasswordSerializer , DeleteAccountSerializer
+from .serializers import LogoutSerializer, ChangePhoneNumberSerializer, ResetPasswordSerializer, \
+    DeleteAccountSerializer, LoginSerializer, VerifyDeleteAccountSerializer
 from .models import CustomUser
 import uuid
 import time
@@ -21,6 +22,8 @@ MAX_OTP_ATTEMPTS = 3
 
 class LoginView(APIView):
 
+    serializer_class = LoginSerializer
+
     def post(self, request):
         phone_number = request.data.get('phone_number')
         password = request.data.get('password')
@@ -36,6 +39,8 @@ class LoginView(APIView):
 
 
 class LogoutView(APIView):
+
+    serializer_class = LogoutSerializer
     permission_classes = [IsAuthenticated]
 
 
@@ -73,6 +78,8 @@ class LogoutView(APIView):
 
 
 class ChangePhoneNumberView(APIView):
+
+    serializer_class = ChangePhoneNumberSerializer
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -93,6 +100,8 @@ class ChangePhoneNumberView(APIView):
 
 
 class ResetPasswordView(APIView):
+
+    serializer_class = ResetPasswordSerializer
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -105,6 +114,8 @@ class ResetPasswordView(APIView):
 
 
 class DeleteAccountView(APIView):
+
+    serializer_class = DeleteAccountSerializer
     permission_classes = [IsAuthenticated]
 
     def delete(self, request):
@@ -140,6 +151,7 @@ class DeleteAccountView(APIView):
 
 class VerifyDeleteAccountView(APIView):
 
+    serializer_class = VerifyDeleteAccountSerializer
     permission_classes = [IsAuthenticated]
 
     def delete(self, request):

@@ -137,6 +137,7 @@ class VerifyDeleteAccountSerializer(serializers.Serializer):
         return value
 
 
+
 class DeleteAccountSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
     refresh = serializers.CharField(write_only=True, required=True, help_text="توکن رفرش برای خروج کامل کاربر")

@@ -225,7 +225,8 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         serializer = self.get_serializer(filtered_queryset, many=True)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['get'], url_path='stream',permission_classes=[(HasStreamSubscription | HasAllSubscription)])
+
+    @action(detail=True, methods=['get'], url_path='stream', permission_classes=[HasStreamSubscription])
     def stream(self, request, slug=None):
         track = self.get_object()
 
@@ -243,9 +244,15 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         response['Content-Type'] = content_type
         response['Content-Disposition'] = 'inline'
         response['Accept-Ranges'] = 'bytes'
+
+        response['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+        response['Pragma'] = 'no-cache'
+        response['Expires'] = '0'
+
         return response
 
-    @action(detail=True, methods=['get'], url_path='download',permission_classes=[(HasDownloadSubscription | HasAllSubscription)])
+
+    @action(detail=True, methods=['get'], url_path='download', permission_classes=[HasDownloadSubscription])
     def download(self , request, slug=None):
         track = self.get_object()
 
