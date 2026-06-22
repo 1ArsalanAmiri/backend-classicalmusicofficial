@@ -77,6 +77,7 @@ INSTALLED_APPS = [
     'channels',
     'django.contrib.postgres',
     'debug_toolbar',
+    'corsheaders',
 
 
     #my-apps
@@ -100,6 +101,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'debug_toolbar.middleware.DebugToolbarMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -285,3 +287,22 @@ mimetypes.add_type("application/javascript", ".js", True)
 
 #UNRAR FILES FOR BULK UPLOAD
 rarfile.ORIGINAL_RARPATH = '/usr/bin/unrar'
+
+
+# ==============================================================================
+# CORS (Cross-Origin Resource Sharing) SETTINGS
+# ==============================================================================
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = True
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
