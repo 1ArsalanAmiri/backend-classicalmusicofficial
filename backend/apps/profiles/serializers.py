@@ -5,7 +5,7 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 from rest_framework.fields import SerializerMethodField
 
-from apps.music.models import Artist, Album , Track
+from apps.music.models import Artist, Album, Track, PlayHistory
 from apps.profiles.models import UserProfile, ArtistProfile
 from django.db.models import Q
 import jdatetime
@@ -205,3 +205,19 @@ class ArtistDetailSerializer(serializers.ModelSerializer):
             'albums', 'sung_tracks', 'composed_tracks', 'related_artists'
         ]
 
+
+
+class DashboardSummarySerializer(serializers.Serializer):
+    liked_albums_count = serializers.IntegerField(help_text="تعداد آلبوم‌های لایک شده")
+    liked_songs_count = serializers.IntegerField(help_text="تعداد آهنگ‌های لایک شده")
+    followed_artists_count = serializers.IntegerField(help_text="تعداد آرتیست‌های فالو شده")
+    saved_playlists_count = serializers.IntegerField(help_text="تعداد پلی‌لیست‌های ذخیره شده")
+
+
+
+class PlayHistorySerializer(serializers.ModelSerializer):
+    track = TrackSerializer(read_only=True)
+
+    class Meta:
+        model = PlayHistory
+        fields = ['id', 'track', 'last_played_at', 'play_count']

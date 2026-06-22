@@ -25,4 +25,5 @@ class Migration(migrations.Migration):
             name='source_path',
             field=models.CharField(blank=True, max_length=500, null=True, unique=True),
         ),
+
     ]

@@ -29,6 +29,9 @@ from django.db.models import F
 from ..interactions.models import Comment
 from ..interactions.serializers import CommentSerializer , CommentCreateSerializer
 
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
+
 
 
 class AlbumBatchUploadAPIView(APIView):
@@ -85,6 +88,8 @@ class AlbumViewSet(CommentableMixin,LikableMixin,viewsets.ModelViewSet):
     ordering_fields = ['release_date', 'title']
     lookup_field = 'slug'
 
+
+    @extend_schema(methods=['POST'],request=CommentSerializer,responses={201: CommentSerializer},)
     @action(detail=True,methods=["get", "post"],url_path="comments",permission_classes=[IsAuthenticatedOrReadOnly],)
     def comments(self, request, slug=None):
         album = self.get_object()
@@ -207,6 +212,12 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
     ordering_fields = ['track_number', 'release_date']
     lookup_field = 'slug'
 
+
+    @extend_schema(parameters=[
+            OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),
+            OpenApiParameter(name='search', description='جستجو در عنوان، خواننده و آهنگساز', required=False, type=OpenApiTypes.STR, location=OpenApiParameter.QUERY),
+            OpenApiParameter(name='instrument', description='فیلتر بر اساس ساز', required=False, type=OpenApiTypes.STR, location=OpenApiParameter.QUERY),])
+    @action(detail=False, methods=['get'], url_path='singles')
     @action(detail=False, methods=['get'], url_path='singles')
     def singles(self, request):
 
@@ -273,6 +284,9 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         response['Content-Type'] = content_type
         return response
 
+
+    @extend_schema(parameters=[OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),])
+    @action(detail=False, methods=['get'], url_path='chosen')
     @action(detail=False, methods=['get'], url_path='chosen')
     def chosen(self, request):
 
@@ -285,6 +299,7 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
 
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
+
 
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated], url_path='record-play')
     def record_play(self, request, slug=None):
@@ -304,23 +319,6 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
             history.save(update_fields=['play_count', 'last_played_at'])
 
         return Response({"message": "پخش با موفقیت ثبت شد."}, status=status.HTTP_200_OK)
-
-    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='history')
-    def history(self, request):
-        queryset = PlayHistory.objects.filter(user=request.user).select_related(
-            'track__album',
-            'track__composer',
-            'track__singer',
-            'track__instrument'
-        ).order_by('-last_played_at')
-
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = PlayHistorySerializer(page, many=True, context={'request': request})
-            return self.get_paginated_response(serializer.data)
-
-        serializer = PlayHistorySerializer(queryset, many=True, context={'request': request})
-        return Response(serializer.data)
 
 
 
@@ -381,6 +379,7 @@ class EraListView(APIView):
 class LabelViewSet(FollowableMixin,LikableMixin,viewsets.ReadOnlyModelViewSet):
     lookup_field = 'slug'
 
+
     def get_queryset(self):
         queryset = Label.objects.all()
         if self.action == 'retrieve':
@@ -390,11 +389,14 @@ class LabelViewSet(FollowableMixin,LikableMixin,viewsets.ReadOnlyModelViewSet):
             )
         return queryset
 
+
     def get_serializer_class(self):
         if self.action == 'retrieve':
             return LabelDetailSerializer
         return LabelListSerializer
 
+
+    @extend_schema(parameters=[OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),])
     @action(detail=True, methods=['get'])
     def tracks(self, request, slug=None):
         label = self.get_object()
@@ -408,6 +410,8 @@ class LabelViewSet(FollowableMixin,LikableMixin,viewsets.ReadOnlyModelViewSet):
         serializer = TrackSerializer(tracks, many=True, context={'request': request})
         return Response(serializer.data)
 
+
+    @extend_schema(parameters=[OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),])
     @action(detail=True, methods=['get'])
     def albums(self, request, slug=None):
         label = self.get_object()
