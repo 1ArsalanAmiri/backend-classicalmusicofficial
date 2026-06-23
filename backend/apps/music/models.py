@@ -6,11 +6,6 @@ from apps.common.models import (TimeStampedModel, ArchiveUploadStatus, PublishSt
     unique_slugify, artist_image_path , album_cover_path,
     track_cover_path ,track_audio_path, AlbumManager)
 from uuid import uuid4
-from mutagen import File as MutagenFile, MutagenError
-import datetime
-from re import search
-from django.utils.text import slugify
-from django.core.files.base import ContentFile
 from logging import getLogger
 from django.conf import settings
 from django.utils import timezone
@@ -220,20 +215,14 @@ class AlbumArchiveUpload(TimeStampedModel):
         verbose_name_plural = _("آپلودهای گروهی آلبوم")
 
 
-class AlbumZipExport(TimeStampedModel):
-    class ExportStatus(models.TextChoices):
-        PENDING = 'pending', _('Pending')
-        PROCESSING = 'processing', _('Processing')
-        COMPLETED = 'completed', _('Completed')
-        FAILED = 'failed', _('Failed')
-
-    album = models.OneToOneField('Album', on_delete=models.CASCADE, related_name='zip_export')
-    zip_file = models.FileField(upload_to='protected/exports/albums/zips/', null=True, blank=True)
-    status = models.CharField(max_length=20, choices=ExportStatus.choices, default=ExportStatus.PENDING)
-    error_log = models.TextField(null=True, blank=True)
+class AlbumZipExport(models.Model):
+    album = models.ForeignKey('Album', on_delete=models.CASCADE, related_name='zip_exports')
+    zip_file = models.FileField(upload_to='album_zips/', blank=True, null=True)
+    status = models.CharField(max_length=20, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"ZIP Export for {self.album.title} - {self.status}"
+        return f"{self.album.slug} - {self.download_token}"
 
 # =========================================================
 # Track Model

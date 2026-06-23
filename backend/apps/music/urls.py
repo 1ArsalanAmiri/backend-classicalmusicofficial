@@ -1,6 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import ArtistViewSet, AlbumViewSet, TrackViewSet , GenreViewSet, InstrumentViewSet , EraListView , AlbumBatchUploadAPIView , LabelViewSet
+from .views import ArtistViewSet, AlbumViewSet, TrackViewSet, GenreViewSet, InstrumentViewSet, EraListView, \
+    AlbumBatchUploadAPIView, LabelViewSet , download_album_zip_api
 from apps.common.search_views import GlobalSearchView
 
 router = DefaultRouter()
@@ -17,6 +18,6 @@ urlpatterns = [
     path('eras/', EraListView.as_view(), name='era-list'),
     path('api/v1/albums/<int:album_id>/batch-upload/', AlbumBatchUploadAPIView.as_view(), name='api-album-batch-upload'),
     path('search/', GlobalSearchView.as_view(), name='global-search'),
+    path('api/v1/albums/<slug:album_slug>/download-zip/', download_album_zip_api, name='download-album-zip'),
 
 ]
-

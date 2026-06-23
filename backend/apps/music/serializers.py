@@ -91,7 +91,7 @@ class AlbumDetailSerializer(serializers.ModelSerializer):
 
     total_tracks = serializers.IntegerField(read_only=True)
     total_duration_ms = serializers.IntegerField(read_only=True)
-    on_this_album = serializers.ListField(child=serializers.CharField(), read_only=True)
+    on_this_album = serializers.SerializerMethodField()
 
     class Meta:
         model = Album
@@ -101,6 +101,54 @@ class AlbumDetailSerializer(serializers.ModelSerializer):
             'on_this_album', 'total_tracks', 'total_duration_ms', 'status',
             'tracks','likes_count','comments_count',
         ]
+
+
+    @extend_schema_field(serializers.ListField())
+    def get_on_this_album(self, obj):
+        names = obj.on_this_album
+        if not names:
+            return []
+        existing_artists = Artist.objects.filter(name__in=names).only('name', 'slug')
+        artist_map = {artist.name: artist for artist in existing_artists}
+        request = self.context.get('request')
+        result = []
+        for name in names:
+            if name in artist_map:
+                artist = artist_map[name]
+                try:
+                    profile_url = request.build_absolute_uri(reverse('artist-detail', kwargs={'slug': artist.slug}))
+                except Exception:
+                    profile_url = None
+                result.append({
+                    "name": name,
+                    "profile_url": profile_url,
+                    "slug": artist.slug,
+                    "has_profile": True
+                })
+            else:
+                result.append({
+                    "name": name,
+                    "profile_url": None,
+                    "slug": None,
+                    "has_profile": False
+                })
+        return result
+
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        track_composers = [
+            track.composer.name for track in instance.tracks.all()
+            if track.composer
+        ]
+        album_on_this = instance.on_this_album
+        has_common_composer = any(composer in album_on_this for composer in track_composers)
+        if has_common_composer:
+            fields_to_remove = ['composer', 'conductor', 'orchestra', 'soloist', 'ensemble']
+            for field in fields_to_remove:
+                representation.pop(field, None)
+
+        return representation
 
 
 

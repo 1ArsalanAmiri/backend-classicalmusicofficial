@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.shortcuts import get_object_or_404
 from .models import *
-from .tasks import process_album_archive_task , generate_album_zip_task
+from .tasks import process_album_archive_task
 from rest_framework import viewsets, filters , status
 from django_filters.rest_framework import DjangoFilterBackend
 from .serializers import *
@@ -15,9 +15,7 @@ from apps.common.pagination import ClassicalMusicPagination
 from apps.common.filters import AlbumFilter,TrackFilter
 from django.db import transaction
 from rest_framework.decorators import action
-from apps.common.throttles import ZipGenerationRateThrottle
-from rest_framework.exceptions import PermissionDenied
-from apps.common.permissions import HasStreamSubscription , user_has_download_access , user_has_stream_access , HasAllSubscription , HasDownloadSubscription
+from apps.common.permissions import HasStreamSubscription  , user_has_stream_access , HasDownloadSubscription
 from apps.common.models import PublishStatus
 from django.db.models import Count
 from django.utils.decorators import method_decorator
@@ -25,13 +23,19 @@ from django.views.decorators.cache import cache_page
 from rest_framework.viewsets import ReadOnlyModelViewSet
 from apps.interactions.mixins import LikableMixin, FollowableMixin ,CommentableMixin
 from django.db.models import F
-
 from ..interactions.models import Comment
 from ..interactions.serializers import CommentSerializer , CommentCreateSerializer
-
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
-
+from asgiref.sync import sync_to_async
+from rest_framework.decorators import api_view, permission_classes
+from django.conf import settings
+import os
+import tempfile
+import zipfile
+from django.core.files import File
+from django.utils import timezone
+from .models import Album, AlbumArchiveUpload, Track, Artist ,Genre
 
 
 class AlbumBatchUploadAPIView(APIView):
@@ -132,60 +136,6 @@ class AlbumViewSet(CommentableMixin,LikableMixin,viewsets.ModelViewSet):
         if self.action == 'list':
             return AlbumListSerializer
         return AlbumDetailSerializer
-
-    @action(detail=True, methods=['post'], url_path='request-zip',throttle_classes=[ZipGenerationRateThrottle],permission_classes=[IsAuthenticated])
-    def request_zip(self, request, slug=None):
-        if not user_has_download_access(request.user):
-            return Response({"error": "شما اشتراک فعال برای دانلود آلبوم را ندارید."}, status=status.HTTP_403_FORBIDDEN)
-
-        album = self.get_object()
-        export_record, created = AlbumZipExport.objects.get_or_create(album=album)
-
-        if not created and export_record.status == AlbumZipExport.ExportStatus.PENDING:
-            return Response({
-                "status": "pending",
-                "message": "file is getting ready. listen to WebSocket connection"
-            }, status=status.HTTP_200_OK)
-
-        if not created and export_record.status == AlbumZipExport.ExportStatus.COMPLETED and export_record.zip_file:
-            download_url = request.build_absolute_uri(reverse('album-download-zip', kwargs={'slug': album.slug}))
-            return Response({
-                "status": "completed",
-                "message": "file exists in cache",
-                "download_url": download_url
-            }, status=status.HTTP_200_OK)
-
-        export_record.status = AlbumZipExport.ExportStatus.PENDING
-        export_record.save()
-
-        transaction.on_commit(lambda: generate_album_zip_task.delay(album.id, export_record.id))
-
-        return Response({
-            "status": "pending",
-            "message": "request submitted successfully. please wait for zip url."
-        }, status=status.HTTP_202_ACCEPTED)
-
-    @action(detail=True, methods=['get'], url_path='download-zip',permission_classes=[IsAuthenticated])
-    def download_zip(self, request, slug=None):
-        if not user_has_download_access(request.user):
-            raise PermissionDenied("شما اشتراک فعال برای دانلود این آلبوم را ندارید.")
-
-        export = get_object_or_404(
-            AlbumZipExport,
-            album__slug=slug,
-            status='COMPLETED'
-        )
-
-        if not export.zip_file:
-            raise Http404("File not found.")
-
-        file_path = export.zip_file.name
-
-        response = HttpResponse()
-        response['X-Accel-Redirect'] = f'/protected_media/{file_path}'
-        response['Content-Disposition'] = f'attachment; filename="{export.album.slug}.zip"'
-
-        return response
 
     @method_decorator(cache_page(60 * 15))
     def list(self, request, *args, **kwargs):
@@ -426,3 +376,69 @@ class LabelViewSet(FollowableMixin,LikableMixin,viewsets.ReadOnlyModelViewSet):
         return Response(serializer.data)
 
 
+
+@sync_to_async
+def get_album_and_tracks(album_slug):
+    album = get_object_or_404(Album, slug=album_slug)
+    tracks = list(album.tracks.select_related())
+    return album, tracks
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def download_album_zip_api(request, album_slug):
+    album = get_object_or_404(Album, slug=album_slug)
+    tracks = list(album.tracks.all())
+
+    if not tracks:
+        return Response({"error": "آهنگی توی این آلبوم پیدا نشد. دوباره برسی کنید یا به پشتیبانی پیام بدید."}, status=status.HTTP_404_NOT_FOUND)
+
+    with transaction.atomic():
+        existing_export = AlbumZipExport.objects.select_for_update().filter(
+            album=album,
+            status='completed',
+            zip_file__isnull=False
+        ).exclude(zip_file='').first()
+
+    file_exists_physically = False
+    if existing_export and existing_export.zip_file:
+        if os.path.exists(existing_export.zip_file.path):
+            file_exists_physically = True
+
+    if file_exists_physically:
+        export_record = existing_export
+    else:
+        export_record = AlbumZipExport(album=album, status='pending')
+        temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+
+        try:
+            with zipfile.ZipFile(temp_zip.name, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for track in tracks:
+                    audio = getattr(track, "audio_file", None)
+                    if audio and audio.name and os.path.exists(audio.path):
+                        file_path = audio.path
+                        file_name = os.path.basename(file_path)
+                        zipf.write(file_path, arcname=file_name)
+
+            with open(temp_zip.name, 'rb') as f:
+                export_record.zip_file.save(f"{album.slug}.zip", File(f), save=False)
+
+            export_record.status = 'completed'
+            export_record.save()
+
+        except Exception as e:
+            os.unlink(temp_zip.name)
+            return Response({"error": "ساخت فایل زیپ به مشکل خورد ، به پشتیبانی پیام بدید."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        finally:
+            if os.path.exists(temp_zip.name):
+                os.unlink(temp_zip.name)
+
+    file_url = export_record.zip_file.url
+    nginx_internal_path = file_url.replace(settings.MEDIA_URL, '/protected-media/')
+
+    response = HttpResponse()
+    response['X-Accel-Redirect'] = nginx_internal_path
+    response['Content-Disposition'] = f'attachment; filename="{os.path.basename(export_record.zip_file.name)}"'
+    response['Content-Type'] = 'application/zip'
+
+    return response

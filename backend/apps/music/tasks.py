@@ -5,20 +5,15 @@ import rarfile
 import shutil
 from mutagen import File as MutagenFile
 from celery import shared_task
-from django.core.files import File
-from config.settings import SITE_URL
-from apps.common.connectors import MockStorageConnector
-from channels.layers import get_channel_layer
-from asgiref.sync import async_to_sync
 from django.utils.text import slugify
-from django.core.cache import cache
 from datetime import timedelta
 from django.utils import timezone
 import uuid
 from django.core.files.base import ContentFile
 from django.db import transaction
-from .models import Album, AlbumArchiveUpload, Track, Artist, AlbumZipExport ,Genre
+from .models import AlbumArchiveUpload, Track, Artist, AlbumZipExport ,Genre
 import logging
+
 
 
 logger = logging.getLogger(__name__)
@@ -231,89 +226,6 @@ def process_album_archive_task(self, upload_record_id: int):
                 logger.error(f"Failed to delete temp dir {temp_dir}: {cleanup_err}")
 
 
-def send_status_to_websocket(album_slug, status, message, download_url=None):
-    channel_layer = get_channel_layer()
-    group_name = f'album_{album_slug}'
-
-    event_data = {
-        'type': 'zip_status',
-        'message': {
-            'status': status,
-            'message': message,
-            'download_url': download_url
-        }
-    }
-    print(f"--- CELERY SENDING EVENT TO GROUP: {group_name} ---")
-    print(event_data)
-    print("-----------------------------------------------")
-
-    async_to_sync(channel_layer.group_send)(
-        group_name,
-        event_data
-    )
-
-
-@shared_task(bind=True)
-def generate_album_zip_task(self, album_id, export_record_id):
-    lock_id = f"lock_album_zip_{album_id}"
-
-    if not cache.add(lock_id, 'locked', 600):
-        return "Task is already running for this album."
-
-    try:
-        album = Album.objects.get(id=album_id)
-        export_record = AlbumZipExport.objects.get(id=export_record_id)
-
-        export_record.status = 'PROCESSING'
-        export_record.save()
-
-        with tempfile.NamedTemporaryFile(delete=True, suffix='.zip') as tmp_file:
-            with zipfile.ZipFile(tmp_file, 'w', zipfile.ZIP_DEFLATED) as zf:
-                for track in album.tracks.all():
-                    if track.audio_file:
-                        file_path = track.audio_file.path
-                        file_name = os.path.basename(file_path)
-                        zf.write(file_path, arcname=file_name)
-
-            tmp_file.flush()
-            export_record.zip_file.save(f"{album.slug}.zip", File(tmp_file))
-
-        export_record.status = 'COMPLETED'
-        export_record.save()
-
-        download_link = f"{SITE_URL}/api/v1/albums/{album.slug}/download-zip/"
-
-        send_status_to_websocket(
-            album_slug=album.slug,
-            status='COMPLETED',
-            message='Zip file is completed successfully.',
-            download_url=download_link
-        )
-
-    except Exception as e:
-        if 'export_record' in locals():
-            export_record.status = 'FAILED'
-            export_record.save()
-        raise e
-    finally:
-        cache.delete(lock_id)
-
-
-@shared_task
-def cleanup_old_zip_exports():
-    time_threshold = timezone.now() - timedelta(hours=24)
-    old_exports = AlbumZipExport.objects.filter(created_at__lt=time_threshold)
-
-    deleted_count = 0
-    for export in old_exports:
-        if export.zip_file:
-            export.zip_file.delete(save=False)
-        export.delete()
-        deleted_count += 1
-
-    return f"Deleted {deleted_count} old zip files."
-
-
 @shared_task
 def extract_track_metadata_task(track_id):
     try:
@@ -336,3 +248,19 @@ def extract_track_metadata_task(track_id):
 
     except Track.DoesNotExist:
         pass
+
+
+@shared_task
+def cleanup_old_album_zips():
+    expiration_date = timezone.now() - timedelta(days=7)
+
+    old_exports = AlbumZipExport.objects.filter(created_at__lt=expiration_date)
+
+    deleted_count = 0
+    for export in old_exports:
+        if export.zip_file and os.path.exists(export.zip_file.path):
+            os.remove(export.zip_file.path)
+        export.delete()
+        deleted_count += 1
+
+    return f"Successfully deleted {deleted_count} old album zip caches."

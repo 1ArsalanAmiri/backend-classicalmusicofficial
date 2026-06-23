@@ -9,6 +9,8 @@ from apps.common.serializers import SendOTPSerializer, VerifyOTPSerializer
 from apps.common.utils.otp import generate_otp
 from apps.common.utils.sms import send_sms
 from apps.profiles.models import UserProfile
+from django.conf import settings
+
 
 
 User = get_user_model()
