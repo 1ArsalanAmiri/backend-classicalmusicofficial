@@ -3,8 +3,6 @@ from rest_framework import permissions
 from apps.subscriptions.services import user_has_download_access, user_has_stream_access,user_has_all_access
 
 
-
-
 class HasDownloadSubscription(BasePermission):
     message = "شما اشتراک فعال برای دانلود ندارید."
 

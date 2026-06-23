@@ -147,9 +147,9 @@ class AlbumAdmin(admin.ModelAdmin):
 
         if obj.cover_image and change:
             tracks_to_update = Track.objects.filter(album=obj, cover_image__isnull=True)
-            for track in tracks_to_update:
-                track.save()
-            messages.success(request, _(f"کاور آلبوم به {tracks_to_update.count()} ترک اختصاص داده شد."))
+            updated_count = tracks_to_update.update(cover_image=obj.cover_image)
+            if updated_count > 0:
+                messages.success(request, _(f"کاور آلبوم به {updated_count} ترک اختصاص داده شد."))
 
     def upload_archive_button(self, obj):
         url = reverse('admin:album_batch_upload', args=[obj.pk])

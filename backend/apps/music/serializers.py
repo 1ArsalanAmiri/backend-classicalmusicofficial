@@ -47,21 +47,25 @@ class TrackSerializer(serializers.ModelSerializer):
     composer_name = serializers.CharField(source='composer.name', read_only=True)
     instrument_name = serializers.CharField(source='instrument.name', read_only=True)
     duration_seconds = serializers.SerializerMethodField()
+    audio_stream_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Track
         fields = [
-            'id','title','album','singer','composer', 'slug', 'cover_image', 'release_date',
+            'id','title','album','singer','composer', 'slug', 'audio_stream_url' ,'cover_image', 'release_date',
             'duration_seconds', 'instrument_name',
             'composer_name','singer_name','status','likes_count'
         ]
 
-
     def get_audio_stream_url(self, obj):
         has_stream_access = self.context.get("has_stream_access", False)
-        if not has_stream_access:
-            return None
+        has_download_access = self.context.get("has_download_access", False)
 
+        if not has_stream_access or has_download_access:
+            return None
+        request = self.context.get('request')
+        if request is None:
+            return None
         request = self.context.get('request')
         return request.build_absolute_uri(reverse('track-stream', kwargs={'slug': obj.slug}))
 

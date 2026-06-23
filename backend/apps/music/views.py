@@ -23,6 +23,8 @@ from django.views.decorators.cache import cache_page
 from rest_framework.viewsets import ReadOnlyModelViewSet
 from apps.interactions.mixins import LikableMixin, FollowableMixin ,CommentableMixin
 from django.db.models import F
+
+from ..common.utils.clean_file_name import get_clean_download_filename
 from ..interactions.models import Comment
 from ..interactions.serializers import CommentSerializer , CommentCreateSerializer
 from drf_spectacular.utils import extend_schema, OpenApiParameter
@@ -88,7 +90,7 @@ class AlbumViewSet(CommentableMixin,LikableMixin,viewsets.ModelViewSet):
     pagination_class = ClassicalMusicPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = AlbumFilter
-    search_fields = ['title', 'composer__name', 'conductor__name']
+    search_fields = ['title', 'composer', 'conductor']
     ordering_fields = ['release_date', 'title']
     lookup_field = 'slug'
 
@@ -168,7 +170,6 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
             OpenApiParameter(name='search', description='جستجو در عنوان، خواننده و آهنگساز', required=False, type=OpenApiTypes.STR, location=OpenApiParameter.QUERY),
             OpenApiParameter(name='instrument', description='فیلتر بر اساس ساز', required=False, type=OpenApiTypes.STR, location=OpenApiParameter.QUERY),])
     @action(detail=False, methods=['get'], url_path='singles')
-    @action(detail=False, methods=['get'], url_path='singles')
     def singles(self, request):
 
         queryset = Track.objects.filter(
@@ -212,9 +213,8 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
 
         return response
 
-
     @action(detail=True, methods=['get'], url_path='download', permission_classes=[HasDownloadSubscription])
-    def download(self , request, slug=None):
+    def download(self, request, slug=None):
         track = self.get_object()
 
         if not track.audio_file:
@@ -225,15 +225,16 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         content_type, _ = mimetypes.guess_type(audio_path)
         content_type = content_type or 'audio/mpeg'
 
-        filename = audio_path.split('/')[-1]
-        encoded_filename = quote(filename)
+        clean_filename = get_clean_download_filename(track)
+
+        encoded_filename = quote(clean_filename)
 
         response = HttpResponse()
         response['X-Accel-Redirect'] = f"/protected_media/{audio_path}"
         response['Content-Disposition'] = f"attachment; filename*=UTF-8''{encoded_filename}"
         response['Content-Type'] = content_type
-        return response
 
+        return response
 
     @extend_schema(parameters=[OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),])
     @action(detail=False, methods=['get'], url_path='chosen')

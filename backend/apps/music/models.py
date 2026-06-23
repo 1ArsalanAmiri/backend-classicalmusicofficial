@@ -156,7 +156,7 @@ class Album(TimeStampedModel):
     def save(self, *args, **kwargs):
         if not self.artist:
             from .models import Artist
-            unknown_artist, _ = Artist.objects.get_or_create(name="Unknown Artist",defaults={"artist_type": "unknown"})
+            unknown_artist, _ = Artist.objects.get_or_create(name="Unknown Artist",defaults={"artist_type": "other"})
             self.artist = unknown_artist
         super().save(*args, **kwargs)
 
@@ -222,7 +222,7 @@ class AlbumZipExport(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.album.slug} - {self.download_token}"
+        return f"{self.album.slug} - {self.status}"
 
 # =========================================================
 # Track Model
