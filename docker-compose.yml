@@ -81,17 +81,11 @@ services:
       - ./nginx/certs:/etc/letsencrypt
       - ./nginx/certbot-webroot:/var/www/certbot
       - static_volume:/usr/share/nginx/html/static/
+      - media_volume:/usr/share/nginx/html/media/
     depends_on:
      - backend
-
-#  certbot:
-#    image: certbot/certbot
-#    volumes:
-#      - ./data/certbot/conf:/etc/letsencrypt
-#      - ./data/certbot/www:/var/www/certbot
 
 volumes:
   postgres_data:
   static_volume:
   media_volume:
-
