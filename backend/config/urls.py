@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.http import HttpResponse
 from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from django.conf import settings
