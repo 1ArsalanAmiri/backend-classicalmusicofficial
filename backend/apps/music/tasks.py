@@ -61,7 +61,7 @@ def process_album_archive_task(self, upload_record_id: int):
 
         total_files = len(audio_files)
         cover_extracted = bool(album.cover_image)
-        storage_connector = MockStorageConnector()
+        # storage_connector = MockStorageConnector()
         artist_cache = {}
         tracks_to_update = []
         task_warnings = []
@@ -112,10 +112,9 @@ def process_album_archive_task(self, upload_record_id: int):
                 if not safe_slug:
                     safe_slug = f"track-{uuid.uuid4().hex[:10]}"
 
-                # 2. Track Number (تبدیل ایمن به عدد)
+                # 2. Track Number
                 raw_track_number = audio_meta.get("tracknumber", [str(index + 1)])[0]
                 try:
-                    # مثلا اگر "1/12" باشد فقط "1" را میگیرد
                     clean_track_str = str(raw_track_number).split("/")[0].strip()
                     track_number = int(clean_track_str) if clean_track_str.isdigit() else (index + 1)
                 except (ValueError, TypeError, AttributeError):
@@ -149,7 +148,7 @@ def process_album_archive_task(self, upload_record_id: int):
                 # -------- Upload file --------
                 filename = os.path.basename(file_path)
                 target_relative_path = f"tracks/{album.slug}/{filename}"
-                final_path = storage_connector.upload_chunked(file_path, target_relative_path)
+                # final_path = storage_connector.upload_chunked(file_path, target_relative_path)
 
                 tracks_to_update.append({
                     "album": album,
@@ -160,7 +159,7 @@ def process_album_archive_task(self, upload_record_id: int):
                         "genre": genre_obj,
                         "composer": artist_obj,
                         "duration_ms": duration_ms,
-                        "audio_file": final_path,
+                        # "audio_file": final_path,
                     }
                 })
 
@@ -190,18 +189,15 @@ def process_album_archive_task(self, upload_record_id: int):
                 logger.error(f"DB Update failed for track {data.get('title')}: {db_err}")
                 task_warnings.append(f"خطای دیتابیس برای ترک {data.get('title')}")
 
-        # بروزرسانی وضعیت نهایی
         upload_record.status = "completed"
         upload_record.progress = 100
 
-        # اگر در طول پروسه هشداری داشتیم، آن را در لاگ ذخیره میکنیم تا مدیر ببیند
         if task_warnings:
             upload_record.error_log = "هشدارهای تسک:\n" + "\n".join(task_warnings)
 
         upload_record.save(update_fields=["status", "progress", "error_log"])
 
     except ValueError as ve:
-        # خطاهای منطقی (مثل فرمت اشتباه) نیازی به Retry ندارند
         if upload_record:
             upload_record.status = "failed"
             upload_record.error_log = str(ve)
@@ -209,7 +205,6 @@ def process_album_archive_task(self, upload_record_id: int):
         logger.error(f"Validation Error in task {upload_record_id}: {ve}")
 
     except Exception as e:
-        # خطاهای پیش بینی نشده (شبکه، دیتابیس اصلی، پر شدن هارد) نیاز به Retry دارند
         if upload_record:
             upload_record.status = "failed"
             upload_record.error_log = str(e)
@@ -218,7 +213,6 @@ def process_album_archive_task(self, upload_record_id: int):
         raise self.retry(exc=e, countdown=10)
 
     finally:
-        # حذف ایمن پوشه موقت
         if temp_dir and os.path.exists(temp_dir):
             try:
                 shutil.rmtree(temp_dir)
