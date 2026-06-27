@@ -13,7 +13,7 @@ from django.core.files.base import ContentFile
 from django.db import transaction
 from .models import AlbumArchiveUpload, Track, Artist, AlbumZipExport ,Genre
 import logging
-
+from .utils import MockStorageConnector
 
 
 logger = logging.getLogger(__name__)
