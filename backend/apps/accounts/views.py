@@ -28,7 +28,7 @@ class LoginView(APIView):
         phone_number = request.data.get('phone_number')
         password = request.data.get('password')
 
-        user = authenticate(request, username=phone_number, password=password)
+        user = authenticate(request, phone_number=phone_number, password=password)
         if not user :
             raise serializers.ValidationError("Username or password is incorrect.")
 
@@ -209,7 +209,8 @@ class VerifyDeleteAccountView(APIView):
 
             user = request.user
             user.is_active = False
-            user.phone_number = f"deleted_{user.id}_{int(time.time())}"
+            fake_identifier = str(int(time.time()))[-7:]
+            user.phone_number = f"+98000{fake_identifier}"
             user.first_name = ""
             user.last_name = ""
             user.save()

@@ -30,19 +30,6 @@ class UserProfileSerializer(serializers.ModelSerializer):
         return jalali_date.strftime("%Y/%m/%d")
 
 
-    def to_representation(self, instance):
-        representation = super().to_representation(instance)
-
-        if instance.date_joined:
-            local_time = timezone.localtime(instance.date_joined)
-
-            jalali_date = jdatetime.datetime.fromgregorian(datetime=local_time)
-
-            representation['date_joined'] = jalali_date.strftime("%Y/%m/%d %H:%M:%S")
-
-        return representation
-
-
 
 class LoginSerializer(serializers.Serializer):
     phone_number = PhoneNumberField(region="IR")
@@ -51,7 +38,6 @@ class LoginSerializer(serializers.Serializer):
 
 
 class LogoutSerializer(serializers.Serializer):
-    phone_number = PhoneNumberField(region="IR", required=False)
     refresh = serializers.CharField(required=True)
 
 
