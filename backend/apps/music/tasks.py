@@ -3,18 +3,20 @@ import tempfile
 import zipfile
 import rarfile
 import shutil
-from mutagen import File as MutagenFile
-from celery import shared_task
-from django.utils.text import slugify
-from datetime import timedelta
-from django.utils import timezone
 import uuid
+import logging
+from datetime import timedelta
+
+from django.utils import timezone
+from django.utils.text import slugify
 from django.core.files.base import ContentFile
 from django.db import transaction
-from .models import AlbumArchiveUpload, Track, Artist, AlbumZipExport ,Genre
-import logging
+from celery import shared_task
+from mutagen import File as MutagenFile
 
-
+from .models import AlbumArchiveUpload, Track, Artist, AlbumZipExport, Genre
+# در صورت نیاز کانکتور واقعی را ایمپورت کنید، فعلا از کلاس موجود در utils استفاده می‌کنیم
+from .utils import MockStorageConnector
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,9 @@ def process_album_archive_task(self, upload_record_id: int):
         upload_record.save(update_fields=["status"])
 
         archive_path = upload_record.archive_file.path
+        if not os.path.exists(archive_path):
+            raise ValueError("فایل آرشیو در مسیر مشخص شده یافت نشد.")
+
         temp_dir = tempfile.mkdtemp()
 
         # -------- Extract --------
@@ -61,8 +66,7 @@ def process_album_archive_task(self, upload_record_id: int):
 
         total_files = len(audio_files)
         cover_extracted = bool(album.cover_image)
-        # storage_connector = MockStorageConnector()
-        artist_cache = {}
+        storage_connector = MockStorageConnector()
         tracks_to_update = []
         task_warnings = []
 
@@ -73,13 +77,14 @@ def process_album_archive_task(self, upload_record_id: int):
                     audio_meta = MutagenFile(file_path, easy=True)
                 except Exception as meta_error:
                     logger.warning(f"Skipping {file_path}: Metadata read error - {meta_error}")
-                    task_warnings.append(f"خطا در خواندن فایل {os.path.basename(file_path)}")
+                    task_warnings.append(f"خطا در خواندن متادیتا فایل {os.path.basename(file_path)}")
                     continue
 
                 if not audio_meta:
+                    task_warnings.append(f"فایل {os.path.basename(file_path)} فاقد متادیتای معتبر است.")
                     continue
 
-                # -------- Extract cover once ایمن --------
+                # -------- Extract cover --------
                 if not cover_extracted and audio_raw:
                     try:
                         image_data, mime_type = None, None
@@ -105,50 +110,66 @@ def process_album_archive_task(self, upload_record_id: int):
                         logger.warning(f"Failed to extract cover from {file_path}: {cover_error}")
 
                 # -------- Metadata Extraction --------
+                filename = os.path.basename(file_path)
+
                 # 1. Title & Slug
-                raw_title = audio_meta.get("title", [os.path.basename(file_path)])[0]
-                safe_title = (raw_title or "Untitled")[:450]
+                raw_title_list = audio_meta.get("title", [filename])
+                raw_title = raw_title_list[0] if raw_title_list else filename
+                safe_title = (str(raw_title) or "Untitled")[:450]
                 safe_slug = slugify(safe_title, allow_unicode=True)[:450]
                 if not safe_slug:
                     safe_slug = f"track-{uuid.uuid4().hex[:10]}"
 
                 # 2. Track Number
-                raw_track_number = audio_meta.get("tracknumber", [str(index + 1)])[0]
+                raw_track_number_list = audio_meta.get("tracknumber", [str(index + 1)])
+                raw_track_number = raw_track_number_list[0] if raw_track_number_list else str(index + 1)
                 try:
                     clean_track_str = str(raw_track_number).split("/")[0].strip()
                     track_number = int(clean_track_str) if clean_track_str.isdigit() else (index + 1)
                 except (ValueError, TypeError, AttributeError):
                     track_number = index + 1
 
-                # 3. Artist -------------
+                # 3. Artist
+                raw_artist_name_list = audio_meta.get("artist", [None])
+                raw_artist_name = raw_artist_name_list[0] if raw_artist_name_list else None
+                album_artist_name = str(raw_artist_name).strip() if raw_artist_name else None
 
-                raw_artist_name = audio_meta.get("artist", [None])[0]
-                album_artist_name = raw_artist_name.strip() if raw_artist_name else None
                 artist_obj = None
                 if album_artist_name:
                     artist_obj = Artist.objects.filter(name__iexact=album_artist_name).first()
-
                 if not artist_obj:
-                    artist_obj, _ = Artist.objects.get_or_create(name="Unknown Artist",defaults={"artist_type": "unknown"})
+                    artist_obj, _ = Artist.objects.get_or_create(
+                        name="Unknown Artist", defaults={"artist_type": "unknown"}
+                    )
 
-                # Genre ------------
-                genre_name = audio_meta.get("genre", [None])[0]
+                # 4. Genre
+                genre_name_list = audio_meta.get("genre", [None])
+                genre_name = genre_name_list[0] if genre_name_list else None
                 genre_obj = None
                 if genre_name:
-                    genre_obj = Genre.objects.filter(name=genre_name).only("id").first()
+                    genre_obj = Genre.objects.filter(name=str(genre_name)).only("id").first()
 
-                # 4. Duration
+                # 5. Duration
                 duration_ms = 0
                 if audio_meta.info and hasattr(audio_meta.info, "length"):
                     try:
-                        duration_ms = int(audio_meta.info.length * 1000)
+                        duration_ms = int(float(audio_meta.info.length) * 1000)
                     except (ValueError, TypeError):
                         pass
 
                 # -------- Upload file --------
-                filename = os.path.basename(file_path)
                 target_relative_path = f"tracks/{album.slug}/{filename}"
-                # final_path = storage_connector.upload_chunked(file_path, target_relative_path)
+                final_path = None
+                try:
+                    final_path = storage_connector.upload_chunked(file_path, target_relative_path)
+                except Exception as upload_err:
+                    logger.error(f"Upload failed for {file_path}: {upload_err}")
+                    task_warnings.append(f"خطا در آپلود فایل {filename}")
+                    continue
+
+                if not isinstance(final_path, str):
+                    logger.warning(f"Upload path is not string for {filename}, falling back to default.")
+                    final_path = target_relative_path
 
                 tracks_to_update.append({
                     "album": album,
@@ -159,13 +180,13 @@ def process_album_archive_task(self, upload_record_id: int):
                         "genre": genre_obj,
                         "composer": artist_obj,
                         "duration_ms": duration_ms,
-                        # "audio_file": final_path,
+                        "audio_file": final_path,
                     }
                 })
 
                 # -------- Progress update --------
                 if index % 5 == 0 or index == total_files - 1:
-                    progress = int(((index + 1) / total_files) * 90)  # رزرو 10 درصد آخر برای ذخیره دیتابیس
+                    progress = int(((index + 1) / total_files) * 90)
                     AlbumArchiveUpload.objects.filter(id=upload_record_id).update(progress=progress)
 
             except Exception as track_error:
@@ -173,9 +194,9 @@ def process_album_archive_task(self, upload_record_id: int):
                 task_warnings.append(f"خطا در پردازش کامل فایل {os.path.basename(file_path)}")
                 continue
 
-
         saved_tracks_count = 0
         for data in tracks_to_update:
+            track_title = data["defaults"].get("title", "Unknown")
             try:
                 with transaction.atomic():
                     Track.objects.update_or_create(
@@ -183,18 +204,15 @@ def process_album_archive_task(self, upload_record_id: int):
                         track_number=data["track_number"],
                         defaults=data["defaults"],
                     )
-
                 saved_tracks_count += 1
             except Exception as db_err:
-                logger.error(f"DB Update failed for track {data.get('title')}: {db_err}")
-                task_warnings.append(f"خطای دیتابیس برای ترک {data.get('title')}")
+                logger.error(f"DB Update failed for track {track_title}: {db_err}")
+                task_warnings.append(f"خطای دیتابیس برای ترک {track_title}")
 
         upload_record.status = "completed"
         upload_record.progress = 100
-
         if task_warnings:
             upload_record.error_log = "هشدارهای تسک:\n" + "\n".join(task_warnings)
-
         upload_record.save(update_fields=["status", "progress", "error_log"])
 
     except ValueError as ve:
@@ -224,9 +242,7 @@ def process_album_archive_task(self, upload_record_id: int):
 def extract_track_metadata_task(track_id):
     try:
         track = Track.objects.get(id=track_id)
-
         old_title = track.title
-
         track.extract_metadata()
 
         update_fields_list = [
@@ -239,22 +255,30 @@ def extract_track_metadata_task(track_id):
             update_fields_list.append('slug')
 
         track.save(update_fields=update_fields_list)
-
     except Track.DoesNotExist:
         pass
+    except Exception as e:
+        logger.error(f"Metadata extraction failed for track {track_id}: {e}")
 
 
 @shared_task
 def cleanup_old_album_zips():
-    expiration_date = timezone.now() - timedelta(days=7)
+    try:
+        expiration_date = timezone.now() - timedelta(days=7)
+        old_exports = AlbumZipExport.objects.filter(created_at__lt=expiration_date)
 
-    old_exports = AlbumZipExport.objects.filter(created_at__lt=expiration_date)
+        deleted_count = 0
+        for export in old_exports:
+            if export.zip_file and os.path.exists(export.zip_file.path):
+                try:
+                    os.remove(export.zip_file.path)
+                except OSError as e:
+                    logger.error(f"Failed to remove file {export.zip_file.path}: {e}")
+                    continue
+            export.delete()
+            deleted_count += 1
 
-    deleted_count = 0
-    for export in old_exports:
-        if export.zip_file and os.path.exists(export.zip_file.path):
-            os.remove(export.zip_file.path)
-        export.delete()
-        deleted_count += 1
-
-    return f"Successfully deleted {deleted_count} old album zip caches."
+        return f"Successfully deleted {deleted_count} old album zip caches."
+    except Exception as e:
+        logger.error(f"Error in cleanup_old_album_zips: {e}")
+        return "Failed during cleanup."
