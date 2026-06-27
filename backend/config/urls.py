@@ -8,10 +8,14 @@ from django.conf.urls.static import static
 def trigger_error(request):
     division_by_zero = 1 / 0
 
+def health_check(request):
+    return HttpResponse("OK")
 
 urlpatterns = [
 
     path("admin/", admin.site.urls),
+
+    path('health/', health_check),
 
     path('_nested_admin/', include('nested_admin.urls')),
 
