@@ -10,8 +10,7 @@ class AlbumFilter(django_filters.FilterSet):
 
     class Meta:
         model = Album
-        fields = ['composer', 'conductor', 'orchestra', 'soloist' , 'label']
-
+        fields = ['status', 'label']
 
 class TrackFilter(django_filters.FilterSet):
     label = django_filters.CharFilter(field_name='label__slug')
