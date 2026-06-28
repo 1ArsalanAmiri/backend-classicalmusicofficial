@@ -1,6 +1,6 @@
 from django.urls import reverse
 from rest_framework import serializers
-from .models import Artist, Album, Track,Genre, Instrument , Label , PlayHistory
+from .models import Artist, Album, Track , Genre, Instrument , Label , PlayHistory
 from drf_spectacular.utils import extend_schema_field
 
 
@@ -56,6 +56,7 @@ class TrackSerializer(serializers.ModelSerializer):
     artists = serializers.SerializerMethodField()
     cover_image = serializers.SerializerMethodField()
     audio_url = serializers.SerializerMethodField()
+    duration_seconds = serializers.SerializerMethodField()
 
     class Meta:
         model = Track
@@ -82,7 +83,7 @@ class TrackSerializer(serializers.ModelSerializer):
         return None
 
 
-    def get_audio_stream_url(self, obj):
+    def get_audio_url(self, obj):
         has_stream_access = self.context.get("has_stream_access", False)
         has_download_access = self.context.get("has_download_access", False)
         if not has_stream_access or has_download_access:
@@ -91,6 +92,7 @@ class TrackSerializer(serializers.ModelSerializer):
         if request is None:
             return None
         return request.build_absolute_uri(reverse('track-stream', kwargs={'slug': obj.slug}))
+
 
     @extend_schema_field(serializers.IntegerField())
     def get_duration_seconds(self, obj):
