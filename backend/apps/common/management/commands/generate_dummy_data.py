@@ -4,6 +4,7 @@ from django.core.management.base import BaseCommand
 from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
 from django.utils.text import slugify
+from django.db import IntegrityError
 
 from apps.accounts.models import CustomUser
 from apps.profiles.models import UserProfile
@@ -21,7 +22,6 @@ class Command(BaseCommand):
     help = "Generate dummy data for development"
 
     def handle(self, *args, **kwargs):
-
         self.stdout.write(self.style.SUCCESS("Generating dummy data..."))
 
         users = self.create_users(10)
@@ -29,168 +29,122 @@ class Command(BaseCommand):
         instruments = self.create_instruments()
         labels = self.create_labels(5)
         artists = self.create_artists(10)
-        albums = self.create_albums(10, artists, labels)
+        albums = self.create_albums(20, artists, labels)
 
-        tracks = self.create_tracks(30, albums, artists, genres, instruments, labels)
+        # We need to make sure we have albums before creating tracks
+        if not albums:
+            self.stdout.write(self.style.WARNING("No albums found or created, skipping track generation."))
+            tracks = []
+        else:
+            tracks = self.create_tracks(50, albums, artists, genres, instruments)
 
-        playlists = self.create_playlists(users, tracks)
+        if users and tracks:
+            playlists = self.create_playlists(users, tracks)
+        else:
+            self.stdout.write(self.style.WARNING("Skipping playlist generation due to missing users or tracks."))
+            playlists = []
 
-        self.create_comments(users, albums)
-        self.create_likes(users, artists, albums, tracks, playlists)
-        self.create_follows(users, artists, playlists)
+        if users and albums:
+            self.create_comments(users, albums)
+
+        likeable_objects = artists + albums + tracks + (playlists if playlists else [])
+        if users and likeable_objects:
+            self.create_likes(users, likeable_objects)
+
+        followable_objects = artists + (playlists if playlists else [])
+        if users and followable_objects:
+            self.create_follows(users, followable_objects)
 
         self.create_discounts()
 
-        self.stdout.write(self.style.SUCCESS("Dummy data generated successfully ✅"))
-
-    # -------------------------------------------------
-    # USERS
-    # -------------------------------------------------
+        self.stdout.write(self.style.SUCCESS("Dummy data generation process finished ✅"))
 
     def create_users(self, count):
-
         users = []
-
         for i in range(count):
-
-            phone = f"+989{random.randint(100000000,999999999)}"
-
-            user, _ = CustomUser.objects.get_or_create(
-                phone_number=phone,
+            username = f'user{i}'
+            email = f'user{i}@example.com'
+            user, created = CustomUser.objects.get_or_create(
+                username=username,
                 defaults={
-                    "username": f"user{i}",
-                    "first_name": fake.first_name(),
-                    "last_name": fake.last_name(),
-                    "email": fake.email(),
+                    'email': email,
+                    'first_name': fake.first_name(),
+                    'last_name': fake.last_name(),
+                    'is_active': True
                 }
             )
-
-            user.set_password("password123")
-            user.save()
-
+            if created:
+                user.set_password('password12345')
+                user.save()
             UserProfile.objects.get_or_create(user=user)
-
             users.append(user)
-
+        self.stdout.write(self.style.SUCCESS(f'Successfully created/verified {len(users)} users.'))
         return users
 
-    # -------------------------------------------------
-    # GENRES
-    # -------------------------------------------------
-
     def create_genres(self):
-
-        names = [
-            "Classical",
-            "Baroque",
-            "Romantic",
-            "Opera",
-            "Symphony",
-            "Chamber Music",
-        ]
-
+        names = ["Classical", "Baroque", "Romantic", "Opera", "Symphony", "Chamber Music"]
         genres = []
-
         for name in names:
-
             genre, _ = Genre.objects.get_or_create(
                 name=name,
-                defaults={"slug": name.lower().replace(" ", "-")}
+                defaults={"slug": slugify(name)}
             )
-
             genres.append(genre)
-
+        self.stdout.write(self.style.SUCCESS(f'Successfully created/verified {len(genres)} genres.'))
         return genres
 
-    # -------------------------------------------------
-    # INSTRUMENTS
-    # -------------------------------------------------
-
     def create_instruments(self):
-
-        names = [
-            "Piano",
-            "Violin",
-            "Cello",
-            "Flute",
-            "Clarinet",
-            "Harp"
-        ]
-
+        names = ["Piano", "Violin", "Cello", "Flute", "Clarinet", "Harp"]
         instruments = []
-
         for name in names:
-
-            inst, _ = Instrument.objects.get_or_create(
-                name=name,
-                defaults={"slug": name.lower()}
-            )
-
+            inst, _ = Instrument.objects.get_or_create(name=name, defaults={"slug": slugify(name)})
             instruments.append(inst)
-
+        self.stdout.write(self.style.SUCCESS(f'Successfully created/verified {len(instruments)} instruments.'))
         return instruments
 
-    # -------------------------------------------------
-    # LABELS
-    # -------------------------------------------------
-
     def create_labels(self, count):
-
         labels = []
-
         for _ in range(count):
-
             name = fake.company()
-
             label, _ = Label.objects.get_or_create(
                 name=name,
-                defaults={
-                    "slug": name.lower().replace(" ", "-"),
-                    "country": fake.country(),
-                }
+                defaults={"slug": slugify(name), "country": fake.country()}
             )
-
             labels.append(label)
-
+        self.stdout.write(self.style.SUCCESS(f'Successfully created/verified {len(labels)} labels.'))
         return labels
 
-    # -------------------------------------------------
-    # ARTISTS
-    # -------------------------------------------------
-
     def create_artists(self, count):
-
         artists = []
-
         for _ in range(count):
-
             name = fake.name()
-
-            artist = Artist.objects.create(
-                name=name,
-                country=fake.country(),
-                biography=fake.text(max_nb_chars=300),
-                artist_type=random.choice(["person", "ensemble", "orchestra"])
-            )
-
-            artists.append(artist)
-
+            try:
+                artist, _ = Artist.objects.get_or_create(
+                    name=name,
+                    defaults={
+                        "slug": slugify(name),
+                        "country": fake.country(),
+                        "biography": fake.text(max_nb_chars=300),
+                        "artist_type": random.choice(["person", "ensemble", "orchestra"])
+                    }
+                )
+                artists.append(artist)
+            except IntegrityError:
+                # In case a slug collision happens with a different name
+                continue
+        self.stdout.write(self.style.SUCCESS(f'Successfully created/verified {len(artists)} artists.'))
         return artists
 
-    # -------------------------------------------------
-    # ALBUMS
-    # -------------------------------------------------
-
     def create_albums(self, count, artists, labels):
-
         albums = []
-
+        if not artists or not labels:
+            self.stdout.write(self.style.WARNING("Cannot create albums without artists and labels."))
+            return []
         for _ in range(count):
             album_title = fake.sentence(nb_words=3)
             base_slug = slugify(album_title)
             album_slug = base_slug
             counter = 1
-
             while Album.objects.filter(slug=album_slug).exists():
                 album_slug = f"{base_slug}-{counter}"
                 counter += 1
@@ -198,149 +152,124 @@ class Command(BaseCommand):
             album = Album.objects.create(
                 title=album_title,
                 slug=album_slug,
-                composer=fake.name(),
                 artist=random.choice(artists),
+                label=random.choice(labels),
+                release_date=fake.date_between("-30y", "today"),
+                # Optional fields
+                composer=fake.name(),
                 conductor=fake.name(),
                 orchestra=fake.company(),
                 soloist=fake.name(),
                 ensemble=fake.company(),
-                release_date=fake.date_between("-30y", "today"),
-                label=random.choice(labels),
             )
             albums.append(album)
-
+        self.stdout.write(self.style.SUCCESS(f'Successfully created {len(albums)} albums.'))
         return albums
 
-    # -------------------------------------------------
-    # TRACKS
-    # -------------------------------------------------
-
-    def create_tracks(self, count, albums, artists, genres, instruments, labels):
-
-        tracks = []
-
+    def create_tracks(self, count, albums, artists, genres, instruments):
+        processed_tracks = []
         for i in range(count):
-
             album = random.choice(albums)
+            last_track = Track.objects.filter(album=album).order_by('-track_number').first()
+            next_track_number = (last_track.track_number + 1) if last_track else 1
 
-            track = Track.objects.create(
+            track_title = f'Dummy Track {i} {random.randint(1000, 9999)}'
+
+            # --- Dynamically build defaults to avoid FieldError ---
+            defaults = {'title': track_title}
+            if hasattr(Track, 'slug'):
+                defaults['slug'] = slugify(track_title)
+            if hasattr(Track, 'duration'):
+                defaults['duration'] = random.randint(120, 600)
+            if hasattr(Track, 'audio_file'):
+                defaults['audio_file'] = 'path/to/dummy.mp3'
+            # --- End of dynamic build ---
+
+            track, created = Track.objects.get_or_create(
                 album=album,
-                title=fake.sentence(nb_words=3),
-                genre=random.choice(genres),
-                instrument=random.choice(instruments),
-                composer=random.choice(artists),
-                singer=random.choice(artists),
-                track_number=random.randint(1, 12),
-                duration_ms=random.randint(60000, 500000),
-                description=fake.text(100),
-                label=random.choice(labels),
-                audio_file="dummy.mp3",
+                track_number=next_track_number,
+                defaults=defaults
             )
 
-            tracks.append(track)
+            if created:
+                # Dynamically set relationships
+                if hasattr(track, 'artist') and not hasattr(track, 'artists'):
+                    track.artist = random.choice(artists)
+                if hasattr(track, 'artists') and hasattr(track.artists, 'set'):
+                    track.artists.set(random.sample(list(artists), k=random.randint(1, min(3, len(artists)))))
+                if hasattr(track, 'genres') and hasattr(track.genres, 'set'):
+                    track.genres.set(random.sample(list(genres), k=random.randint(1, min(2, len(genres)))))
+                if instruments and hasattr(track, 'instruments') and hasattr(track.instruments, 'set'):
+                    track.instruments.set(
+                        random.sample(list(instruments), k=random.randint(0, min(2, len(instruments)))))
+                track.save()
 
-        return tracks
-
-    # -------------------------------------------------
-    # PLAYLISTS
-    # -------------------------------------------------
+            processed_tracks.append(track)
+        self.stdout.write(self.style.SUCCESS(f'Successfully processed {len(processed_tracks)} tracks.'))
+        return processed_tracks
 
     def create_playlists(self, users, tracks):
-
         playlists = []
-
         for user in users:
-
             for _ in range(random.randint(1, 3)):
-
                 playlist = Playlist.objects.create(
-                    owner=user,
-                    title=fake.sentence(nb_words=3),
-                    description=fake.text(100),
-                    is_public=True
+                    owner=user, title=fake.sentence(nb_words=3), description=fake.text(100), is_public=True
                 )
-
-                sample_tracks = random.sample(tracks, random.randint(5, 15))
-
-                for order, track in enumerate(sample_tracks):
-
-                    PlaylistTrack.objects.create(
-                        playlist=playlist,
-                        track=track,
-                        order=order
-                    )
-
+                sample_tracks = random.sample(tracks, k=random.randint(1, min(15, len(tracks))))
+                for order, track in enumerate(sample_tracks, 1):
+                    PlaylistTrack.objects.create(playlist=playlist, track=track, order=order)
                 playlists.append(playlist)
-
+        self.stdout.write(self.style.SUCCESS(f'Successfully created {len(playlists)} playlists.'))
         return playlists
 
-    # -------------------------------------------------
-    # COMMENTS
-    # -------------------------------------------------
-
     def create_comments(self, users, albums):
-
-        for _ in range(200):
-
+        comments_count = 0
+        for _ in range(50):
             Comment.objects.create(
-                user=random.choice(users),
-                album=random.choice(albums),
-                body=fake.sentence(),
-                is_approved=True
+                user=random.choice(users), album=random.choice(albums), body=fake.sentence(), is_approved=True
             )
+            comments_count += 1
+        self.stdout.write(self.style.SUCCESS(f'Successfully created {comments_count} comments.'))
 
-    # -------------------------------------------------
-    # LIKES
-    # -------------------------------------------------
-
-    def create_likes(self, users, artists, albums, tracks, playlists):
-
-        models = artists + albums + tracks + playlists
-
-        for _ in range(300):
-
+    def create_likes(self, users, models):
+        likes_count = 0
+        for _ in range(100):
             obj = random.choice(models)
-
-            Like.objects.get_or_create(
+            _, created = Like.objects.get_or_create(
                 user=random.choice(users),
                 content_type=ContentType.objects.get_for_model(obj),
                 object_id=obj.id
             )
+            if created:
+                likes_count += 1
+        self.stdout.write(self.style.SUCCESS(f'Successfully created {likes_count} new likes.'))
 
-    # -------------------------------------------------
-    # FOLLOWS
-    # -------------------------------------------------
-
-    def create_follows(self, users, artists, playlists):
-
-        models = artists + playlists
-
-        for _ in range(150):
-
+    def create_follows(self, users, models):
+        follows_count = 0
+        for _ in range(50):
             obj = random.choice(models)
-
-            Follow.objects.get_or_create(
+            _, created = Follow.objects.get_or_create(
                 user=random.choice(users),
                 content_type=ContentType.objects.get_for_model(obj),
                 object_id=obj.id
             )
-
-    # -------------------------------------------------
-    # DISCOUNTS
-    # -------------------------------------------------
+            if created:
+                follows_count += 1
+        self.stdout.write(self.style.SUCCESS(f'Successfully created {follows_count} new follows.'))
 
     def create_discounts(self):
-
         for i in range(5):
-
-            Discount.objects.create(
-                name=f"Test Discount {i}",
+            Discount.objects.get_or_create(
                 code=f"TEST{i}",
-                discount_type="percentage",
-                discount_value=random.randint(5, 30),
-                start_date=timezone.now(),
-                end_date=timezone.now() + timezone.timedelta(days=30),
-                max_uses=100,
-                max_uses_per_user=2,
-                is_active=True
+                defaults={
+                    "name": f"Test Discount {i}",
+                    "discount_type": "percentage",
+                    "discount_value": random.randint(5, 30),
+                    "start_date": timezone.now(),
+                    "end_date": timezone.now() + timezone.timedelta(days=30),
+                    "max_uses": 100,
+                    "max_uses_per_user": 2,
+                    "is_active": True
+                }
             )
+        self.stdout.write(self.style.SUCCESS('Successfully created/verified 5 discounts.'))
