@@ -2,7 +2,8 @@ from django.contrib import admin, messages
 from django.urls import path
 from django.utils.html import format_html, mark_safe
 from django.utils.translation import gettext_lazy as _
-from .models import Artist, Album, Track, AlbumArchiveUpload, ArchiveUploadStatus, Genre, Instrument, Label
+# مدل AlbumCredit اضافه شد
+from .models import Artist, Album, Track, AlbumArchiveUpload, ArchiveUploadStatus, Genre, Instrument, Label, AlbumCredit
 from django.http import JsonResponse
 from django.template.response import TemplateResponse
 from admin_extra_buttons.api import ExtraButtonsMixin, button
@@ -11,14 +12,24 @@ from .tasks import process_album_archive_task
 
 
 # =========================================================
-# Track Inline for Album Admin
+# Inlines
 # =========================================================
+
+# اینلاین جدید برای مدیریت نقش آرتیست‌ها در آلبوم
+class AlbumCreditInline(admin.TabularInline):
+    model = AlbumCredit
+    extra = 1
+    autocomplete_fields = ["artist"]
+    classes = ('collapse',)
+
+
 class TrackInline(admin.TabularInline):
     model = Track
     extra = 0
-    fields = ("track_number", "title", "audio_file", "duration_ms", "composer", "singer", "status")
-    autocomplete_fields = ["composer", "singer"]
+    # فیلدهای composer و singer حذف شدند
+    fields = ("track_number", "title", "audio_file", "duration_ms", "status")
     ordering = ["track_number"]
+    show_change_link = True
 
 
 class TrackInlineForLabel(admin.TabularInline):
@@ -27,11 +38,10 @@ class TrackInlineForLabel(admin.TabularInline):
     show_change_link = True
     fields = ('title', 'release_date', 'status')
     classes = ('collapse',)
-    # readonly_fields = ('title', 'release_date', 'is_published')
 
 
 # =========================================================
-# Label Admin (لیبل / ناشر)
+# Label Admin
 # =========================================================
 @admin.register(Label)
 class LabelAdmin(admin.ModelAdmin):
@@ -71,6 +81,7 @@ class LabelAdmin(admin.ModelAdmin):
 
         return mark_safe('<div style="display: flex; flex-wrap: wrap;">' + ''.join(links) + '</div>')
 
+
 # =========================================================
 # Artist Admin
 # =========================================================
@@ -94,16 +105,20 @@ class ArtistAdmin(admin.ModelAdmin):
         }),
     )
 
+
 # =========================================================
 # Track Admin (Standalone)
 # =========================================================
 @admin.register(Track)
 class TrackAdmin(ExtraButtonsMixin, admin.ModelAdmin):
-    # فیلد label به نمایش اضافه شد
     list_display = ['title', 'get_album_or_single', 'label', 'track_number', 'get_duration', 'status']
-    # فیلتر بر اساس لیبل اضافه شد
     list_filter = ['status', 'album', 'label']
-    search_fields = ['title', 'album__title', 'label__name']
+    # جستجو در نام آرتیست‌های مشارکت کننده اضافه شد
+    search_fields = ['title', 'album__title', 'label__name', 'artists__name']
+
+    # برای مدیریت راحت‌تر فیلد ManyToMany آرتیست‌ها
+    filter_horizontal = ('artists',)
+    autocomplete_fields = ['album', 'genre', 'instrument', 'label']
 
     @admin.display(description='آلبوم / سینگل', ordering='album__title')
     def get_album_or_single(self, obj):
@@ -120,20 +135,23 @@ class TrackAdmin(ExtraButtonsMixin, admin.ModelAdmin):
         seconds = seconds % 60
         return f"{minutes:02}:{seconds:02}"
 
+
 # =========================================================
 # Album Admin
 # =========================================================
 @admin.register(Album)
 class AlbumAdmin(admin.ModelAdmin):
-    list_display = ('title', 'composer', 'label', 'status', 'upload_archive_button', 'display_cover_image')
+    # فیلدهای composer حذف و artist و title_fa اضافه شدند
+    list_display = ('title', 'title_fa', 'artist', 'label', 'status', 'upload_archive_button', 'display_cover_image')
     list_filter = ('status', 'release_date', 'label')
-    search_fields = ('title', 'composer', 'conductor', 'orchestra', 'soloist', 'ensemble', 'label__name')
+    # فیلدهای سرچ قدیمی حذف و نام آرتیست‌های درگیر اضافه شد
+    search_fields = ('title', 'title_fa', 'artist__name', 'credits__artist__name', 'label__name')
     prepopulated_fields = {"slug": ("title",)}
     readonly_fields = ("created_at", "updated_at")
-    autocomplete_fields = ['artist']
+    autocomplete_fields = ['artist', 'label']
 
-
-    inlines = [TrackInline]
+    # اینلاین AlbumCredit اضافه شد
+    inlines = [AlbumCreditInline, TrackInline]
 
     def display_cover_image(self, obj):
         if obj.cover_image:
@@ -208,6 +226,7 @@ class AlbumAdmin(admin.ModelAdmin):
         except AlbumArchiveUpload.DoesNotExist:
             return JsonResponse({'status': 'ERROR', 'error_log': 'Record not found'}, status=404)
 
+
 # =========================================================
 # Genre Admin
 # =========================================================
@@ -224,6 +243,7 @@ class GenreAdmin(admin.ModelAdmin):
         ("اطلاعات سیستمی", {"fields": ("created_at", "updated_at")}),
     )
 
+
 # =========================================================
 # Instrument Admin
 # =========================================================
@@ -239,5 +259,3 @@ class InstrumentAdmin(admin.ModelAdmin):
         ("اطلاعات ساز", {"fields": ("name", "slug")}),
         ("اطلاعات سیستمی", {"fields": ("created_at", "updated_at")}),
     )
-
-

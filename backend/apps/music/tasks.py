@@ -178,10 +178,10 @@ def process_album_archive_task(self, upload_record_id: int):
                         "title": safe_title,
                         "slug": safe_slug,
                         "genre": genre_obj,
-                        "composer": artist_obj,
                         "duration_ms": duration_ms,
                         "audio_file": final_path,
-                    }
+                    },
+                    "artist_obj": artist_obj
                 })
 
                 # -------- Progress update --------
@@ -199,15 +199,18 @@ def process_album_archive_task(self, upload_record_id: int):
             track_title = data["defaults"].get("title", "Unknown")
             try:
                 with transaction.atomic():
-                    Track.objects.update_or_create(
+                    track, created = Track.objects.update_or_create(
                         album=data["album"],
                         track_number=data["track_number"],
                         defaults=data["defaults"],
                     )
+                    if data["artist_obj"]:
+                        track.artists.add(data["artist_obj"])
                 saved_tracks_count += 1
             except Exception as db_err:
                 logger.error(f"DB Update failed for track {track_title}: {db_err}")
                 task_warnings.append(f"خطای دیتابیس برای ترک {track_title}")
+
 
         upload_record.status = "completed"
         upload_record.progress = 100
@@ -246,8 +249,7 @@ def extract_track_metadata_task(track_id):
         track.extract_metadata()
 
         update_fields_list = [
-            'title', 'duration_ms', 'singer', 'composer',
-            'genre', 'track_number', 'release_date', 'cover_image'
+            'title', 'duration_ms', 'genre', 'track_number', 'release_date', 'cover_image'
         ]
 
         if track.title != old_title and not track.slug:

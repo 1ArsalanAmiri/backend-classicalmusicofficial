@@ -41,21 +41,19 @@ class RelatedArtistSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "slug", "image"]
 
 
-
 class TrackSerializer(serializers.ModelSerializer):
-    singer_name = serializers.CharField(source='singer.name', read_only=True)
-    composer_name = serializers.CharField(source='composer.name', read_only=True)
     instrument_name = serializers.CharField(source='instrument.name', read_only=True)
     duration_seconds = serializers.SerializerMethodField()
     audio_stream_url = serializers.SerializerMethodField()
+    artists = RelatedArtistSerializer(many=True, read_only=True)
 
     class Meta:
         model = Track
         fields = [
-            'id','title','album','singer','composer', 'slug', 'audio_stream_url' ,'cover_image', 'release_date',
-            'duration_seconds', 'instrument_name',
-            'composer_name','singer_name','status','likes_count'
+            'id', 'title', 'album', 'artists', 'slug', 'audio_stream_url', 'cover_image', 'release_date',
+            'duration_seconds', 'instrument_name', 'status', 'likes_count'
         ]
+
 
     def get_audio_stream_url(self, obj):
         has_stream_access = self.context.get("has_stream_access", False)
@@ -76,7 +74,6 @@ class TrackSerializer(serializers.ModelSerializer):
         return obj.duration_ms // 1000
 
 
-
 class AlbumListSerializer(serializers.ModelSerializer):
     total_tracks = serializers.IntegerField(read_only=True)
 
@@ -88,72 +85,26 @@ class AlbumListSerializer(serializers.ModelSerializer):
         ]
 
 
-
 class AlbumDetailSerializer(serializers.ModelSerializer):
-
     tracks = TrackSerializer(many=True, read_only=True)
-
     total_tracks = serializers.IntegerField(read_only=True)
     total_duration_ms = serializers.IntegerField(read_only=True)
+    main_artist = RelatedArtistSerializer(source='artist', read_only=True)
     on_this_album = serializers.SerializerMethodField()
 
     class Meta:
         model = Album
         fields = [
-            'id', 'title', 'slug', 'cover_image', 'release_date',
-            'composer', 'conductor', 'orchestra', 'soloist', 'ensemble',
-            'on_this_album', 'total_tracks', 'total_duration_ms', 'status',
-            'tracks','likes_count','comments_count',
+            'id', 'title', 'title_fa', 'slug', 'cover_image', 'release_date',
+            'main_artist', 'on_this_album', 'total_tracks', 'total_duration_ms', 'status',
+            'tracks', 'likes_count', 'comments_count',
         ]
 
 
-    @extend_schema_field(serializers.ListField())
+    @extend_schema_field(RelatedArtistSerializer(many=True))
     def get_on_this_album(self, obj):
-        names = obj.on_this_album
-        if not names:
-            return []
-        existing_artists = Artist.objects.filter(name__in=names).only('name', 'slug')
-        artist_map = {artist.name: artist for artist in existing_artists}
-        request = self.context.get('request')
-        result = []
-        for name in names:
-            if name in artist_map:
-                artist = artist_map[name]
-                try:
-                    profile_url = request.build_absolute_uri(reverse('artist-detail', kwargs={'slug': artist.slug}))
-                except Exception:
-                    profile_url = None
-                result.append({
-                    "name": name,
-                    "profile_url": profile_url,
-                    "slug": artist.slug,
-                    "has_profile": True
-                })
-            else:
-                result.append({
-                    "name": name,
-                    "profile_url": None,
-                    "slug": None,
-                    "has_profile": False
-                })
-        return result
-
-
-    def to_representation(self, instance):
-        representation = super().to_representation(instance)
-        track_composers = [
-            track.composer.name for track in instance.tracks.all()
-            if track.composer
-        ]
-        album_on_this = instance.on_this_album
-        has_common_composer = any(composer in album_on_this for composer in track_composers)
-        if has_common_composer:
-            fields_to_remove = ['composer', 'conductor', 'orchestra', 'soloist', 'ensemble']
-            for field in fields_to_remove:
-                representation.pop(field, None)
-
-        return representation
-
+        artists = obj.on_this_album
+        return RelatedArtistSerializer(artists, many=True, context=self.context).data
 
 
 class GenreSerializer(serializers.ModelSerializer):

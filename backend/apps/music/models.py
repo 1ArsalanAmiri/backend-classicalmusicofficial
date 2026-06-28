@@ -18,11 +18,13 @@ logger = getLogger(__name__)
 # Choices
 # =========================================================
 
-class ArtistType(models.TextChoices):
-    PERSON = "person", _("شخص")
+class ArtistRole(models.TextChoices):
+    COMPOSER = "composer", _("آهنگساز")
+    CONDUCTOR = "conductor", _("رهبر ارکستر")
     ORCHESTRA = "orchestra", _("ارکستر")
-    ENSEMBLE = "ensemble", _("گروه")
-    CHOIR = "choir", _("کر")
+    SOLOIST = "soloist", _("نوازنده (سولیست)")
+    ENSEMBLE = "ensemble", _("گروه موسیقی")
+    SINGER = "singer", _("خواننده")
     OTHER = "other", _("سایر")
 
 
@@ -107,21 +109,15 @@ class Label(TimeStampedModel):
 
 
 class Album(TimeStampedModel):
-    composer = models.CharField(_("نام آهنگساز"), max_length=255, blank=True)
-    artist = models.ForeignKey('Artist',on_delete=models.SET_NULL,null=True,blank=True,verbose_name="آرتیست",related_name="albums")
-    title = models.CharField(_("عنوان آلبوم"), max_length=300 , blank = True,default="untitled")
+    artist = models.ForeignKey('Artist', on_delete=models.SET_NULL, null=True, blank=True,verbose_name=_("آرتیست اصلی"), related_name="albums")
+    title = models.CharField(_("عنوان آلبوم"), max_length=300, blank=True, default="untitled")
+    title_fa = models.CharField(_("عنوان فارسی"), max_length=300, blank=True, null=True)
     slug = models.SlugField(_("اسلاگ"), max_length=300, unique=True, blank=True, allow_unicode=True)
-    source_path = models.CharField(max_length=500, unique=True , blank=True ,null=True)
-    cover_image = models.ImageField(_("تصویر آلبوم"),upload_to=album_cover_path,null=True,blank=True,validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])])
+    source_path = models.CharField(max_length=500, unique=True, blank=True, null=True)
+    cover_image = models.ImageField(_("تصویر آلبوم"), upload_to=album_cover_path, null=True, blank=True,validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])])
     release_date = models.DateField(_("تاریخ انتشار"), null=True, blank=True)
-    conductor = models.CharField(_("نام رهبر ارکستر"), max_length=255, blank=True)
-    orchestra = models.CharField(_("نام ارکستر"), max_length=255, blank=True)
-    soloist = models.CharField(_("نام نوازنده"), max_length=255, blank=True)
-    ensemble = models.CharField(_("نام گروه موسیقی"), max_length=255, blank=True)
-    status = models.CharField(_("وضعیت انتشار"),max_length=20,choices=PublishStatus.choices,default=PublishStatus.PUBLISHED,db_index=True)
-
+    status = models.CharField(_("وضعیت انتشار"), max_length=20, choices=PublishStatus.choices,default=PublishStatus.PUBLISHED, db_index=True)
     label = models.ForeignKey(Label, on_delete=models.SET_NULL, null=True, blank=True, related_name="albums_by_label",verbose_name=_("لیبل ناشر"))
-
     likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
     comments_count = models.PositiveIntegerField(_("تعداد کامنت"), default=0)
 
@@ -150,8 +146,7 @@ class Album(TimeStampedModel):
 
     @property
     def on_this_album(self):
-        names = [self.composer, self.conductor, self.orchestra, self.soloist, self.ensemble]
-        return [name.strip() for name in names if name and name.strip()]
+        return Artist.objects.filter(album_credits__album=self).distinct()
 
     def save(self, *args, **kwargs):
         if not self.artist:
@@ -168,7 +163,7 @@ class Artist(TimeStampedModel):
     name = models.CharField(_("نام آرتیست"), max_length=255)
     slug = models.SlugField(_("اسلاگ"), max_length=120, unique=True, blank=True, allow_unicode=True)
     country = models.CharField(_("ملیت/کشور"), max_length=100, blank=True)
-    artist_type = models.CharField(_("نوع آرتیست"),max_length=20,choices=ArtistType.choices,default=ArtistType.PERSON,db_index=True)
+    artist_type = models.CharField(_("نوع آرتیست"),max_length=20,choices=ArtistRole.choices,default=ArtistRole.PERSON,db_index=True)
     related_artists = models.ManyToManyField("self",blank=True,symmetrical=False)
     era = models.CharField(_("دوره زمانی"),max_length=20,choices=EraChoices.choices,null=True,blank=True,db_index=True)
     image = models.ImageField(_("عکس"),upload_to=artist_image_path,null=True,blank=True,validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])])
@@ -185,10 +180,7 @@ class Artist(TimeStampedModel):
 
     @property
     def all_related_tracks(self):
-        track_pks = set()
-        track_pks.update(self.composed_tracks.values_list('pk', flat=True))
-        track_pks.update(self.sung_tracks.values_list('pk', flat=True))
-        return Track.objects.filter(pk__in=list(track_pks))
+        return self.participated_tracks.all()
 
     def save(self, *args, **kwargs):
         if not self.slug:
@@ -197,6 +189,21 @@ class Artist(TimeStampedModel):
 
     def __str__(self):
         return f"{self.name} ({self.get_artist_type_display()})"
+
+
+class AlbumCredit(TimeStampedModel):
+    album = models.ForeignKey(Album, on_delete=models.CASCADE, related_name="credits", verbose_name=_("آلبوم"))
+    artist = models.ForeignKey(Artist, on_delete=models.CASCADE, related_name="album_credits", verbose_name=_("آرتیست"))
+    role = models.CharField(_("نقش"), max_length=50, choices=ArtistRole.choices)
+
+    class Meta:
+        verbose_name = _("عوامل آلبوم")
+        verbose_name_plural = _("عوامل آلبوم")
+        unique_together = ('album', 'artist', 'role')
+
+    def __str__(self):
+        return f"{self.artist.name} - {self.get_role_display()} in {self.album.title}"
+
 
 # =========================================================
 # Album Model
@@ -222,31 +229,31 @@ class AlbumZipExport(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.album.slug} - {self.status}"
+        try:
+            return f"{self.album.slug} - {self.status}"
+        except Album.DoesNotExist:
+            return f"(آلبوم حذف شده) - {self.status}"
 
 # =========================================================
 # Track Model
 # =========================================================
 
 class Track(TimeStampedModel):
-
-    album = models.ForeignKey(Album, on_delete=models.CASCADE, related_name="tracks", null=True, blank=True, verbose_name=_("آلبوم"))
-    title = models.CharField(_("عنوان ترک"), max_length=300 , blank=True, default="Untitled")
+    album = models.ForeignKey(Album, on_delete=models.CASCADE, related_name="tracks", null=True, blank=True,verbose_name=_("آلبوم"))
+    title = models.CharField(_("عنوان ترک"), max_length=300, blank=True, default="Untitled")
     slug = models.SlugField(_("اسلاگ"), max_length=300, unique=True, blank=True, allow_unicode=True)
-    genre = models.ForeignKey(Genre, on_delete=models.SET_NULL, null=True, blank=True, related_name="tracks", verbose_name=_("ژانر"))
-    audio_file = models.FileField(_("فایل صوتی"),upload_to=track_audio_path, validators=[FileExtensionValidator(["mp3", "wav", "flac"])],max_length=500)
-    cover_image = models.ImageField(_("کاور اختصاصی ترک"), upload_to=track_cover_path, null=True, blank=True, help_text=_("اگر سینگل ترک است، حتماً کاور آپلود شود. در صورت داشتن آلبوم، کاور آلبوم اولویت دارد."))
-    release_date = models.DateField(_("تاریخ انتشار ترک"), null=True, blank=True, help_text=_("مخصوص سینگل ترک‌ها"))
-    composer = models.ForeignKey(Artist, on_delete=models.SET_NULL, null=True, blank=True, related_name="composed_tracks", verbose_name=_("آهنگساز"))
-    singer = models.ForeignKey(Artist, on_delete=models.SET_NULL, null=True, blank=True, related_name="sung_tracks", verbose_name=_("خواننده"))
+    genre = models.ForeignKey(Genre, on_delete=models.SET_NULL, null=True, blank=True, related_name="tracks",verbose_name=_("ژانر"))
+    audio_file = models.FileField(_("فایل صوتی"), upload_to=track_audio_path,validators=[FileExtensionValidator(["mp3", "wav", "flac"])], max_length=500)
+    cover_image = models.ImageField(_("کاور اختصاصی ترک"), upload_to=track_cover_path, null=True, blank=True)
+    release_date = models.DateField(_("تاریخ انتشار ترک"), null=True, blank=True)
+    artists = models.ManyToManyField(Artist, related_name="participated_tracks", blank=True,verbose_name=_("آرتیست‌های مشارکت‌کننده"))
     duration_ms = models.PositiveIntegerField(_("مدت زمان (میلی‌ثانیه)"), null=True, blank=True)
     description = models.TextField(_("توضیحات"), blank=True)
     track_number = models.PositiveIntegerField(_("شماره ترک در آلبوم"), null=True, blank=True)
-    status = models.CharField(_("وضعیت انتشار"), max_length=20, choices=PublishStatus.choices, default=PublishStatus.PUBLISHED, db_index=True)
-    instrument = models.ForeignKey(Instrument,on_delete=models.SET_NULL,related_name="tracks",verbose_name=_("ساز"),null=True, blank=True)
-    is_chosen = models.BooleanField(default=False, help_text=_("منتخب"))
-    label = models.ForeignKey(Label,on_delete=models.SET_NULL,null=True,blank=True,related_name="tracks", verbose_name=_("لیبل ناشر"),help_text=_("برای سینگل‌ترک‌ها یا در صورتی که لیبل ترک با آلبوم متفاوت است."))
-
+    status = models.CharField(_("وضعیت انتشار"), max_length=20, choices=PublishStatus.choices,default=PublishStatus.PUBLISHED, db_index=True)
+    instrument = models.ForeignKey(Instrument, on_delete=models.SET_NULL, related_name="tracks", verbose_name=_("ساز"),null=True, blank=True)
+    is_chosen = models.BooleanField(default=False)
+    label = models.ForeignKey(Label, on_delete=models.SET_NULL, null=True, blank=True, related_name="tracks",verbose_name=_("لیبل ناشر"))
     likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
     play_count = models.PositiveBigIntegerField(_("تعداد کل پخش"), default=0)
 
@@ -265,12 +272,15 @@ class Track(TimeStampedModel):
 
     @property
     def is_single(self):
-        return self.album is None
+        return self.album_id is None
 
     @property
     def effective_cover_image(self):
-        if self.album and self.album.cover_image:
-            return self.album.cover_image
+        try:
+            if self.album_id and self.album.cover_image:
+                return self.album.cover_image
+        except Album.DoesNotExist:
+            pass
         return self.cover_image
 
     def save(self, *args, **kwargs):
@@ -280,7 +290,12 @@ class Track(TimeStampedModel):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.title} (Single)" if self.is_single else f"{self.title} - {self.album.title}"
+        if self.is_single:
+            return f"{self.title} (Single)"
+        try:
+            return f"{self.title} - {self.album.title}"
+        except Album.DoesNotExist:
+            return f"{self.title} - (آلبوم نامشخص یا حذف شده)"
 
 # =========================================================
 # PlayHistory Model

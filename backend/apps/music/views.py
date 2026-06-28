@@ -83,14 +83,13 @@ class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
     lookup_field = 'slug'
 
 
-
-class AlbumViewSet(CommentableMixin,LikableMixin,viewsets.ModelViewSet):
+class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     permission_classes = [AllowAny]
     queryset = Album.objects.filter(status=PublishStatus.PUBLISHED).prefetch_related("tracks").annotate(annotated_total_tracks=Count("tracks"))
     pagination_class = ClassicalMusicPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = AlbumFilter
-    search_fields = ['title', 'composer', 'conductor']
+    search_fields = ['title', 'artist__name', 'credits__artist__name']
     ordering_fields = ['release_date', 'title']
     lookup_field = 'slug'
 
@@ -154,28 +153,25 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
     pagination_class = ClassicalMusicPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = TrackFilter
-
-    queryset = Track.objects.filter(status=PublishStatus.PUBLISHED).select_related('album', 'composer', 'singer')
-
+    queryset = Track.objects.filter(status=PublishStatus.PUBLISHED).select_related('album').prefetch_related('artists')
     serializer_class = TrackSerializer
-
     filterset_fields = ['instrument', 'album__slug']
-    search_fields = ['title', 'composer__name', 'singer__name']
+    search_fields = ['title', 'artists__name']
     ordering_fields = ['track_number', 'release_date']
     lookup_field = 'slug'
 
 
     @extend_schema(parameters=[
-            OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),
-            OpenApiParameter(name='search', description='جستجو در عنوان، خواننده و آهنگساز', required=False, type=OpenApiTypes.STR, location=OpenApiParameter.QUERY),
-            OpenApiParameter(name='instrument', description='فیلتر بر اساس ساز', required=False, type=OpenApiTypes.STR, location=OpenApiParameter.QUERY),])
+        OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),
+        OpenApiParameter(name='search', description='جستجو در عنوان، خواننده و آهنگساز', required=False, type=OpenApiTypes.STR, location=OpenApiParameter.QUERY),
+        OpenApiParameter(name='instrument', description='فیلتر بر اساس ساز', required=False, type=OpenApiTypes.STR, location=OpenApiParameter.QUERY),
+    ])
     @action(detail=False, methods=['get'], url_path='singles')
     def singles(self, request):
-
         queryset = Track.objects.filter(
             status=PublishStatus.PUBLISHED,
             album__isnull=True
-        ).select_related('composer', 'singer', 'instrument')
+        ).select_related('instrument').prefetch_related('artists')
 
         filtered_queryset = self.filter_queryset(queryset)
 
