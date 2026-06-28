@@ -99,13 +99,7 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
         queryset = super().get_queryset()
 
         if self.action == 'retrieve':
-            queryset = queryset.select_related('main_artist').prefetch_related(
-                Prefetch(
-                    'tracks',
-                    queryset=Track.objects.select_related('album', 'album__main_artist').prefetch_related('artists')
-                ),
-                'credits__artist'
-            )
+            queryset = queryset.select_related('artist', 'label')
         return queryset
 
     @extend_schema(methods=['POST'],request=CommentSerializer,responses={201: CommentSerializer},)

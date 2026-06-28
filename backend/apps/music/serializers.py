@@ -66,9 +66,10 @@ class TrackSerializer(serializers.ModelSerializer):
 
     def get_artists(self, obj):
         track_artists = list(obj.artists.all())
-        if obj.album and obj.album.main_artist:
-            if obj.album.main_artist not in track_artists:
-                track_artists.insert(0, obj.album.main_artist)
+        album_artist = obj.album.artist if obj.album else None
+        if album_artist:
+            if album_artist not in track_artists:
+                track_artists.insert(0, album_artist)
         return ArtistBasicSerializer(track_artists, many=True, context=self.context).data
 
 
@@ -115,8 +116,8 @@ class AlbumDetailSerializer(serializers.ModelSerializer):
     tracks = TrackSerializer(many=True, read_only=True)
     total_tracks = serializers.IntegerField(read_only=True)
     total_duration_ms = serializers.IntegerField(read_only=True)
-    main_artist = ArtistBasicSerializer(read_only=True)
     on_this_album = serializers.SerializerMethodField()
+    main_artist = ArtistBasicSerializer(source='artist', read_only=True)
 
     class Meta:
         model = Album
@@ -128,19 +129,15 @@ class AlbumDetailSerializer(serializers.ModelSerializer):
 
     def get_on_this_album(self, obj):
         unique_artists = {}
-
         for track in obj.tracks.all():
             for artist in track.artists.all():
                 if artist.id not in unique_artists:
                     unique_artists[artist.id] = artist
-
         for credit in obj.credits.all():
             if credit.artist.id not in unique_artists:
                 unique_artists[credit.artist.id] = credit.artist
-
-        if obj.main_artist and obj.main_artist.id in unique_artists:
-            del unique_artists[obj.main_artist.id]
-
+        if obj.artist and obj.artist.id in unique_artists:
+            del unique_artists[obj.artist.id]
         return ArtistBasicSerializer(unique_artists.values(), many=True, context=self.context).data
 
 
