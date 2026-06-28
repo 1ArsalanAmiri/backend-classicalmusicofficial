@@ -19,11 +19,11 @@ class ArtistSerializer(serializers.ModelSerializer):
 
 
 class ArtistBasicSerializer(serializers.ModelSerializer):
-    artist_type_display = serializers.CharField(source='get_artist_type_display', read_only=True)
+    artist_type = serializers.CharField(source='get_artist_type_display', read_only=True)
 
     class Meta:
         model = Artist
-        fields = ['name', 'slug', 'image', 'artist_type_display']
+        fields = ['name', 'slug', 'image', 'artist_type']
 
 
 
@@ -69,7 +69,8 @@ class TrackSerializer(serializers.ModelSerializer):
         track_artists = list(obj.artists.all())
         album_artist = obj.album.artist if obj.album else None
         if album_artist:
-            if album_artist not in track_artists:
+            track_artist_ids = [artist.id for artist in track_artists]
+            if album_artist.id not in track_artist_ids:
                 track_artists.insert(0, album_artist)
         return ArtistBasicSerializer(track_artists, many=True, context=self.context).data
 
@@ -116,8 +117,8 @@ class AlbumListSerializer(serializers.ModelSerializer):
 
 class AlbumDetailSerializer(serializers.ModelSerializer):
     tracks = TrackSerializer(many=True, read_only=True)
-    total_tracks = serializers.IntegerField(read_only=True)
-    total_duration_ms = serializers.IntegerField(read_only=True)
+    total_tracks = serializers.IntegerField(source='annotated_total_tracks', read_only=True)
+    total_duration_ms = serializers.IntegerField(source='annotated_total_duration_ms', read_only=True)
     on_this_album = serializers.SerializerMethodField()
     main_artist = ArtistBasicSerializer(source='artist', read_only=True)
 

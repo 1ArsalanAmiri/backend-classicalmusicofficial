@@ -23,7 +23,7 @@ from django.views.decorators.cache import cache_page
 from rest_framework.viewsets import ReadOnlyModelViewSet
 from apps.interactions.mixins import LikableMixin, FollowableMixin ,CommentableMixin
 from django.db.models import F
-
+from django.views.decorators.vary import vary_on_headers
 from ..common.utils.clean_file_name import get_clean_download_filename
 from ..interactions.models import Comment
 from ..interactions.serializers import CommentSerializer , CommentCreateSerializer
@@ -38,7 +38,8 @@ import zipfile
 from django.core.files import File
 from django.utils import timezone
 from .models import Album, AlbumArchiveUpload, Track, Artist ,Genre
-from django.db.models import Prefetch
+from django.db.models import Count, Prefetch, Sum, Value
+from django.db.models.functions import Coalesce
 
 
 class AlbumBatchUploadAPIView(APIView):
@@ -96,10 +97,14 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     lookup_field = 'slug'
 
     def get_queryset(self):
-        queryset = super().get_queryset()
-
-        if self.action == 'retrieve':
-            queryset = queryset.select_related('artist', 'label')
+        queryset = Album.objects.filter(status=PublishStatus.PUBLISHED)
+        if self.action == 'list':
+            queryset = queryset.annotate(total_tracks=Count('tracks', distinct=True))
+        elif self.action == 'retrieve':
+            queryset = queryset.select_related('artist', 'label').prefetch_related(
+                Prefetch('tracks',queryset=Track.objects.select_related('album', 'album__artist').prefetch_related('artists')),'credits__artist').annotate(
+                annotated_total_tracks=Count('tracks', distinct=True),
+                annotated_total_duration_ms=Coalesce(Sum('tracks__duration_ms'), Value(0)))
         return queryset
 
     @extend_schema(methods=['POST'],request=CommentSerializer,responses={201: CommentSerializer},)
@@ -151,6 +156,7 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
     @method_decorator(cache_page(60 * 30))
+    @method_decorator(vary_on_headers('Authorization', 'Cookie'))
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
 
@@ -257,22 +263,13 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated], url_path='record-play')
     def record_play(self, request, slug=None):
         track = self.get_object()
-
         Track.objects.filter(id=track.id).update(play_count=F('play_count') + 1)
-
-        history, created = PlayHistory.objects.get_or_create(
-            user=request.user,
-            track=track,
-            defaults={'play_count': 1, 'last_played_at': timezone.now()}
-        )
-
+        history, created = PlayHistory.objects.update_or_create(user=request.user,track=track,defaults={'last_played_at': timezone.now()})
         if not created:
-            history.play_count = F('play_count') + 1
-            history.last_played_at = timezone.now()
-            history.save(update_fields=['play_count', 'last_played_at'])
-
+            PlayHistory.objects.filter(id=history.id).update(play_count=F('play_count') + 1)
+        else:
+            PlayHistory.objects.filter(id=history.id).update(play_count=1)
         return Response({"message": "پخش با موفقیت ثبت شد."}, status=status.HTTP_200_OK)
-
 
 
 class GenreViewSet(viewsets.ReadOnlyModelViewSet):
