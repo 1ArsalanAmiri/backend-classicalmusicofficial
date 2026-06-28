@@ -1,10 +1,14 @@
 from django.db import transaction
 from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+
+from apps.accounts.models import CustomUser
+from apps.accounts.serializers import RequestChangePhoneSerializer, VerifyChangePhoneSerializer
 from apps.common.serializers import SendOTPSerializer, VerifyOTPSerializer
 from apps.common.utils.otp import generate_otp
 from apps.common.utils.sms import send_sms
@@ -62,6 +66,7 @@ class SendOTPView(APIView):
             "message": f"OTP sent successfully. {otp}",
             "ghasedak_debug_data": sms_response
         }, status=status.HTTP_200_OK)
+
 
 
 class VerifyOTPView(APIView):
@@ -124,3 +129,70 @@ class VerifyOTPView(APIView):
             return Response({"error": "An unexpected error occurred.", "details": str(e)},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+
+class RequestChangePhoneNumberView(APIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = RequestChangePhoneSerializer
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        new_phone_number = serializer.validated_data["new_phone_number"]
+
+        if user.phone_number == new_phone_number:
+            return Response({"error": "این شماره موبایل فعلی شماست."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if CustomUser.objects.filter(phone_number=new_phone_number).exists():
+            return Response({"error": "این شماره موبایل قبلاً در سیستم ثبت شده است."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        cache_key = f"change_phone_otp_{user.id}_{new_phone_number}"
+        if cache.get(cache_key):
+            return Response({"error": "کد تایید قبلاً ارسال شده است. لطفا تا پایان زمان اعتبار صبر کنید."},
+                            status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        otp_code = generate_otp()
+
+        cache.set(cache_key, otp_code, timeout=120)
+
+        send_sms(new_phone_number, otp_code)
+
+        return Response(
+            {"detail": "کد تایید به شماره موبایل جدید ارسال شد."},
+            status=status.HTTP_200_OK
+        )
+
+
+
+class VerifyChangePhoneNumberView(APIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = VerifyChangePhoneSerializer
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        new_phone_number = serializer.validated_data["new_phone_number"]
+        entered_otp = serializer.validated_data["otp"]
+
+        cache_key = f"change_phone_otp_{user.id}_{new_phone_number}"
+        cached_otp = cache.get(cache_key)
+
+        if not cached_otp:
+            return Response({"error": "کد تایید منقضی شده یا نامعتبر است."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if str(cached_otp) != str(entered_otp):
+            return Response({"error": "کد تایید اشتباه است."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.phone_number = new_phone_number
+        user.save(update_fields=["phone_number"])
+
+        cache.delete(cache_key)
+
+        return Response(
+            {"detail": "شماره موبایل شما با موفقیت تغییر یافت."},
+            status=status.HTTP_200_OK
+        )

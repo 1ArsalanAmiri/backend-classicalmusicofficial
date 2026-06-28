@@ -13,7 +13,9 @@ urlpatterns = [
 
     path("verify-otp/", VerifyOTPView.as_view(), name="verify_otp"),
 
-    path("change-phone-number/", ChangePhoneNumberView.as_view(), name="change_phone_number"),
+    path('change-phone/request/', RequestChangePhoneNumberView.as_view(), name='request_change_phone'),
+
+    path('change-phone/verify/', VerifyChangePhoneNumberView.as_view(), name='verify_change_phone'),
 
     path("reset-password/", ResetPasswordView.as_view(), name="change_password"),
 

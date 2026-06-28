@@ -1,4 +1,5 @@
 from django.core.cache import cache
+from django.core.validators import RegexValidator
 from django.utils import timezone
 from phonenumber_field.serializerfields import PhoneNumberField
 from rest_framework import serializers
@@ -39,6 +40,21 @@ class LoginSerializer(serializers.Serializer):
 
 class LogoutSerializer(serializers.Serializer):
     refresh = serializers.CharField(required=True)
+
+
+
+class RequestChangePhoneSerializer(serializers.Serializer):
+    new_phone_number = serializers.CharField(
+        max_length=13,
+        validators=[RegexValidator(regex=r'^\+989\d{9}$', message="فرمت شماره موبایل نامعتبر است. (مثال: 989120000000+)")],
+        help_text="شماره موبایل جدید کاربر"
+    )
+
+
+
+class VerifyChangePhoneSerializer(serializers.Serializer):
+    new_phone_number = serializers.CharField(max_length=13)
+    otp = serializers.CharField(max_length=5, min_length=4)
 
 
 

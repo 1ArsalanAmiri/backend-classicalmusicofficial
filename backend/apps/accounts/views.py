@@ -77,28 +77,6 @@ class LogoutView(APIView):
 
 
 
-class ChangePhoneNumberView(APIView):
-
-    serializer_class = ChangePhoneNumberSerializer
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        serializer = ChangePhoneNumberSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        user = request.user
-        new_phone_number = serializer.validated_data["new_phone_number"]
-
-        if CustomUser.objects.filter(phone_number=new_phone_number).exists():
-            return Response({"error": "Phone number already used"}, status=400)
-
-        user.phone_number = new_phone_number
-        user.save(update_fields=["phone_number"])
-
-        return Response({"detail": "Phone number changed"}, status=200)
-
-
-
 class ResetPasswordView(APIView):
 
     serializer_class = ResetPasswordSerializer
