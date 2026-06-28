@@ -30,11 +30,8 @@ class Command(BaseCommand):
         labels = self.create_labels(5)
         artists = self.create_artists(10)
         albums = self.create_albums(10, artists, labels)
-<<<<<<< HEAD
-        tracks = self.create_tracks(50, albums, artists, genres, instruments, labels)
-=======
+
         tracks = self.create_tracks(30, albums, artists, genres, instruments, labels)
->>>>>>> 980220c (fixed generate_dummy_data)
 
         playlists = self.create_playlists(users, tracks)
 
@@ -184,27 +181,20 @@ class Command(BaseCommand):
     # ALBUMS
     # -------------------------------------------------
 
-    # -------------------------------------------------
-    # ALBUMS
-    # -------------------------------------------------
-
     def create_albums(self, count, artists, labels):
 
         albums = []
 
         for _ in range(count):
-            # ۱. تولید عنوان و اسلاگ باید داخل حلقه باشد تا برای هر رکورد متفاوت شود
             album_title = fake.sentence(nb_words=3)
             base_slug = slugify(album_title)
             album_slug = base_slug
             counter = 1
 
-            # ۲. بررسی اصولی و بهینه برای یکتا بودن اسلاگ در دیتابیس
             while Album.objects.filter(slug=album_slug).exists():
                 album_slug = f"{base_slug}-{counter}"
                 counter += 1
 
-            # ۳. ایجاد رکورد جدید در دیتابیس
             album = Album.objects.create(
                 title=album_title,
                 slug=album_slug,
@@ -217,7 +207,6 @@ class Command(BaseCommand):
                 release_date=fake.date_between("-30y", "today"),
                 label=random.choice(labels),
             )
-
             albums.append(album)
 
         return albums
