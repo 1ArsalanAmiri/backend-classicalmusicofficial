@@ -54,7 +54,7 @@ class RequestChangePhoneSerializer(serializers.Serializer):
 
 class VerifyChangePhoneSerializer(serializers.Serializer):
     new_phone_number = serializers.CharField(max_length=13)
-    otp = serializers.CharField(max_length=5, min_length=4)
+    otp = serializers.CharField(max_length=6)
 
 
 
