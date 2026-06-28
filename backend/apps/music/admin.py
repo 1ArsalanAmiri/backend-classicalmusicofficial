@@ -25,10 +25,11 @@ class AlbumCreditInline(admin.TabularInline):
 class TrackInline(admin.TabularInline):
     model = Track
     extra = 0
-    # فیلدهای composer و singer حذف شدند
-    fields = ("track_number", "title", "audio_file", "duration_ms", "status")
+    fields = ("title", "artists", "duration_ms", "status")
     ordering = ["track_number"]
     show_change_link = True
+
+    autocomplete_fields = ["artists"]
 
 
 class TrackInlineForLabel(admin.TabularInline):

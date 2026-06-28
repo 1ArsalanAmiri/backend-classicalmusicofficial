@@ -1,4 +1,4 @@
-from django.http import HttpResponse, Http404
+from django.http import HttpResponse, Http404, FileResponse
 import mimetypes
 from urllib.parse import quote
 from rest_framework.permissions import AllowAny , IsAuthenticated , IsAuthenticatedOrReadOnly
@@ -197,30 +197,16 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         serializer = self.get_serializer(filtered_queryset, many=True)
         return Response(serializer.data)
 
-
-    @action(detail=True, methods=['get'], url_path='stream', permission_classes=[HasStreamSubscription])
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
     def stream(self, request, slug=None):
         track = self.get_object()
-
+        if not user_has_stream_access(request.user):
+            return Response({"error": "شما اشتراک فعال برای پخش آهنگ ندارید."}, status=status.HTTP_403_FORBIDDEN)
         if not track.audio_file:
-            raise Http404("Audio not found")
-
-        audio_path = track.audio_file.name
-
-        content_type, _ = mimetypes.guess_type(audio_path)
-        content_type = content_type or 'audio/mpeg'
-
-        response = HttpResponse()
-
-        response['X-Accel-Redirect'] = f"/protected_media/{audio_path}"
-        response['Content-Type'] = content_type
-        response['Content-Disposition'] = 'inline'
+            return Response({"error": "فایل صوتی برای این ترک یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
+        content_type, _ = mimetypes.guess_type(track.audio_file.name)
+        response = FileResponse(open(track.audio_file.path, 'rb'),content_type=content_type or 'audio/mpeg')
         response['Accept-Ranges'] = 'bytes'
-
-        response['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
-        response['Pragma'] = 'no-cache'
-        response['Expires'] = '0'
-
         return response
 
     @action(detail=True, methods=['get'], url_path='download', permission_classes=[HasDownloadSubscription])
