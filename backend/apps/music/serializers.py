@@ -4,6 +4,7 @@ from .models import Artist, Album, Track,Genre, Instrument , Label , PlayHistory
 from drf_spectacular.utils import extend_schema_field
 
 
+
 class ArtistSerializer(serializers.ModelSerializer):
     artist_type_display = serializers.CharField(source='get_artist_type_display', read_only=True)
     era_display = serializers.CharField(source='get_era_display', read_only=True)
@@ -11,16 +12,25 @@ class ArtistSerializer(serializers.ModelSerializer):
     class Meta:
         model = Artist
         fields = [
-            'id', 'name', 'slug', 'country', 'artist_type', 'artist_type_display',
+            'name', 'slug', 'country', 'artist_type', 'artist_type_display',
             'era', 'era_display', 'image', 'biography','likes_count','followers_count'
         ]
+
+
+
+class ArtistBasicSerializer(serializers.ModelSerializer):
+    artist_type_display = serializers.CharField(source='get_artist_type_display', read_only=True)
+
+    class Meta:
+        model = Artist
+        fields = ['name', 'slug', 'image', 'artist_type_display']
 
 
 
 class LabelListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Label
-        fields = ['id', 'name', 'slug', 'logo' , 'likes_count','followers_count']
+        fields = ['name', 'slug', 'logo' , 'likes_count','followers_count']
 
 
 
@@ -30,7 +40,7 @@ class LabelDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Label
-        fields = ['id', 'name', 'slug', 'logo', 'country', 'website', 'description', 'albums_count', 'tracks_count']
+        fields = ['name', 'slug', 'logo', 'country', 'website', 'description', 'albums_count', 'tracks_count']
 
 
 
@@ -38,33 +48,47 @@ class RelatedArtistSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Artist
-        fields = ["id", "name", "slug", "image"]
+        fields = ["name", "slug"]
+
 
 
 class TrackSerializer(serializers.ModelSerializer):
-    instrument_name = serializers.CharField(source='instrument.name', read_only=True)
-    duration_seconds = serializers.SerializerMethodField()
-    audio_stream_url = serializers.SerializerMethodField()
-    artists = RelatedArtistSerializer(many=True, read_only=True)
+    artists = serializers.SerializerMethodField()
+    cover_image = serializers.SerializerMethodField()
+    audio_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Track
         fields = [
-            'id', 'title', 'album', 'artists', 'slug', 'audio_stream_url', 'cover_image', 'release_date',
-            'duration_seconds', 'instrument_name', 'status', 'likes_count'
+            'id', 'title', 'album', 'artists', 'slug', 'cover_image',
+            'duration_seconds', 'status', 'likes_count', 'audio_url'
         ]
+
+    def get_artists(self, obj):
+        track_artists = list(obj.artists.all())
+        if obj.album and obj.album.main_artist:
+            if obj.album.main_artist not in track_artists:
+                track_artists.insert(0, obj.album.main_artist)
+        return ArtistBasicSerializer(track_artists, many=True, context=self.context).data
+
+
+    def get_cover_image(self, obj):
+        request = self.context.get('request')
+        if obj.cover_image:
+            return request.build_absolute_uri(obj.cover_image.url)
+        elif obj.album and obj.album.cover_image:
+            return request.build_absolute_uri(obj.album.cover_image.url)
+        return None
 
 
     def get_audio_stream_url(self, obj):
         has_stream_access = self.context.get("has_stream_access", False)
         has_download_access = self.context.get("has_download_access", False)
-
         if not has_stream_access or has_download_access:
             return None
         request = self.context.get('request')
         if request is None:
             return None
-        request = self.context.get('request')
         return request.build_absolute_uri(reverse('track-stream', kwargs={'slug': obj.slug}))
 
     @extend_schema_field(serializers.IntegerField())
@@ -74,37 +98,51 @@ class TrackSerializer(serializers.ModelSerializer):
         return obj.duration_ms // 1000
 
 
+
 class AlbumListSerializer(serializers.ModelSerializer):
     total_tracks = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Album
         fields = [
-            'id', 'title', 'slug', 'cover_image',
+            'title', 'slug', 'cover_image',
             'release_date', 'total_tracks'
         ]
+
 
 
 class AlbumDetailSerializer(serializers.ModelSerializer):
     tracks = TrackSerializer(many=True, read_only=True)
     total_tracks = serializers.IntegerField(read_only=True)
     total_duration_ms = serializers.IntegerField(read_only=True)
-    main_artist = RelatedArtistSerializer(source='artist', read_only=True)
+    main_artist = ArtistBasicSerializer(read_only=True)
     on_this_album = serializers.SerializerMethodField()
 
     class Meta:
         model = Album
         fields = [
-            'id', 'title', 'title_fa', 'slug', 'cover_image', 'release_date',
-            'main_artist', 'on_this_album', 'total_tracks', 'total_duration_ms', 'status',
-            'tracks', 'likes_count', 'comments_count',
+            'id', 'title', 'title_fa', 'slug', 'cover_image',
+            'release_date', 'main_artist', 'on_this_album',
+            'total_tracks', 'total_duration_ms', 'status', 'tracks'
         ]
 
-
-    @extend_schema_field(RelatedArtistSerializer(many=True))
     def get_on_this_album(self, obj):
-        artists = obj.on_this_album
-        return RelatedArtistSerializer(artists, many=True, context=self.context).data
+        unique_artists = {}
+
+        for track in obj.tracks.all():
+            for artist in track.artists.all():
+                if artist.id not in unique_artists:
+                    unique_artists[artist.id] = artist
+
+        for credit in obj.credits.all():
+            if credit.artist.id not in unique_artists:
+                unique_artists[credit.artist.id] = credit.artist
+
+        if obj.main_artist and obj.main_artist.id in unique_artists:
+            del unique_artists[obj.main_artist.id]
+
+        return ArtistBasicSerializer(unique_artists.values(), many=True, context=self.context).data
+
 
 
 class GenreSerializer(serializers.ModelSerializer):
@@ -112,7 +150,7 @@ class GenreSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Genre
-        fields = ['id', 'name', 'slug', 'track_count']
+        fields = ['name', 'slug', 'track_count']
 
 
 
@@ -121,4 +159,4 @@ class InstrumentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Instrument
-        fields = ['id', 'name', 'slug', 'track_count']
+        fields = ['name', 'slug', 'track_count']

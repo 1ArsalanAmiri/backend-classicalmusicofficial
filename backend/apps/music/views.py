@@ -38,6 +38,7 @@ import zipfile
 from django.core.files import File
 from django.utils import timezone
 from .models import Album, AlbumArchiveUpload, Track, Artist ,Genre
+from django.db.models import Prefetch
 
 
 class AlbumBatchUploadAPIView(APIView):
@@ -83,6 +84,7 @@ class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
     lookup_field = 'slug'
 
 
+
 class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     permission_classes = [AllowAny]
     queryset = Album.objects.filter(status=PublishStatus.PUBLISHED).prefetch_related("tracks").annotate(annotated_total_tracks=Count("tracks"))
@@ -93,6 +95,18 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     ordering_fields = ['release_date', 'title']
     lookup_field = 'slug'
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        if self.action == 'retrieve':
+            queryset = queryset.select_related('main_artist').prefetch_related(
+                Prefetch(
+                    'tracks',
+                    queryset=Track.objects.select_related('album', 'album__main_artist').prefetch_related('artists')
+                ),
+                'credits__artist'
+            )
+        return queryset
 
     @extend_schema(methods=['POST'],request=CommentSerializer,responses={201: CommentSerializer},)
     @action(detail=True,methods=["get", "post"],url_path="comments",permission_classes=[IsAuthenticatedOrReadOnly],)
@@ -234,7 +248,6 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
 
     @extend_schema(parameters=[OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),])
     @action(detail=False, methods=['get'], url_path='chosen')
-    @action(detail=False, methods=['get'], url_path='chosen')
     def chosen(self, request):
 
         queryset = self.filter_queryset(self.get_queryset().filter(is_chosen=True))
@@ -246,7 +259,6 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
 
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
-
 
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated], url_path='record-play')
     def record_play(self, request, slug=None):

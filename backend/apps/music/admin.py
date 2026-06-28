@@ -15,7 +15,6 @@ from .tasks import process_album_archive_task
 # Inlines
 # =========================================================
 
-# اینلاین جدید برای مدیریت نقش آرتیست‌ها در آلبوم
 class AlbumCreditInline(admin.TabularInline):
     model = AlbumCredit
     extra = 1
