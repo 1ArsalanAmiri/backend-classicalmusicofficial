@@ -30,7 +30,11 @@ class Command(BaseCommand):
         labels = self.create_labels(5)
         artists = self.create_artists(10)
         albums = self.create_albums(10, artists, labels)
+<<<<<<< HEAD
         tracks = self.create_tracks(50, albums, artists, genres, instruments, labels)
+=======
+        tracks = self.create_tracks(30, albums, artists, genres, instruments, labels)
+>>>>>>> 980220c (fixed generate_dummy_data)
 
         playlists = self.create_playlists(users, tracks)
 
