@@ -24,13 +24,13 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS("Generating dummy data..."))
 
-        users = self.create_users(20)
+        users = self.create_users(10)
         genres = self.create_genres()
         instruments = self.create_instruments()
         labels = self.create_labels(5)
-        artists = self.create_artists(30)
-        albums = self.create_albums(25, artists, labels)
-        tracks = self.create_tracks(120, albums, artists, genres, instruments, labels)
+        artists = self.create_artists(10)
+        albums = self.create_albums(10, artists, labels)
+        tracks = self.create_tracks(50, albums, artists, genres, instruments, labels)
 
         playlists = self.create_playlists(users, tracks)
 
@@ -180,31 +180,27 @@ class Command(BaseCommand):
     # ALBUMS
     # -------------------------------------------------
 
+    # -------------------------------------------------
+    # ALBUMS
+    # -------------------------------------------------
+
     def create_albums(self, count, artists, labels):
 
         albums = []
 
-        album_title = fake.sentence(nb_words=3)
-        from django.db import IntegrityError
-
-        base_slug = slugify(album_title)
-        album_slug = base_slug
-        counter = 1
-        while True:
-            try:
-                Album.objects.get(slug=album_slug)
-                album_slug = f"{base_slug}-{counter}"
-                counter += 1
-            except Album.DoesNotExist:
-                break
-            except IntegrityError:
-                self.stdout.write(
-                    self.style.WARNING(f"IntegrityError encountered for slug: {album_slug}. Trying next..."))
-                album_slug = f"{base_slug}-{counter}"
-                counter += 1
-
         for _ in range(count):
+            # ۱. تولید عنوان و اسلاگ باید داخل حلقه باشد تا برای هر رکورد متفاوت شود
+            album_title = fake.sentence(nb_words=3)
+            base_slug = slugify(album_title)
+            album_slug = base_slug
+            counter = 1
 
+            # ۲. بررسی اصولی و بهینه برای یکتا بودن اسلاگ در دیتابیس
+            while Album.objects.filter(slug=album_slug).exists():
+                album_slug = f"{base_slug}-{counter}"
+                counter += 1
+
+            # ۳. ایجاد رکورد جدید در دیتابیس
             album = Album.objects.create(
                 title=album_title,
                 slug=album_slug,
