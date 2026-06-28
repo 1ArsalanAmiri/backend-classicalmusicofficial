@@ -25,7 +25,7 @@ class AlbumCreditInline(admin.TabularInline):
 class TrackInline(admin.TabularInline):
     model = Track
     extra = 0
-    fields = ("title", "artists", "duration_ms", "status")
+    fields = ("title", "artists","status")
     ordering = ["track_number"]
     show_change_link = True
 
