@@ -99,7 +99,7 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = Album.objects.filter(status=PublishStatus.PUBLISHED)
         if self.action == 'list':
-            queryset = queryset.annotate(total_tracks=Count('tracks', distinct=True))
+            queryset = queryset.annotate(annotated_total_tracks=Count('tracks', distinct=True))
         elif self.action == 'retrieve':
             queryset = queryset.select_related('artist', 'label').prefetch_related(
                 Prefetch('tracks',queryset=Track.objects.select_related('album', 'album__artist').prefetch_related('artists')),'credits__artist').annotate(
@@ -270,6 +270,7 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         else:
             PlayHistory.objects.filter(id=history.id).update(play_count=1)
         return Response({"message": "پخش با موفقیت ثبت شد."}, status=status.HTTP_200_OK)
+
 
 
 class GenreViewSet(viewsets.ReadOnlyModelViewSet):
