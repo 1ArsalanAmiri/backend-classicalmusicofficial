@@ -163,7 +163,7 @@ class Artist(TimeStampedModel):
     name = models.CharField(_("نام آرتیست"), max_length=255)
     slug = models.SlugField(_("اسلاگ"), max_length=120, unique=True, blank=True, allow_unicode=True)
     country = models.CharField(_("ملیت/کشور"), max_length=100, blank=True)
-    artist_type = models.CharField(_("نوع آرتیست"),max_length=20,choices=ArtistRole.choices,default=ArtistRole.PERSON,db_index=True)
+    artist_type = models.CharField(_("نوع آرتیست"),max_length=20,choices=ArtistRole.choices,default=ArtistRole.OTHER,db_index=True)
     related_artists = models.ManyToManyField("self",blank=True,symmetrical=False)
     era = models.CharField(_("دوره زمانی"),max_length=20,choices=EraChoices.choices,null=True,blank=True,db_index=True)
     image = models.ImageField(_("عکس"),upload_to=artist_image_path,null=True,blank=True,validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])])
