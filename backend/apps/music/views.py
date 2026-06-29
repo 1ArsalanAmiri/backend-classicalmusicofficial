@@ -372,29 +372,6 @@ class LabelViewSet(FollowableMixin, LikableMixin, viewsets.ReadOnlyModelViewSet)
             context["has_download_access"] = False
         return context
 
-    @extend_schema(parameters=[OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),])
-    @action(detail=True, methods=['get'])
-    def tracks(self, request, slug=None):
-        label = self.get_object()
-        tracks = label.tracks.select_related('album').all()
-        page = self.paginate_queryset(tracks)
-        if page is not None:
-            serializer = TrackSerializer(page, many=True, context=self.get_serializer_context())
-            return self.get_paginated_response(serializer.data)
-        serializer = TrackSerializer(tracks, many=True, context=self.get_serializer_context())
-        return Response(serializer.data)
-
-    @extend_schema(parameters=[OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),])
-    @action(detail=True, methods=['get'])
-    def albums(self, request, slug=None):
-        label = self.get_object()
-        albums = label.albums_by_label.prefetch_related('tracks').annotate(annotated_total_tracks=Count('tracks'))
-        page = self.paginate_queryset(albums)
-        if page is not None:
-            serializer = AlbumListSerializer(page, many=True, context=self.get_serializer_context())
-            return self.get_paginated_response(serializer.data)
-        serializer = AlbumListSerializer(albums, many=True, context=self.get_serializer_context())
-        return Response(serializer.data)
 
 
 @sync_to_async
