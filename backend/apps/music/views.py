@@ -1,6 +1,5 @@
-from django.http import HttpResponse, Http404, FileResponse
+from django.http import HttpResponse
 import mimetypes
-from urllib.parse import quote
 from rest_framework.permissions import AllowAny , IsAuthenticated , IsAuthenticatedOrReadOnly
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -17,29 +16,26 @@ from django.db import transaction
 from rest_framework.decorators import action
 from apps.common.permissions import user_has_stream_access ,user_has_download_access , user_has_all_access
 from apps.common.models import PublishStatus
-from django.db.models import Count
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 from rest_framework.viewsets import ReadOnlyModelViewSet
 from apps.interactions.mixins import LikableMixin, FollowableMixin ,CommentableMixin
 from django.db.models import F
 from django.views.decorators.vary import vary_on_headers
-from ..common.utils.clean_file_name import get_clean_download_filename
 from ..interactions.models import Comment
 from ..interactions.serializers import CommentSerializer , CommentCreateSerializer
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 from asgiref.sync import sync_to_async
 from rest_framework.decorators import api_view, permission_classes
-from django.conf import settings
 import os
 import tempfile
 import zipfile
 from django.core.files import File
 from django.utils import timezone
 from .models import Album, AlbumArchiveUpload, Track, Artist ,Genre
-from django.db.models import Count, Prefetch, Sum, Value
-from django.db.models.functions import Coalesce
+from django.db.models import Count, Prefetch
+from urllib.parse import quote
 
 
 class AlbumBatchUploadAPIView(APIView):
@@ -88,7 +84,10 @@ class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
 
 class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     permission_classes = [AllowAny]
-    queryset = Album.objects.filter(status=PublishStatus.PUBLISHED).prefetch_related("tracks").annotate(annotated_total_tracks=Count("tracks"))
+    queryset = Album.objects.filter(status=PublishStatus.PUBLISHED).prefetch_related(
+        "tracks__artists",
+        "main_artists"
+    ).annotate(annotated_total_tracks=Count("tracks"))
     pagination_class = ClassicalMusicPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = AlbumFilter
@@ -220,13 +219,11 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
             return Response({"detail": "شما اشتراک فعال برای پخش این آهنگ را ندارید."},status=status.HTTP_403_FORBIDDEN)
         file_path = track.audio_file.name
         content_type, _ = mimetypes.guess_type(file_path)
-        if not content_type:
-            content_type = 'audio/mpeg'
         file_url = track.audio_file.url
-        accel_path = file_url.replace(settings.MEDIA_URL, '/protected-media/')
+        accel_path = f"/protected-media/{track.audio_file.name}"
         response = HttpResponse()
         response['X-Accel-Redirect'] = accel_path
-        response['Content-Type'] = content_type
+        response['Content-Type'] = ''
         from urllib.parse import quote
         safe_filename = quote(file_path.split("/")[-1])
         response['Content-Disposition'] = f'inline; filename="{safe_filename}"'
@@ -241,13 +238,11 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
             return Response({"detail": "شما اشتراک فعال برای دانلود این آهنگ را ندارید."}, status=status.HTTP_403_FORBIDDEN)
         file_path = track.audio_file.name
         content_type, _ = mimetypes.guess_type(file_path)
-        if not content_type:
-            content_type = 'audio/mpeg'
         file_url = track.audio_file.url
-        accel_path = file_url.replace(settings.MEDIA_URL, '/protected-media/')
+        accel_path = f"/protected-media/{track.audio_file.name}"
         response = HttpResponse()
         response['X-Accel-Redirect'] = accel_path
-        response['Content-Type'] = content_type
+        response['Content-Type'] = ''
         from urllib.parse import quote
         safe_filename = quote(file_path.split("/")[-1])
         response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
@@ -457,18 +452,20 @@ def download_album_zip_api(request, album_slug):
             export_record.save()
 
         except Exception as e:
-            os.unlink(temp_zip.name)
+            if os.path.exists(temp_zip.name):
+                os.unlink(temp_zip.name)
             return Response({"error": "ساخت فایل زیپ به مشکل خورد ، به پشتیبانی پیام بدید."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         finally:
             if os.path.exists(temp_zip.name):
                 os.unlink(temp_zip.name)
 
     file_url = export_record.zip_file.url
-    nginx_internal_path = file_url.replace(settings.MEDIA_URL, '/protected-media/')
+    nginx_internal_path = f"/protected-media/{export_record.zip_file.name}"
 
     response = HttpResponse()
     response['X-Accel-Redirect'] = nginx_internal_path
-    response['Content-Disposition'] = f'attachment; filename="{os.path.basename(export_record.zip_file.name)}"'
+    safe_filename = quote(os.path.basename(export_record.zip_file.name))
+    response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
     response['Content-Type'] = 'application/zip'
 
     return response

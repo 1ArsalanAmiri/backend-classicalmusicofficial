@@ -13,9 +13,9 @@ from django.core.files.base import ContentFile
 from django.db import transaction
 from celery import shared_task
 from mutagen import File as MutagenFile
+from django.utils.text import get_valid_filename
 
 from .models import AlbumArchiveUpload, Track, Artist, AlbumZipExport, Genre
-# در صورت نیاز کانکتور واقعی را ایمپورت کنید، فعلا از کلاس موجود در utils استفاده می‌کنیم
 from .utils import MockStorageConnector
 
 logger = logging.getLogger(__name__)
@@ -70,8 +70,16 @@ def process_album_archive_task(self, upload_record_id: int):
         tracks_to_update = []
         task_warnings = []
 
+        used_track_numbers = set(album.tracks.values_list('track_number', flat=True))
+
+
         for index, file_path in enumerate(audio_files):
-            filename = os.path.basename(file_path)
+            raw_filename = os.path.basename(file_path)
+            filename = get_valid_filename(raw_filename).replace(" ", "_").replace("%", "_")
+            try:
+                os.chmod(file_path, 0o644)
+            except Exception as e:
+                logger.warning(f"Could not change permissions for {file_path}: {e}")
             try:
                 try:
                     audio_raw = MutagenFile(file_path)
@@ -117,7 +125,11 @@ def process_album_archive_task(self, upload_record_id: int):
                 raw_title_list = audio_meta.get("title", [filename])
                 raw_title = raw_title_list[0] if raw_title_list else filename
                 safe_title = (str(raw_title) or "Untitled")[:450]
-                safe_slug = slugify(safe_title, allow_unicode=True)[:450]
+
+                base_slug = slugify(safe_title, allow_unicode=True)[:400]
+                unique_suffix = uuid.uuid4().hex[:8]
+                safe_slug = f"{base_slug}-{unique_suffix}" if base_slug else f"track-{unique_suffix}"
+
                 if not safe_slug:
                     safe_slug = f"track-{uuid.uuid4().hex[:10]}"
 
@@ -129,6 +141,10 @@ def process_album_archive_task(self, upload_record_id: int):
                     track_number = int(clean_track_str) if clean_track_str.isdigit() else (index + 1)
                 except (ValueError, TypeError, AttributeError):
                     track_number = index + 1
+                while track_number in used_track_numbers:
+                    track_number += 1
+                used_track_numbers.add(track_number)
+
 
                 # 3. Artist
                 raw_artist_name_list = audio_meta.get("artist", [None])

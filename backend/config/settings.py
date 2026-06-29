@@ -7,10 +7,11 @@ from sentry_sdk.integrations.django import DjangoIntegration
 from sentry_sdk.integrations.celery import CeleryIntegration
 from sentry_sdk.integrations.redis import RedisIntegration
 import rarfile
+import mimetypes
 
 
 
-SITE_URL = "http://localhost"  # در سرور واقعی این را به https://yourdomain.com تغییر دهید
+SITE_URL = "https://clmusic.ir"
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -28,7 +29,7 @@ DEBUG = env('DEBUG')
 
 FRONTEND_URL = "http://localhost:3000"
 
-BACKEND_URL= "http://localhost/"
+BACKEND_URL= "https://clmusic.ir/"
 
 ALLOWED_HOSTS = ["*"]
 
@@ -272,16 +273,11 @@ if DEBUG:
     import socket
     hostname, _, ips = socket.gethostbyname_ex(socket.gethostname())
     INTERNAL_IPS = [ip[: ip.rfind(".")] + ".1" for ip in ips] + ["127.0.0.1", "10.0.2.2"]
-
-
 def show_toolbar(request):
     return DEBUG
-
 DEBUG_TOOLBAR_CONFIG = {
     "SHOW_TOOLBAR_CALLBACK": "config.settings.show_toolbar",
     "INSERT_BEFORE": "</body>",}
-
-import mimetypes
 mimetypes.add_type("application/javascript", ".js", True)
 
 

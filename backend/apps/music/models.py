@@ -323,4 +323,4 @@ class PlayHistory(TimeStampedModel):
         ]
 
     def __str__(self):
-        return f"{self.user} listened to {self.track.title}"
+        return f"{self.user} listened to {self.track}"
