@@ -19,7 +19,6 @@ class AlbumCreditInline(admin.TabularInline):
     model = AlbumCredit
     extra = 1
     autocomplete_fields = ["artist"]
-    classes = ('collapse',)
 
 
 class TrackInline(admin.TabularInline):

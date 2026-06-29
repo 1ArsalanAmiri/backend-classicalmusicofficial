@@ -1,8 +1,7 @@
-from django.urls import reverse
 from rest_framework import serializers
-from .models import Artist, Album, Track , Genre, Instrument , Label , PlayHistory
+from .models import Artist, Album, Track , Genre, Instrument , Label
 from drf_spectacular.utils import extend_schema_field
-
+from rest_framework.reverse import reverse
 
 
 class ArtistSerializer(serializers.ModelSerializer):
@@ -74,7 +73,6 @@ class TrackSerializer(serializers.ModelSerializer):
                 track_artists.insert(0, album_artist)
         return ArtistBasicSerializer(track_artists, many=True, context=self.context).data
 
-
     def get_cover_image(self, obj):
         request = self.context.get('request')
         if obj.cover_image:
@@ -83,17 +81,21 @@ class TrackSerializer(serializers.ModelSerializer):
             return request.build_absolute_uri(obj.album.cover_image.url)
         return None
 
-
     def get_audio_url(self, obj):
         has_stream_access = self.context.get("has_stream_access", False)
-        has_download_access = self.context.get("has_download_access", False)
-        if not has_stream_access or has_download_access:
+        if not has_stream_access or not obj.audio_file:
             return None
         request = self.context.get('request')
-        if request is None:
-            return None
-        return request.build_absolute_uri(reverse('track-stream', kwargs={'slug': obj.slug}))
-
+        if request:
+            try:
+                return reverse(
+                    'track-stream',
+                    kwargs={'slug': obj.slug},
+                    request=request
+                )
+            except Exception:
+                return None
+        return None
 
     @extend_schema_field(serializers.IntegerField())
     def get_duration_seconds(self, obj):

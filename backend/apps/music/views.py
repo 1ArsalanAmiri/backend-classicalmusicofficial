@@ -174,6 +174,15 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
     ordering_fields = ['track_number', 'release_date']
     lookup_field = 'slug'
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        request = self.request
+        if request and request.user.is_authenticated:
+            context["has_stream_access"] = user_has_stream_access(request.user)
+        else:
+            context["has_stream_access"] = False
+        return context
+
 
     @extend_schema(parameters=[
         OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),
@@ -197,39 +206,21 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         serializer = self.get_serializer(filtered_queryset, many=True)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated], url_path='stream')
     def stream(self, request, slug=None):
         track = self.get_object()
+        if not track.audio_file:
+            return Response({"detail": "فایل صوتی یافت نشد."}, status=404)
         if not user_has_stream_access(request.user):
-            return Response({"error": "شما اشتراک فعال برای پخش آهنگ ندارید."}, status=status.HTTP_403_FORBIDDEN)
-        if not track.audio_file:
-            return Response({"error": "فایل صوتی برای این ترک یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
-        content_type, _ = mimetypes.guess_type(track.audio_file.name)
-        response = FileResponse(open(track.audio_file.path, 'rb'),content_type=content_type or 'audio/mpeg')
-        response['Accept-Ranges'] = 'bytes'
-        return response
-
-    @action(detail=True, methods=['get'], url_path='download', permission_classes=[HasDownloadSubscription])
-    def download(self, request, slug=None):
-        track = self.get_object()
-
-        if not track.audio_file:
-            raise Http404("Audio file not found")
-
-        audio_path = track.audio_file.name
-
-        content_type, _ = mimetypes.guess_type(audio_path)
-        content_type = content_type or 'audio/mpeg'
-
-        clean_filename = get_clean_download_filename(track)
-
-        encoded_filename = quote(clean_filename)
-
+            return Response({"detail": "شما اشتراک فعال برای پخش این آهنگ را ندارید."}, status=403)
+        file_path = track.audio_file.name
+        accel_path = f"/protected-media/{file_path}"
+        content_type, _ = mimetypes.guess_type(file_path)
+        if not content_type:
+            content_type = 'audio/mpeg'
         response = HttpResponse()
-        response['X-Accel-Redirect'] = f"/protected_media/{audio_path}"
-        response['Content-Disposition'] = f"attachment; filename*=UTF-8''{encoded_filename}"
+        response['X-Accel-Redirect'] = accel_path
         response['Content-Type'] = content_type
-
         return response
 
     @extend_schema(parameters=[OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),])

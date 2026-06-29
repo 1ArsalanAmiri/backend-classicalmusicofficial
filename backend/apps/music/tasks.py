@@ -27,7 +27,7 @@ def process_album_archive_task(self, upload_record_id: int):
     upload_record = None
 
     try:
-        upload_record = AlbumArchiveUpload.objects.select_related("album").get(id=upload_record_id)
+        upload_record = AlbumArchiveUpload.objects.select_related("album", "album__artist").get(id=upload_record_id)
         album = upload_record.album
 
         upload_record.status = "extracting"
@@ -71,18 +71,21 @@ def process_album_archive_task(self, upload_record_id: int):
         task_warnings = []
 
         for index, file_path in enumerate(audio_files):
+            filename = os.path.basename(file_path)
             try:
                 try:
                     audio_raw = MutagenFile(file_path)
                     audio_meta = MutagenFile(file_path, easy=True)
                 except Exception as meta_error:
                     logger.warning(f"Skipping {file_path}: Metadata read error - {meta_error}")
-                    task_warnings.append(f"خطا در خواندن متادیتا فایل {os.path.basename(file_path)}")
+                    task_warnings.append(f"خطا در خواندن متادیتا فایل {filename}")
                     continue
 
                 if not audio_meta:
-                    task_warnings.append(f"فایل {os.path.basename(file_path)} فاقد متادیتای معتبر است.")
-                    continue
+                    audio_meta = audio_raw
+                    if not audio_meta:
+                        task_warnings.append(f"فایل {filename} فاقد متادیتای معتبر است.")
+                        continue
 
                 # -------- Extract cover --------
                 if not cover_extracted and audio_raw:
@@ -103,15 +106,13 @@ def process_album_archive_task(self, upload_record_id: int):
 
                         if image_data:
                             ext = {"image/png": "png", "image/webp": "webp"}.get(mime_type, "jpg")
-                            filename = f"album_cover_{album.id}_{uuid.uuid4().hex[:6]}.{ext}"
-                            album.cover_image.save(filename, ContentFile(image_data), save=True)
+                            cover_filename = f"album_cover_{album.id}_{uuid.uuid4().hex[:6]}.{ext}"
+                            album.cover_image.save(cover_filename, ContentFile(image_data), save=True)
                             cover_extracted = True
                     except Exception as cover_error:
                         logger.warning(f"Failed to extract cover from {file_path}: {cover_error}")
 
                 # -------- Metadata Extraction --------
-                filename = os.path.basename(file_path)
-
                 # 1. Title & Slug
                 raw_title_list = audio_meta.get("title", [filename])
                 raw_title = raw_title_list[0] if raw_title_list else filename
@@ -132,11 +133,16 @@ def process_album_archive_task(self, upload_record_id: int):
                 # 3. Artist
                 raw_artist_name_list = audio_meta.get("artist", [None])
                 raw_artist_name = raw_artist_name_list[0] if raw_artist_name_list else None
-                album_artist_name = str(raw_artist_name).strip() if raw_artist_name else None
+                track_artist_name = str(raw_artist_name).strip() if raw_artist_name else None
 
                 artist_obj = None
-                if album_artist_name:
-                    artist_obj = Artist.objects.filter(name__iexact=album_artist_name).first()
+
+                if track_artist_name:
+                    artist_obj = Artist.objects.filter(name__iexact=track_artist_name).first()
+
+                if not artist_obj:
+                    artist_obj = album.artist
+
                 if not artist_obj:
                     artist_obj, _ = Artist.objects.get_or_create(
                         name="Unknown Artist", defaults={"artist_type": "unknown"}
@@ -151,7 +157,7 @@ def process_album_archive_task(self, upload_record_id: int):
 
                 # 5. Duration
                 duration_ms = 0
-                if audio_meta.info and hasattr(audio_meta.info, "length"):
+                if hasattr(audio_meta, "info") and hasattr(audio_meta.info, "length"):
                     try:
                         duration_ms = int(float(audio_meta.info.length) * 1000)
                     except (ValueError, TypeError):
@@ -191,9 +197,10 @@ def process_album_archive_task(self, upload_record_id: int):
 
             except Exception as track_error:
                 logger.error(f"Track processing error on {file_path}: {track_error}")
-                task_warnings.append(f"خطا در پردازش کامل فایل {os.path.basename(file_path)}")
+                task_warnings.append(f"خطا در پردازش کامل فایل {filename}")
                 continue
 
+        # -------- Database Save --------
         saved_tracks_count = 0
         for data in tracks_to_update:
             track_title = data["defaults"].get("title", "Unknown")
@@ -209,8 +216,7 @@ def process_album_archive_task(self, upload_record_id: int):
                 saved_tracks_count += 1
             except Exception as db_err:
                 logger.error(f"DB Update failed for track {track_title}: {db_err}")
-                task_warnings.append(f"خطای دیتابیس برای ترک {track_title}")
-
+                task_warnings.append(f"خطای دیتابیس در ذخیره ترک {track_title}")
 
         upload_record.status = "completed"
         upload_record.progress = 100
@@ -231,6 +237,7 @@ def process_album_archive_task(self, upload_record_id: int):
             upload_record.error_log = str(e)
             upload_record.save(update_fields=["status", "error_log"])
         logger.exception(f"Unexpected error in task {upload_record_id}")
+        # Retrying only on unexpected exceptions (like DB deadlock, storage timeouts, etc.)
         raise self.retry(exc=e, countdown=10)
 
     finally:
