@@ -70,7 +70,7 @@ class LabelAdmin(admin.ModelAdmin):
 # ==========================================
 @admin.register(Album)
 class AlbumAdmin(admin.ModelAdmin):
-    list_display = ['title', 'release_year', 'display_main_artists']
+    list_display = ['title', 'release_year', 'display_main_artists' , 'cover_image']
     autocomplete_fields = ['label']
     inlines = [TrackInline, AlbumCreditInline]
     search_fields = ['title']
