@@ -201,7 +201,7 @@ class ArtistDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Artist
         fields = [
-            'slug', 'name', 'biography', 'image',
+            'slug', 'name', 'biography', 'image','birth_year','death_year',
             'albums', 'sung_tracks', 'composed_tracks', 'related_artists'
         ]
 

@@ -22,24 +22,7 @@ class ArtistBasicSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Artist
-        fields = ['name', 'slug', 'image', 'artist_type']
-
-
-
-class LabelListSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Label
-        fields = ['name', 'slug', 'logo' , 'likes_count','followers_count']
-
-
-
-class LabelDetailSerializer(serializers.ModelSerializer):
-    albums_count = serializers.IntegerField(read_only=True)
-    tracks_count = serializers.IntegerField(read_only=True)
-
-    class Meta:
-        model = Label
-        fields = ['name', 'slug', 'logo', 'country', 'website', 'description', 'albums_count', 'tracks_count']
+        fields = ['name', 'slug','artist_type']
 
 
 
@@ -147,18 +130,13 @@ class AlbumDetailSerializer(serializers.ModelSerializer):
         ]
 
     def get_on_this_album(self, obj):
-        unique_artists = {}
-        for track in obj.tracks.all():
-            for artist in track.artists.all():
-                if artist.id not in unique_artists:
-                    unique_artists[artist.id] = artist
-        for credit in obj.credits.all():
-            if credit.artist.id not in unique_artists:
-                unique_artists[credit.artist.id] = credit.artist
-        for main_artist in obj.main_artists.all():
-            if main_artist.id in unique_artists:
-                del unique_artists[main_artist.id]
-        return ArtistBasicSerializer(unique_artists.values(), many=True, context=self.context).data
+        main_artists_ids = obj.main_artists.values_list('id', flat=True)
+        track_artists_ids = obj.tracks.values_list('artists__id', flat=True)
+        all_artist_ids = set(main_artists_ids) | set(track_artists_ids)
+        all_artist_ids.discard(None)
+        artists = Artist.objects.filter(id__in=all_artist_ids).distinct()
+        serializer = ArtistBasicSerializer(artists, many=True, context=self.context)
+        return serializer.data
 
 
 
@@ -177,3 +155,35 @@ class InstrumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Instrument
         fields = ['name', 'slug', 'track_count']
+
+
+
+class LabelListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Label
+        fields = ['name', 'slug', 'logo' , 'likes_count','followers_count']
+
+
+
+class LabelDetailSerializer(serializers.ModelSerializer):
+    albums_count = serializers.IntegerField(read_only=True)
+    tracks_count = serializers.IntegerField(read_only=True)
+    albums = serializers.SerializerMethodField()
+    singles = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Label
+        fields = [
+            'name', 'slug', 'logo', 'country', 'website', 'description',
+            'albums_count', 'tracks_count', 'albums', 'singles'
+        ]
+
+    @extend_schema_field(AlbumListSerializer(many=True))
+    def get_albums(self, obj):
+        albums = obj.albums_by_label.all()
+        return AlbumListSerializer(albums, many=True, context=self.context).data
+
+    @extend_schema_field(TrackSerializer(many=True))
+    def get_singles(self, obj):
+        singles = getattr(obj, 'prefetched_singles', [])
+        return TrackSerializer(singles, many=True, context=self.context).data

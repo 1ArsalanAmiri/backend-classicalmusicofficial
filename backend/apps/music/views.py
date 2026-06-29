@@ -96,24 +96,19 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     ordering_fields = ['release_year', 'title']
     lookup_field = 'slug'
 
-    def get_queryset(self):
-        queryset = Album.objects.filter(status=PublishStatus.PUBLISHED)
-        if self.action == 'list':
-            queryset = queryset.annotate(annotated_total_tracks=Count('tracks', distinct=True))
-            queryset = queryset.prefetch_related('main_artists')
-        elif self.action == 'retrieve':
-            queryset = queryset.select_related('label').prefetch_related(
-                'main_artists',
-                Prefetch(
-                    'tracks',
-                    queryset=Track.objects.select_related('album').prefetch_related('artists', 'album__main_artists')
-                ),
-                'credits__artist'
-            ).annotate(
-                annotated_total_tracks=Count('tracks', distinct=True),
-                annotated_total_duration_ms=Coalesce(Sum('tracks__duration_ms'), Value(0))
-            )
-        return queryset
+    def get_on_this_album(self, obj):
+        main_artists_ids = [artist.id for artist in obj.main_artists.all()]
+        track_artists_ids = [
+            artist.id
+            for track in obj.tracks.all()for artist in track.artists.all()
+        ]
+        all_artist_ids = set(main_artists_ids) | set(track_artists_ids)
+        all_artist_ids.discard(None)
+        if not all_artist_ids:
+            return []
+        artists = Artist.objects.filter(id__in=all_artist_ids).distinct()
+        serializer = ArtistBasicSerializer(artists, many=True, context=self.context)
+        return serializer.data
 
     @extend_schema(methods=['POST'],request=CommentSerializer,responses={201: CommentSerializer},)
     @action(detail=True,methods=["get", "post"],url_path="comments",permission_classes=[IsAuthenticatedOrReadOnly],)
@@ -339,55 +334,72 @@ class EraListView(APIView):
 
 
 
-class LabelViewSet(FollowableMixin,LikableMixin,viewsets.ReadOnlyModelViewSet):
+class LabelViewSet(FollowableMixin, LikableMixin, viewsets.ReadOnlyModelViewSet):
     lookup_field = 'slug'
-
 
     def get_queryset(self):
         queryset = Label.objects.all()
         if self.action == 'retrieve':
             queryset = queryset.annotate(
-                albums_count=Count('albums', distinct=True),
+                albums_count=Count('albums_by_label', distinct=True),
                 tracks_count=Count('tracks', distinct=True)
+            ).prefetch_related(
+                Prefetch(
+                    'albums_by_label',
+                    queryset=Album.objects.filter(status=PublishStatus.PUBLISHED).annotate(
+                        annotated_total_tracks=Count('tracks')
+                    )
+                ),
+                Prefetch(
+                    'tracks',
+                    queryset=Track.objects.filter(
+                        status=PublishStatus.PUBLISHED,
+                        album__isnull=True
+                    ).select_related('album', 'instrument').prefetch_related('artists'),
+                    to_attr='prefetched_singles'
+                )
             )
         return queryset
-
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
             return LabelDetailSerializer
         return LabelListSerializer
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        request = self.request
+        if request and request.user.is_authenticated:
+            context["has_stream_access"] = user_has_stream_access(request.user)
+            context["has_download_access"] = user_has_download_access(request.user)
+        else:
+            context["has_stream_access"] = False
+            context["has_download_access"] = False
+        return context
 
     @extend_schema(parameters=[OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),])
     @action(detail=True, methods=['get'])
     def tracks(self, request, slug=None):
         label = self.get_object()
         tracks = label.tracks.select_related('album').all()
-
         page = self.paginate_queryset(tracks)
         if page is not None:
-            serializer = TrackSerializer(page, many=True, context={'request': request})
+            serializer = TrackSerializer(page, many=True, context=self.get_serializer_context())
             return self.get_paginated_response(serializer.data)
-
-        serializer = TrackSerializer(tracks, many=True, context={'request': request})
+        serializer = TrackSerializer(tracks, many=True, context=self.get_serializer_context())
         return Response(serializer.data)
-
 
     @extend_schema(parameters=[OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),])
     @action(detail=True, methods=['get'])
     def albums(self, request, slug=None):
         label = self.get_object()
-        albums = label.albums.prefetch_related('tracks')
-
+        albums = label.albums_by_label.prefetch_related('tracks').annotate(annotated_total_tracks=Count('tracks'))
         page = self.paginate_queryset(albums)
         if page is not None:
-            serializer = AlbumListSerializer(page, many=True, context={'request': request})
+            serializer = AlbumListSerializer(page, many=True, context=self.get_serializer_context())
             return self.get_paginated_response(serializer.data)
-
-        serializer = AlbumListSerializer(albums, many=True, context={'request': request})
+        serializer = AlbumListSerializer(albums, many=True, context=self.get_serializer_context())
         return Response(serializer.data)
-
 
 
 @sync_to_async
