@@ -14,8 +14,6 @@ class PlaylistTrackSerializer(serializers.ModelSerializer):
 
 
 class PlaylistListSerializer(serializers.ModelSerializer):
-    owner_username = serializers.CharField(source="owner.username", read_only=True)
-    owner_phone_number = serializers.CharField(source="owner.phone_number", read_only=True)
 
     class Meta:
         model = Playlist
@@ -23,10 +21,8 @@ class PlaylistListSerializer(serializers.ModelSerializer):
             "id",
             "slug",
             "title",
-            "owner_username",
-            "owner_phone_number",
+            "title_fa",
             "cover_image",
-            "is_public",
             "total_tracks",
             "total_duration_ms",
             "created_at",
@@ -34,8 +30,6 @@ class PlaylistListSerializer(serializers.ModelSerializer):
 
 
 class PlaylistDetailSerializer(serializers.ModelSerializer):
-    owner_username = serializers.CharField(source="owner.username", read_only=True)
-
     tracks = PlaylistTrackSerializer(
         source="playlist_tracks",
         many=True,
@@ -48,10 +42,9 @@ class PlaylistDetailSerializer(serializers.ModelSerializer):
             "id",
             "slug",
             "title",
+            "title_fa",
             "description",
-            "owner_username",
             "cover_image",
-            "is_public",
             "total_tracks",
             "total_duration_ms",
             "created_at",
@@ -65,7 +58,7 @@ class PlaylistCreateUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Playlist
-        fields = ["track_slug", "title", "description", "cover_image", "is_public"]
+        fields = ["track_slug", "title", "title_fa","description", "cover_image"]
 
     def create(self, validated_data):
         track_slug = validated_data.pop('track_slug', None)

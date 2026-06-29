@@ -15,7 +15,7 @@ from apps.common.pagination import ClassicalMusicPagination
 from apps.common.filters import AlbumFilter,TrackFilter
 from django.db import transaction
 from rest_framework.decorators import action
-from apps.common.permissions import HasStreamSubscription  , user_has_stream_access , HasDownloadSubscription
+from apps.common.permissions import user_has_stream_access ,user_has_download_access , user_has_all_access
 from apps.common.models import PublishStatus
 from django.db.models import Count
 from django.utils.decorators import method_decorator
@@ -92,19 +92,27 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     pagination_class = ClassicalMusicPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = AlbumFilter
-    search_fields = ['title', 'artist__name', 'credits__artist__name']
-    ordering_fields = ['release_date', 'title']
+    search_fields = ['title', 'main_artists__name', 'credits__artist__name']
+    ordering_fields = ['release_year', 'title']
     lookup_field = 'slug'
 
     def get_queryset(self):
         queryset = Album.objects.filter(status=PublishStatus.PUBLISHED)
         if self.action == 'list':
             queryset = queryset.annotate(annotated_total_tracks=Count('tracks', distinct=True))
+            queryset = queryset.prefetch_related('main_artists')
         elif self.action == 'retrieve':
-            queryset = queryset.select_related('artist', 'label').prefetch_related(
-                Prefetch('tracks',queryset=Track.objects.select_related('album', 'album__artist').prefetch_related('artists')),'credits__artist').annotate(
+            queryset = queryset.select_related('label').prefetch_related(
+                'main_artists',
+                Prefetch(
+                    'tracks',
+                    queryset=Track.objects.select_related('album').prefetch_related('artists', 'album__main_artists')
+                ),
+                'credits__artist'
+            ).annotate(
                 annotated_total_tracks=Count('tracks', distinct=True),
-                annotated_total_duration_ms=Coalesce(Sum('tracks__duration_ms'), Value(0)))
+                annotated_total_duration_ms=Coalesce(Sum('tracks__duration_ms'), Value(0))
+            )
         return queryset
 
     @extend_schema(methods=['POST'],request=CommentSerializer,responses={201: CommentSerializer},)
@@ -138,12 +146,12 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     def get_serializer_context(self):
         context = super().get_serializer_context()
         request = self.request
-
         if request and request.user.is_authenticated:
             context["has_stream_access"] = user_has_stream_access(request.user)
+            context["has_download_access"] = user_has_download_access(request.user)
         else:
             context["has_stream_access"] = False
-
+            context["has_download_access"] = False
         return context
 
     def get_serializer_class(self):
@@ -179,8 +187,10 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         request = self.request
         if request and request.user.is_authenticated:
             context["has_stream_access"] = user_has_stream_access(request.user)
+            context["has_download_access"] = user_has_download_access(request.user)
         else:
             context["has_stream_access"] = False
+            context["has_download_access"] = False
         return context
 
 
@@ -225,6 +235,27 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         from urllib.parse import quote
         safe_filename = quote(file_path.split("/")[-1])
         response['Content-Disposition'] = f'inline; filename="{safe_filename}"'
+        return response
+
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated], url_path='download')
+    def download(self, request, slug=None):
+        track = self.get_object()
+        if not track.audio_file:
+            return Response({"detail": "فایل صوتی یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
+        if not user_has_download_access(request.user):
+            return Response({"detail": "شما اشتراک فعال برای دانلود این آهنگ را ندارید."}, status=status.HTTP_403_FORBIDDEN)
+        file_path = track.audio_file.name
+        content_type, _ = mimetypes.guess_type(file_path)
+        if not content_type:
+            content_type = 'audio/mpeg'
+        file_url = track.audio_file.url
+        accel_path = file_url.replace(settings.MEDIA_URL, '/protected-media/')
+        response = HttpResponse()
+        response['X-Accel-Redirect'] = accel_path
+        response['Content-Type'] = content_type
+        from urllib.parse import quote
+        safe_filename = quote(file_path.split("/")[-1])
+        response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
         return response
 
     @extend_schema(parameters=[OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),])
@@ -369,6 +400,11 @@ def get_album_and_tracks(album_slug):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def download_album_zip_api(request, album_slug):
+    if not user_has_download_access(request.user):
+        return Response(
+            {"detail": "شما اشتراک فعال برای دانلود آلبوم را ندارید."},
+            status=status.HTTP_403_FORBIDDEN
+        )
     album = get_object_or_404(Album, slug=album_slug)
     tracks = list(album.tracks.all())
 

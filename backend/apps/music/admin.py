@@ -2,12 +2,13 @@ from django.contrib import admin, messages
 from django.urls import path
 from django.utils.html import format_html, mark_safe
 from django.utils.translation import gettext_lazy as _
-# مدل AlbumCredit اضافه شد
-from .models import Artist, Album, Track, AlbumArchiveUpload, ArchiveUploadStatus, Genre, Instrument, Label, AlbumCredit
 from django.http import JsonResponse
 from django.template.response import TemplateResponse
 from admin_extra_buttons.api import ExtraButtonsMixin, button
 from django.urls import reverse
+
+from .models import (Artist, Album, Track, AlbumArchiveUpload, ArchiveUploadStatus,
+                     Genre, Instrument, Label, AlbumCredit)
 from .tasks import process_album_archive_task
 
 
@@ -24,10 +25,9 @@ class AlbumCreditInline(admin.TabularInline):
 class TrackInline(admin.TabularInline):
     model = Track
     extra = 0
-    fields = ("title", "artists","status")
+    fields = ("title", "artists", "status")
     ordering = ["track_number"]
     show_change_link = True
-
     autocomplete_fields = ["artists"]
 
 
@@ -47,9 +47,7 @@ class LabelAdmin(admin.ModelAdmin):
     list_display = ('name', 'slug', 'country')
     search_fields = ('name', 'slug')
     prepopulated_fields = {'slug': ('name',)}
-
     inlines = [TrackInlineForLabel]
-
     readonly_fields = ('display_related_albums',)
 
     fieldsets = (
@@ -67,7 +65,7 @@ class LabelAdmin(admin.ModelAdmin):
         if not obj.pk:
             return "پس از ذخیره لیبل، آلبوم‌ها نمایش داده می‌شوند."
 
-        albums = obj.albums.all()
+        albums = obj.albums_by_label.all()  # اصلاح relation به albums_by_label بر اساس model شما
 
         if not albums.exists():
             return "هیچ آلبومی برای این لیبل ثبت نشده است."
@@ -86,18 +84,23 @@ class LabelAdmin(admin.ModelAdmin):
 # =========================================================
 @admin.register(Artist)
 class ArtistAdmin(admin.ModelAdmin):
-    list_display = ("name", "artist_type", "era", "country", "created_at")
+    # سال تولد و فوت به لیست نمایش اضافه شد
+    list_display = ("name", "artist_type", "era", "country", "birth_year", "death_year")
     list_filter = ("artist_type", "era")
     search_fields = ("name", "country", "biography")
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ("created_at", "updated_at")
+    filter_horizontal = ("related_artists",)
 
     fieldsets = (
         (_("اطلاعات پایه"), {
             "fields": ("name", "slug", "artist_type", "era", "country", "image")
         }),
-        (_("جزئیات"), {
-            "fields": ("biography",)
+        (_("اطلاعات زمانی (تولد / فوت)"), {
+            "fields": ("birth_year", "death_year")  # فیلدهای جدید
+        }),
+        (_("ارتباطات و جزئیات"), {
+            "fields": ("related_artists", "biography",)
         }),
         (_("تاریخچه"), {
             "fields": ("created_at", "updated_at")
@@ -106,16 +109,14 @@ class ArtistAdmin(admin.ModelAdmin):
 
 
 # =========================================================
-# Track Admin (Standalone)
+# Track Admin
 # =========================================================
 @admin.register(Track)
 class TrackAdmin(ExtraButtonsMixin, admin.ModelAdmin):
     list_display = ['title', 'get_album_or_single', 'label', 'track_number', 'get_duration', 'status']
     list_filter = ['status', 'album', 'label']
-    # جستجو در نام آرتیست‌های مشارکت کننده اضافه شد
     search_fields = ['title', 'album__title', 'label__name', 'artists__name']
 
-    # برای مدیریت راحت‌تر فیلد ManyToMany آرتیست‌ها
     filter_horizontal = ('artists',)
     autocomplete_fields = ['album', 'genre', 'instrument', 'label']
 
@@ -140,28 +141,40 @@ class TrackAdmin(ExtraButtonsMixin, admin.ModelAdmin):
 # =========================================================
 @admin.register(Album)
 class AlbumAdmin(admin.ModelAdmin):
-    # فیلدهای composer حذف و artist و title_fa اضافه شدند
-    list_display = ('title', 'title_fa', 'artist', 'label', 'status', 'upload_archive_button', 'display_cover_image')
-    list_filter = ('status', 'release_date', 'label')
-    # فیلدهای سرچ قدیمی حذف و نام آرتیست‌های درگیر اضافه شد
-    search_fields = ('title', 'title_fa', 'artist__name', 'credits__artist__name', 'label__name')
+    # فیلد artist حذف و display_main_artists جایگزین شد
+    list_display = ('title', 'title_fa', 'display_main_artists', 'label', 'status', 'upload_archive_button',
+                    'display_cover_image')
+
+    # فیلد release_date به release_year تغییر یافت
+    list_filter = ('status', 'release_year', 'label')
+
+    # فیلد جستجو به main_artists__name تغییر یافت
+    search_fields = ('title', 'title_fa', 'main_artists__name', 'credits__artist__name', 'label__name')
+
     prepopulated_fields = {"slug": ("title",)}
     readonly_fields = ("created_at", "updated_at")
-    autocomplete_fields = ['artist', 'label']
 
-    # اینلاین AlbumCredit اضافه شد
+    # فیلد artist حذف شد، به جای آن از autocomplete_fields برای M2M استفاده می‌کنیم
+    autocomplete_fields = ['main_artists', 'label']
+
     inlines = [AlbumCreditInline, TrackInline]
+
+    @admin.display(description=_('آرتیست‌های اصلی'))
+    def display_main_artists(self, obj):
+        artists = obj.main_artists.all()
+        if artists.exists():
+            return ", ".join([artist.name for artist in artists])
+        return "-"
 
     def display_cover_image(self, obj):
         if obj.cover_image:
-            return format_html('<img src="{}" width="50" height="50" />', obj.cover_image.url)
+            return format_html('<img src="{}" width="50" height="50" style="border-radius:4px;"/>', obj.cover_image.url)
         return _("بدون کاور")
 
     display_cover_image.short_description = _("کاور آلبوم")
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
-
         if obj.cover_image and change:
             tracks_to_update = Track.objects.filter(album=obj, cover_image__isnull=True)
             updated_count = tracks_to_update.update(cover_image=obj.cover_image)
@@ -170,7 +183,9 @@ class AlbumAdmin(admin.ModelAdmin):
 
     def upload_archive_button(self, obj):
         url = reverse('admin:album_batch_upload', args=[obj.pk])
-        return format_html('<a class="button" href="{}">Bulk Upload</a>', url)
+        return format_html(
+            '<a class="button" href="{}" style="background:#79aec8;color:white;padding:5px 10px;border-radius:4px;">آپلود فایل زیپ</a>',
+            url)
 
     upload_archive_button.short_description = "آپلود آرشیو"
 
@@ -186,7 +201,6 @@ class AlbumAdmin(admin.ModelAdmin):
 
     def batch_upload_view(self, request, album_id):
         album = self.get_object(request, album_id)
-
         if request.method == 'POST':
             archive_file = request.FILES.get('archive_file')
             if not archive_file:
@@ -227,7 +241,7 @@ class AlbumAdmin(admin.ModelAdmin):
 
 
 # =========================================================
-# Genre Admin
+# Genre & Instrument Admin
 # =========================================================
 @admin.register(Genre)
 class GenreAdmin(admin.ModelAdmin):
@@ -237,15 +251,7 @@ class GenreAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at", "updated_at")
     ordering = ("name",)
 
-    fieldsets = (
-        ("اطلاعات ژانر", {"fields": ("name", "slug")}),
-        ("اطلاعات سیستمی", {"fields": ("created_at", "updated_at")}),
-    )
 
-
-# =========================================================
-# Instrument Admin
-# =========================================================
 @admin.register(Instrument)
 class InstrumentAdmin(admin.ModelAdmin):
     list_display = ("name", "slug", "created_at", "updated_at")
@@ -253,8 +259,3 @@ class InstrumentAdmin(admin.ModelAdmin):
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ("created_at", "updated_at")
     ordering = ("name",)
-
-    fieldsets = (
-        ("اطلاعات ساز", {"fields": ("name", "slug")}),
-        ("اطلاعات سیستمی", {"fields": ("created_at", "updated_at")}),
-    )

@@ -56,21 +56,23 @@ class TrackSerializer(serializers.ModelSerializer):
     cover_image = serializers.SerializerMethodField()
     audio_url = serializers.SerializerMethodField()
     duration_seconds = serializers.SerializerMethodField()
+    download_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Track
         fields = [
             'id', 'title', 'album', 'artists', 'slug', 'cover_image',
-            'duration_seconds', 'status', 'likes_count', 'audio_url'
+            'duration_seconds', 'status', 'likes_count', 'audio_url', 'download_url'
         ]
 
     def get_artists(self, obj):
         track_artists = list(obj.artists.all())
-        album_artist = obj.album.artist if obj.album else None
-        if album_artist:
-            track_artist_ids = [artist.id for artist in track_artists]
-            if album_artist.id not in track_artist_ids:
-                track_artists.insert(0, album_artist)
+        track_artist_ids = [artist.id for artist in track_artists]
+        if obj.album:
+            album_main_artists = obj.album.main_artists.all()
+            for main_artist in reversed(list(album_main_artists)):
+                if main_artist.id not in track_artist_ids:
+                    track_artists.insert(0, main_artist)
         return ArtistBasicSerializer(track_artists, many=True, context=self.context).data
 
     def get_cover_image(self, obj):
@@ -97,6 +99,18 @@ class TrackSerializer(serializers.ModelSerializer):
                 return None
         return None
 
+    def get_download_url(self, obj):
+        has_download_access = self.context.get("has_download_access", False)
+        if not has_download_access or not obj.audio_file:
+            return None
+        request = self.context.get('request')
+        if request:
+            try:
+                return reverse('track-download',kwargs={'slug': obj.slug},request=request)
+            except Exception:
+                return None
+        return None
+
     @extend_schema_field(serializers.IntegerField())
     def get_duration_seconds(self, obj):
         if not obj.duration_ms:
@@ -112,9 +126,8 @@ class AlbumListSerializer(serializers.ModelSerializer):
         model = Album
         fields = [
             'title', 'slug', 'cover_image',
-            'release_date', 'total_tracks'
+            'release_year', 'total_tracks'
         ]
-
 
 
 class AlbumDetailSerializer(serializers.ModelSerializer):
@@ -122,13 +135,13 @@ class AlbumDetailSerializer(serializers.ModelSerializer):
     total_tracks = serializers.IntegerField(source='annotated_total_tracks', read_only=True)
     total_duration_ms = serializers.IntegerField(source='annotated_total_duration_ms', read_only=True)
     on_this_album = serializers.SerializerMethodField()
-    main_artist = ArtistBasicSerializer(source='artist', read_only=True)
+    main_artists = ArtistBasicSerializer(many=True, read_only=True)
 
     class Meta:
         model = Album
         fields = [
             'id', 'title', 'title_fa', 'slug', 'cover_image',
-            'release_date', 'main_artist', 'on_this_album',
+            'release_year', 'description', 'main_artists', 'on_this_album',
             'total_tracks', 'total_duration_ms', 'status', 'tracks'
         ]
 
@@ -141,8 +154,9 @@ class AlbumDetailSerializer(serializers.ModelSerializer):
         for credit in obj.credits.all():
             if credit.artist.id not in unique_artists:
                 unique_artists[credit.artist.id] = credit.artist
-        if obj.artist and obj.artist.id in unique_artists:
-            del unique_artists[obj.artist.id]
+        for main_artist in obj.main_artists.all():
+            if main_artist.id in unique_artists:
+                del unique_artists[main_artist.id]
         return ArtistBasicSerializer(unique_artists.values(), many=True, context=self.context).data
 
 

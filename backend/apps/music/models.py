@@ -109,26 +109,26 @@ class Label(TimeStampedModel):
 
 
 class Album(TimeStampedModel):
-    artist = models.ForeignKey('Artist', on_delete=models.SET_NULL, null=True, blank=True,verbose_name=_("آرتیست اصلی"), related_name="albums")
+    main_artists = models.ManyToManyField('Artist',blank=True,verbose_name=_("آرتیست‌های اصلی"),related_name="main_albums")
     title = models.CharField(_("عنوان آلبوم"), max_length=300, blank=True, default="untitled")
     title_fa = models.CharField(_("عنوان فارسی"), max_length=300, blank=True, null=True)
     slug = models.SlugField(_("اسلاگ"), max_length=300, unique=True, blank=True, allow_unicode=True)
     source_path = models.CharField(max_length=500, unique=True, blank=True, null=True)
     cover_image = models.ImageField(_("تصویر آلبوم"), upload_to=album_cover_path, null=True, blank=True,validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])])
-    release_date = models.DateField(_("تاریخ انتشار"), null=True, blank=True)
+    release_year = models.PositiveIntegerField(_("سال انتشار"), null=True, blank=True)
+    description = models.TextField(_("توضیحات نهایی آلبوم"), blank=True)
     status = models.CharField(_("وضعیت انتشار"), max_length=20, choices=PublishStatus.choices,default=PublishStatus.PUBLISHED, db_index=True)
     label = models.ForeignKey(Label, on_delete=models.SET_NULL, null=True, blank=True, related_name="albums_by_label",verbose_name=_("لیبل ناشر"))
     likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
     comments_count = models.PositiveIntegerField(_("تعداد کامنت"), default=0)
-
     objects = AlbumManager()
 
     class Meta:
         verbose_name = _("آلبوم")
         verbose_name_plural = _("آلبوم‌ها")
-        ordering = ["-release_date", "title"]
+        ordering = ["-release_year", "title"]
         indexes = [
-            models.Index(fields=["release_date"]),
+            models.Index(fields=["release_year"]),
             models.Index(fields=["status"]),
         ]
 
@@ -148,13 +148,6 @@ class Album(TimeStampedModel):
     def on_this_album(self):
         return Artist.objects.filter(album_credits__album=self).distinct()
 
-    def save(self, *args, **kwargs):
-        if not self.artist:
-            from .models import Artist
-            unknown_artist, _ = Artist.objects.get_or_create(name="Unknown Artist",defaults={"artist_type": "other"})
-            self.artist = unknown_artist
-        super().save(*args, **kwargs)
-
     def __str__(self):
         return self.title if self.title else _("بدون عنوان")
 
@@ -168,6 +161,9 @@ class Artist(TimeStampedModel):
     era = models.CharField(_("دوره زمانی"),max_length=20,choices=EraChoices.choices,null=True,blank=True,db_index=True)
     image = models.ImageField(_("عکس"),upload_to=artist_image_path,null=True,blank=True,validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])])
     biography = models.TextField(_("بیوگرافی"), blank=True)
+
+    birth_year = models.PositiveIntegerField(_("سال تولد"), null=True, blank=True, help_text=_("مثال:1958"))
+    death_year = models.PositiveIntegerField(_("سال فوت"), null=True, blank=True, help_text=_("اگر زنده هستش ، این فیلد رو خالی بگذارید"))
 
     likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
     followers_count = models.PositiveIntegerField(_("تعداد فالوور"), default=0)
