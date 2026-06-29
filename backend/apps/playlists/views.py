@@ -2,7 +2,6 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
-from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.db.models import Prefetch , Max
 
@@ -13,13 +12,14 @@ from .serializers import (
     PlaylistDetailSerializer,
     PlaylistCreateUpdateSerializer
 )
-from apps.common.permissions import IsOwnerOrPublicReadOnly
 from django.db import transaction
 from apps.interactions.mixins import LikableMixin , FollowableMixin
+from apps.common.pagination import CustomMetaDataPagination
 
 
 class PlaylistViewSet(LikableMixin, FollowableMixin, viewsets.ModelViewSet):
     lookup_field = "slug"
+    pagination_class = CustomMetaDataPagination
 
     def get_permissions(self):
         if self.action in ['list', 'retrieve']:
@@ -51,17 +51,6 @@ class PlaylistViewSet(LikableMixin, FollowableMixin, viewsets.ModelViewSet):
         elif self.action == "retrieve":
             return PlaylistDetailSerializer
         return PlaylistListSerializer
-
-    def list(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset())
-        if not queryset.exists():
-            return Response({"results": [], "message": "No playlists yet"}, status=status.HTTP_200_OK)
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-        serializer = self.get_serializer(queryset, many=True)
-        return Response({"results": serializer.data, "message": "Playlists retrieved successfully."},status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='add-track')
     def add_track(self, request, slug=None):

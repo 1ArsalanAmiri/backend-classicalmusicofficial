@@ -17,17 +17,16 @@ class PlaylistTrackInline(admin.TabularInline):
 class PlaylistAdmin(admin.ModelAdmin):
     list_display = [
         'title',
-        'owner',
-        'is_public',
+        'title_fa',
         'tracks_count',
         'duration_display',
         'created_at',
         'cover_preview_thumbnail'
     ]
-    list_filter = ['is_public', 'created_at', 'updated_at']
-    search_fields = ['title', 'slug', 'owner__username', 'owner__phone_number']
+    list_filter = ['created_at', 'updated_at']
+    # حذف owner از جستجو و افزودن title_fa
+    search_fields = ['title', 'title_fa', 'slug']
     prepopulated_fields = {'slug': ('title',)}
-    autocomplete_fields = ['owner']
     inlines = [PlaylistTrackInline]
     date_hierarchy = 'created_at'
 
@@ -35,19 +34,20 @@ class PlaylistAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ('اطلاعات پایه', {
-            'fields': ('owner', 'title', 'slug', 'description')
+            'fields': ('title', 'title_fa', 'slug', 'description')
         }),
         ('رسانه (Media)', {
             'fields': ('cover_image', 'cover_image_preview')
         }),
         ('تنظیمات و تاریخ‌ها', {
-            'fields': ('is_public', 'created_at', 'updated_at')
+            'fields': ('created_at', 'updated_at')
         }),
     )
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        qs = qs.select_related('owner').annotate(
+        # حذف owner از select_related به دلیل عدم وجود در مدل جدید
+        qs = qs.annotate(
             admin_total_tracks=Count('playlist_tracks', distinct=True),
             admin_total_duration=Sum('tracks__duration_ms')
         )
