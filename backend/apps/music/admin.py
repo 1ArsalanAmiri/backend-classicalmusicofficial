@@ -23,8 +23,8 @@ class ExtraButtonsMixin:
 class TrackInline(admin.TabularInline):
     model = Track
     extra = 0
-    fields = ['track_number', 'title', 'audio_file', 'duration', 'status']
-    # در صورت نیاز برای فیلدهای طولانی یا روابط
+    fields = ['track_number', 'title', 'audio_file', 'status']
+
     # autocomplete_fields = ['artists']
 
 
@@ -132,7 +132,7 @@ class AlbumAdmin(admin.ModelAdmin):
 # ==========================================
 @admin.register(Track)
 class TrackAdmin(ExtraButtonsMixin, admin.ModelAdmin):
-    list_display = ['title', 'get_album_or_single', 'label', 'track_number', 'get_duration', 'status']
+    list_display = ['title', 'get_album_or_single', 'label', 'track_number', 'status']
 
     list_select_related = ['album', 'label']
 
@@ -144,6 +144,3 @@ class TrackAdmin(ExtraButtonsMixin, admin.ModelAdmin):
     def get_album_or_single(self, obj):
         return obj.album.title if obj.album else "تک‌آهنگ"
 
-    @admin.display(description='مدت زمان')
-    def get_duration(self, obj):
-        return obj.duration_ms
