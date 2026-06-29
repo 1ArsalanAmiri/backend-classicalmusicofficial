@@ -146,4 +146,4 @@ class TrackAdmin(ExtraButtonsMixin, admin.ModelAdmin):
 
     @admin.display(description='مدت زمان')
     def get_duration(self, obj):
-        return obj.duration
+        return obj.duration_ms
