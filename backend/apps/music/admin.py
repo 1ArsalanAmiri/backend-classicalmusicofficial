@@ -136,7 +136,7 @@ class TrackAdmin(ExtraButtonsMixin, admin.ModelAdmin):
 
     list_select_related = ['album', 'label']
 
-    autocomplete_fields = ['album', 'genre', 'label']
+    autocomplete_fields = ['album', 'label']
     search_fields = ['title', 'album__title']
     list_filter = ['status']
 
