@@ -10,7 +10,6 @@ class PlaylistTrackInline(admin.TabularInline):
     autocomplete_fields = ['track']
     ordering = ['order']
     readonly_fields = ['added_at']
-    classes = ['collapse']
 
 
 @admin.register(Playlist)
@@ -88,7 +87,7 @@ class PlaylistAdmin(admin.ModelAdmin):
 
 @admin.register(PlaylistTrack)
 class PlaylistTrackAdmin(admin.ModelAdmin):
-    list_display = ['playlist', 'track', 'order', 'added_at']
+    list_display = ['playlist', 'track', 'added_at']
     list_filter = ['added_at']
     search_fields = ['playlist__title', 'track__title', 'track__slug']
     autocomplete_fields = ['playlist', 'track']
