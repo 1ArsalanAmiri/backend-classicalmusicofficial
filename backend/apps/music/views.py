@@ -210,17 +210,21 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
     def stream(self, request, slug=None):
         track = self.get_object()
         if not track.audio_file:
-            return Response({"detail": "فایل صوتی یافت نشد."}, status=404)
+            return Response({"detail": "فایل صوتی یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
         if not user_has_stream_access(request.user):
-            return Response({"detail": "شما اشتراک فعال برای پخش این آهنگ را ندارید."}, status=403)
+            return Response({"detail": "شما اشتراک فعال برای پخش این آهنگ را ندارید."},status=status.HTTP_403_FORBIDDEN)
         file_path = track.audio_file.name
-        accel_path = f"/protected-media/{file_path}"
         content_type, _ = mimetypes.guess_type(file_path)
         if not content_type:
             content_type = 'audio/mpeg'
+        file_url = track.audio_file.url
+        accel_path = file_url.replace(settings.MEDIA_URL, '/protected-media/')
         response = HttpResponse()
         response['X-Accel-Redirect'] = accel_path
         response['Content-Type'] = content_type
+        from urllib.parse import quote
+        safe_filename = quote(file_path.split("/")[-1])
+        response['Content-Disposition'] = f'inline; filename="{safe_filename}"'
         return response
 
     @extend_schema(parameters=[OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),])
