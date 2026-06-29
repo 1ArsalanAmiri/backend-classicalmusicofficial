@@ -70,14 +70,13 @@ class LabelAdmin(admin.ModelAdmin):
 # ==========================================
 @admin.register(Album)
 class AlbumAdmin(admin.ModelAdmin):
-    list_display = ['title', 'release_date', 'display_main_artists']
-    autocomplete_fields = ['main_artists', 'genre', 'label']
+    list_display = ['title', 'release_year', 'display_main_artists']
+    autocomplete_fields = ['label']
     inlines = [TrackInline, AlbumCreditInline]
     search_fields = ['title']
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        # [تغییر پرفورمنس اعمال شده]: جلوگیری از N+1 Query در لیست آلبوم‌ها
         return qs.prefetch_related('main_artists')
 
     @admin.display(description='هنرمندان اصلی')
@@ -137,9 +136,9 @@ class TrackAdmin(ExtraButtonsMixin, admin.ModelAdmin):
 
     list_select_related = ['album', 'label']
 
-    autocomplete_fields = ['album', 'artists', 'genre', 'label']
+    autocomplete_fields = ['album', 'genre', 'label']
     search_fields = ['title', 'album__title']
-    list_filter = ['status', 'genre']
+    list_filter = ['status']
 
     @admin.display(description='آلبوم / تک‌آهنگ')
     def get_album_or_single(self, obj):
