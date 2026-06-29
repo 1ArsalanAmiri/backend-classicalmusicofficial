@@ -14,42 +14,23 @@ class PlaylistTrackSerializer(serializers.ModelSerializer):
 
 
 class PlaylistListSerializer(serializers.ModelSerializer):
-
     class Meta:
         model = Playlist
         fields = [
-            "id",
-            "slug",
-            "title",
-            "title_fa",
-            "cover_image",
-            "total_tracks",
-            "total_duration_ms",
-            "created_at",
+            "id", "slug", "title", "title_fa", "cover_image",
+            "total_tracks", "total_duration_ms", "created_at",
         ]
 
 
 class PlaylistDetailSerializer(serializers.ModelSerializer):
-    tracks = PlaylistTrackSerializer(
-        source="playlist_tracks",
-        many=True,
-        read_only=True
-    )
+    tracks = PlaylistTrackSerializer(source="playlist_tracks", many=True, read_only=True)
 
     class Meta:
         model = Playlist
         fields = [
-            "id",
-            "slug",
-            "title",
-            "title_fa",
-            "description",
-            "cover_image",
-            "total_tracks",
-            "total_duration_ms",
-            "created_at",
-            "updated_at",
-            "tracks",
+            "id", "slug", "title", "title_fa", "description",
+            "cover_image", "total_tracks", "total_duration_ms",
+            "created_at", "updated_at", "tracks",
         ]
 
 
@@ -58,22 +39,16 @@ class PlaylistCreateUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Playlist
-        fields = ["track_slug", "title", "title_fa","description", "cover_image"]
+        fields = ["track_slug", "title", "title_fa", "description", "cover_image"]
 
     def create(self, validated_data):
         track_slug = validated_data.pop('track_slug', None)
-
         playlist = super().create(validated_data)
 
         if track_slug:
             try:
                 track = Track.objects.get(slug=track_slug)
-                PlaylistTrack.objects.create(
-                    playlist=playlist,
-                    track=track,
-                    order=1
-                )
+                PlaylistTrack.objects.create(playlist=playlist, track=track, order=1)
             except Track.DoesNotExist:
                 raise ValidationError({"track_slug": "ترک با این شناسه یافت نشد."})
-
         return playlist
