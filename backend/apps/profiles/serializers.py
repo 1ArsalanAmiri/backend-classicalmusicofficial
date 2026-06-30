@@ -209,9 +209,6 @@ class ArtistListSerializer(serializers.ModelSerializer):
 
 class ArtistDetailSerializer(serializers.ModelSerializer):
     albums = serializers.SerializerMethodField()
-    sung_tracks = serializers.SerializerMethodField()
-    composed_tracks = serializers.SerializerMethodField()
-
     related_artists = ArtistListSerializer(many=True, read_only=True)
 
     class Meta:
