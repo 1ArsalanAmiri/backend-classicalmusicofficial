@@ -218,20 +218,12 @@ class ArtistDetailSerializer(serializers.ModelSerializer):
         model = Artist
         fields = [
             'slug', 'name', 'biography', 'image', 'birth_year', 'death_year',
-            'albums', 'sung_tracks', 'composed_tracks', 'related_artists'
+            'albums','related_artists'
         ]
 
     def get_albums(self, obj):
         albums = obj.main_albums.all()
         return AlbumListSerializer(albums, many=True, context=self.context).data
-
-    def get_sung_tracks(self, obj):
-        tracks = obj.participated_tracks.filter(artists__artist_type=ArtistRole.SINGER).distinct()
-        return TrackSerializer(tracks, many=True, context=self.context).data
-
-    def get_composed_tracks(self, obj):
-        tracks = obj.participated_tracks.filter(artists__artist_type=ArtistRole.COMPOSER).distinct()
-        return TrackSerializer(tracks, many=True, context=self.context).data
 
 
 class PlayHistorySerializer(serializers.ModelSerializer):
