@@ -3,20 +3,18 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
-from rest_framework.fields import SerializerMethodField
-
-from apps.music.models import Artist, Album, Track, PlayHistory
-from apps.profiles.models import UserProfile, ArtistProfile
+from apps.interactions.models import Like, Follow
+from django.contrib.contenttypes.models import ContentType
+from apps.music.models import Artist, Album, Track, PlayHistory , ArtistRole
+from apps.profiles.models import UserProfile
 from django.db.models import Q
 import jdatetime
-from apps.music.serializers import AlbumDetailSerializer , TrackSerializer
+from apps.music.serializers import TrackSerializer
 from apps.playlists.models import Playlist
-from apps.playlists.serializers import PlaylistListSerializer
 from apps.music.serializers import AlbumListSerializer
 
 
 User = get_user_model()
-
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -31,20 +29,26 @@ class UserProfileSerializer(serializers.ModelSerializer):
     days_until_expiration = serializers.SerializerMethodField()
     subscription_status = serializers.SerializerMethodField()
 
+    liked_albums_count = serializers.SerializerMethodField()
+    followed_artists_count = serializers.SerializerMethodField()
+    liked_songs_count = serializers.SerializerMethodField()
+    saved_playlists_count = serializers.SerializerMethodField()
+
     class Meta:
         model = UserProfile
         fields = [
             'phone_number', 'first_name', 'last_name', 'email',
             'profile_image', 'joined_date',
-            'current_subscription_name',
-            'subscription_start_date',
-            'subscription_end_date',
-            'days_until_expiration',
+            'current_subscription_name', 'subscription_start_date',
+            'subscription_end_date', 'days_until_expiration',
             'subscription_status',
+
+            'liked_albums_count', 'followed_artists_count',
+            'liked_songs_count', 'saved_playlists_count'
         ]
 
+
     def get_latest_active_subscription_history(self, obj):
-        """Helper to get the latest active or upcoming subscription history"""
         today = jdatetime.date.today()
         # Fetch history entries that are either active or will start soon
         return obj.subscriptionhistory_set.filter(
@@ -103,6 +107,21 @@ class UserProfileSerializer(serializers.ModelSerializer):
         else: # end_date < today
             return "Expired"
 
+    def get_liked_albums_count(self, obj):
+        album_ct = ContentType.objects.get_for_model(Album)
+        return Like.objects.filter(user=obj.user, content_type=album_ct).count()
+
+    def get_followed_artists_count(self, obj):
+        artist_ct = ContentType.objects.get_for_model(Artist)
+        return Follow.objects.filter(user=obj.user, content_type=artist_ct).count()
+
+    def get_liked_songs_count(self, obj):
+        track_ct = ContentType.objects.get_for_model(Track)
+        return Like.objects.filter(user=obj.user, content_type=track_ct).count()
+
+    def get_saved_playlists_count(self, obj):
+        playlist_ct = ContentType.objects.get_for_model(Playlist)
+        return Like.objects.filter(user=obj.user, content_type=playlist_ct).count()
 
 
 class UserProfileUpdateSerializer(serializers.ModelSerializer):
@@ -144,7 +163,6 @@ class UserProfileUpdateSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
-
 class ChangePasswordSerializer(serializers.Serializer):
     old_password = serializers.CharField(required=False, allow_blank=True, write_only=True)
     new_password = serializers.CharField(required=True, write_only=True, validators=[validate_password])
@@ -183,36 +201,37 @@ class ChangePasswordSerializer(serializers.Serializer):
         return attrs
 
 
-
 class ArtistListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Artist
         fields = ['slug', 'name', 'image']
 
 
-
 class ArtistDetailSerializer(serializers.ModelSerializer):
-    albums = AlbumListSerializer(many=True, read_only=True)
-    sung_tracks = TrackSerializer(many=True, read_only=True)
-    composed_tracks = TrackSerializer(many=True, read_only=True)
+    albums = serializers.SerializerMethodField()
+    sung_tracks = serializers.SerializerMethodField()
+    composed_tracks = serializers.SerializerMethodField()
 
     related_artists = ArtistListSerializer(many=True, read_only=True)
 
     class Meta:
         model = Artist
         fields = [
-            'slug', 'name', 'biography', 'image','birth_year','death_year',
+            'slug', 'name', 'biography', 'image', 'birth_year', 'death_year',
             'albums', 'sung_tracks', 'composed_tracks', 'related_artists'
         ]
 
+    def get_albums(self, obj):
+        albums = obj.main_albums.all()
+        return AlbumListSerializer(albums, many=True, context=self.context).data
 
+    def get_sung_tracks(self, obj):
+        tracks = obj.participated_tracks.filter(artists__artist_type=ArtistRole.SINGER).distinct()
+        return TrackSerializer(tracks, many=True, context=self.context).data
 
-class DashboardSummarySerializer(serializers.Serializer):
-    liked_albums_count = serializers.IntegerField(help_text="تعداد آلبوم‌های لایک شده")
-    liked_songs_count = serializers.IntegerField(help_text="تعداد آهنگ‌های لایک شده")
-    followed_artists_count = serializers.IntegerField(help_text="تعداد آرتیست‌های فالو شده")
-    saved_playlists_count = serializers.IntegerField(help_text="تعداد پلی‌لیست‌های ذخیره شده")
-
+    def get_composed_tracks(self, obj):
+        tracks = obj.participated_tracks.filter(artists__artist_type=ArtistRole.COMPOSER).distinct()
+        return TrackSerializer(tracks, many=True, context=self.context).data
 
 
 class PlayHistorySerializer(serializers.ModelSerializer):

@@ -64,7 +64,6 @@ class PlaylistTrack(models.Model):
         verbose_name = "ترک پلی لیست"
         verbose_name_plural = "ترک های پلی لیست"
         ordering = ['order']
-        unique_together = ('playlist', 'track')
         indexes = [
             models.Index(fields=["playlist", "order"]),
         ]

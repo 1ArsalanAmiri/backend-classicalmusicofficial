@@ -6,7 +6,8 @@ import shutil
 import uuid
 import logging
 from datetime import timedelta
-
+from django.core.files.storage import default_storage
+from django.core.files.base import File
 from django.utils import timezone
 from django.utils.text import slugify
 from django.core.files.base import ContentFile
@@ -14,9 +15,9 @@ from django.db import transaction
 from celery import shared_task
 from mutagen import File as MutagenFile
 from django.utils.text import get_valid_filename
-
 from .models import AlbumArchiveUpload, Track, Artist, AlbumZipExport, Genre
 from .utils import MockStorageConnector
+
 
 logger = logging.getLogger(__name__)
 
@@ -181,18 +182,15 @@ def process_album_archive_task(self, upload_record_id: int):
 
                 # -------- Upload file --------
                 target_relative_path = f"tracks/{album.slug}/{filename}"
-                final_path = None
+                saved_path = None
                 try:
-                    final_path = storage_connector.upload_chunked(file_path, target_relative_path)
+                    with open(file_path, 'rb') as f:
+                        saved_path = default_storage.save(target_relative_path, File(f))
+
                 except Exception as upload_err:
                     logger.error(f"Upload failed for {file_path}: {upload_err}")
-                    task_warnings.append(f"خطا در آپلود فایل {filename}")
+                    task_warnings.append(f"خطا در ذخیره‌سازی فایل {filename}")
                     continue
-
-                if not isinstance(final_path, str):
-                    logger.warning(f"Upload path is not string for {filename}, falling back to default.")
-                    final_path = target_relative_path
-
                 tracks_to_update.append({
                     "album": album,
                     "track_number": track_number,
@@ -201,11 +199,11 @@ def process_album_archive_task(self, upload_record_id: int):
                         "slug": safe_slug,
                         "genre": genre_obj,
                         "duration_ms": duration_ms,
-                        "audio_file": final_path,
+                        "audio_file": saved_path,
+                        "status": "published",
                     },
                     "artist_obj": artist_obj
                 })
-
                 # -------- Progress update --------
                 if index % 5 == 0 or index == total_files - 1:
                     progress = int(((index + 1) / total_files) * 90)

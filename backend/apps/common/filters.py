@@ -1,22 +1,47 @@
 import django_filters
-from apps.music.models import Album , Track
+from django.db.models import Q
+from apps.music.models import Album, Track
 
 
 class AlbumFilter(django_filters.FilterSet):
-    composer_era = django_filters.CharFilter(field_name='composer__era',lookup_expr='iexact',help_text="Filter By Era")
-    release_year_min = django_filters.NumberFilter(field_name='release_date',lookup_expr='year__gte',help_text="Filter By Year(Since This Year)")
-    release_year_max = django_filters.NumberFilter(field_name='release_date',lookup_expr='year__lte',help_text="Filter By Year(Until This Year)")
+    era = django_filters.CharFilter(
+        field_name='main_artists__era',
+        lookup_expr='iexact',
+        help_text="فیلتر بر اساس دوره زمانی (Era) آهنگساز/آرتیست"
+    )
+    release_year_min = django_filters.NumberFilter(
+        field_name='release_year',
+        lookup_expr='gte',
+        help_text="از سال انتشار (>=)"
+    )
+    release_year_max = django_filters.NumberFilter(
+        field_name='release_year',
+        lookup_expr='lte',
+        help_text="تا سال انتشار (<=)"
+    )
     label = django_filters.CharFilter(field_name='label__slug')
 
     class Meta:
         model = Album
         fields = ['status', 'label']
 
+
 class TrackFilter(django_filters.FilterSet):
     label = django_filters.CharFilter(field_name='label__slug')
+    genre = django_filters.CharFilter(field_name='genre__slug')
+    instrument = django_filters.CharFilter(field_name='instrument__slug')
+    album = django_filters.CharFilter(field_name='album__slug')
+
+    era = django_filters.CharFilter(
+        method='filter_by_era',
+        help_text="فیلتر بر اساس دوره زمانی (رنسانس، باروک و ...)"
+    )
 
     class Meta:
         model = Track
-        fields = ['genre', 'label']
+        fields = ['genre', 'instrument', 'label', 'album']
 
-
+    def filter_by_era(self, queryset, name, value):
+        return queryset.filter(
+            Q(artists__era__iexact=value) | Q(album__main_artists__era__iexact=value)
+        ).distinct()
