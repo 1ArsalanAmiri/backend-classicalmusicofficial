@@ -5,12 +5,6 @@ from django.core.cache import cache
 from .models import Album, Track, AlbumZipExport
 
 
-@receiver(post_save, sender=Album)
-def invalidate_album_cache(sender, instance, **kwargs):
-    cache.delete_pattern("*.album_list.*")
-    cache.delete(f"album_detail_{instance.slug}")
-
-
 @receiver([post_save, post_delete], sender=Album)
 def invalidate_album_cache(sender, instance, **kwargs):
     cache.delete_pattern("*.album_list.*")
@@ -19,9 +13,12 @@ def invalidate_album_cache(sender, instance, **kwargs):
 
 @receiver([post_save, post_delete], sender=Track)
 def invalidate_album_cache_on_track_change(sender, instance, **kwargs):
-    if instance.album:
-        cache.delete(f"album_detail_{instance.album.slug}")
-        cache.delete_pattern("*.album_list.*")
+    try:
+        if instance.album_id:
+            cache.delete(f"album_detail_{instance.album.slug}")
+            cache.delete_pattern("*.album_list.*")
+    except Album.DoesNotExist:
+        pass
 
 
 def delete_album_zip_cache(album):
@@ -32,8 +29,10 @@ def delete_album_zip_cache(album):
         export.delete()
 
 
-@receiver(post_save, sender=Track)
-@receiver(post_delete, sender=Track)
+@receiver([post_save, post_delete], sender=Track)
 def invalidate_album_zip_on_track_change(sender, instance, **kwargs):
-    if instance.album:
-        delete_album_zip_cache(instance.album)
+    try:
+        if instance.album_id:
+            delete_album_zip_cache(instance.album)
+    except Album.DoesNotExist:
+        pass

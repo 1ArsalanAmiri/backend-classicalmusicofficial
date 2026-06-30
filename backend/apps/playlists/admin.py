@@ -23,7 +23,6 @@ class PlaylistAdmin(admin.ModelAdmin):
         'cover_preview_thumbnail'
     ]
     list_filter = ['created_at', 'updated_at']
-    # حذف owner از جستجو و افزودن title_fa
     search_fields = ['title', 'title_fa', 'slug']
     prepopulated_fields = {'slug': ('title',)}
     inlines = [PlaylistTrackInline]
