@@ -146,22 +146,25 @@ def process_album_archive_task(self, upload_record_id: int):
                     track_number += 1
                 used_track_numbers.add(track_number)
 
+                # 3. Artist Extraction
                 raw_artist_name_list = audio_meta.get("artist", [None])
                 raw_artist_name = raw_artist_name_list[0] if raw_artist_name_list else None
                 track_artist_name = str(raw_artist_name).strip() if raw_artist_name else None
-
-                artist_obj = None
+                track_artists = []
 
                 if track_artist_name:
-                    artist_obj = Artist.objects.filter(name__iexact=track_artist_name).first()
+                    found_artist = Artist.objects.filter(name__iexact=track_artist_name).first()
+                    if found_artist:
+                        track_artists.append(found_artist)
 
-                if not artist_obj:
-                    artist_obj = album.main_artists.first()
+                if not track_artists:
+                    track_artists = list(album.main_artists.all())
 
-                if not artist_obj:
-                    artist_obj, _ = Artist.objects.get_or_create(
+                if not track_artists:
+                    unknown_artist, _ = Artist.objects.get_or_create(
                         name="Unknown Artist", defaults={"artist_type": "other"}
                     )
+                    track_artists.append(unknown_artist)
 
                 # -----------------------
                 # 4. Genre
@@ -201,7 +204,7 @@ def process_album_archive_task(self, upload_record_id: int):
                         "audio_file": saved_path,
                         "status": "published",
                     },
-                    "artist_obj": artist_obj
+                    "artist_objs": track_artists
                 })
                 # -------- Progress update --------
                 if index % 5 == 0 or index == total_files - 1:
@@ -214,6 +217,7 @@ def process_album_archive_task(self, upload_record_id: int):
                 continue
 
         # -------- Database Save --------
+        # -------- Database Save --------
         saved_tracks_count = 0
         for data in tracks_to_update:
             track_title = data["defaults"].get("title", "Unknown")
@@ -224,8 +228,9 @@ def process_album_archive_task(self, upload_record_id: int):
                         track_number=data["track_number"],
                         defaults=data["defaults"],
                     )
-                    if data["artist_obj"]:
-                        track.artists.add(data["artist_obj"])
+                    if data["artist_objs"]:
+                        track.artists.add(*data["artist_objs"])
+
                 saved_tracks_count += 1
             except Exception as db_err:
                 logger.error(f"DB Update failed for track {track_title}: {db_err}")
@@ -261,6 +266,7 @@ def process_album_archive_task(self, upload_record_id: int):
                 logger.error(f"Failed to delete temp dir {temp_dir}: {cleanup_err}")
 
 
+
 @shared_task
 def extract_track_metadata_task(track_id):
     try:
@@ -281,6 +287,7 @@ def extract_track_metadata_task(track_id):
         pass
     except Exception as e:
         logger.error(f"Metadata extraction failed for track {track_id}: {e}")
+
 
 
 @shared_task
