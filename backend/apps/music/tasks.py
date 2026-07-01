@@ -28,7 +28,7 @@ def process_album_archive_task(self, upload_record_id: int):
     upload_record = None
 
     try:
-        upload_record = AlbumArchiveUpload.objects.select_related("album", "album__artist").get(id=upload_record_id)
+        upload_record = AlbumArchiveUpload.objects.select_related("album").prefetch_related("album__main_artists").get(id=upload_record_id)
         album = upload_record.album
 
         upload_record.status = "extracting"
@@ -146,8 +146,6 @@ def process_album_archive_task(self, upload_record_id: int):
                     track_number += 1
                 used_track_numbers.add(track_number)
 
-
-                # 3. Artist
                 raw_artist_name_list = audio_meta.get("artist", [None])
                 raw_artist_name = raw_artist_name_list[0] if raw_artist_name_list else None
                 track_artist_name = str(raw_artist_name).strip() if raw_artist_name else None
@@ -158,13 +156,14 @@ def process_album_archive_task(self, upload_record_id: int):
                     artist_obj = Artist.objects.filter(name__iexact=track_artist_name).first()
 
                 if not artist_obj:
-                    artist_obj = album.artist
+                    artist_obj = album.main_artists.first()
 
                 if not artist_obj:
                     artist_obj, _ = Artist.objects.get_or_create(
-                        name="Unknown Artist", defaults={"artist_type": "unknown"}
+                        name="Unknown Artist", defaults={"artist_type": "other"}
                     )
 
+                # -----------------------
                 # 4. Genre
                 genre_name_list = audio_meta.get("genre", [None])
                 genre_name = genre_name_list[0] if genre_name_list else None
