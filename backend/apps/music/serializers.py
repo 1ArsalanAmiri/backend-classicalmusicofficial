@@ -7,14 +7,23 @@ from rest_framework.reverse import reverse
 class ArtistSerializer(serializers.ModelSerializer):
     artist_type_display = serializers.CharField(source='get_artist_type_display', read_only=True)
     era_display = serializers.CharField(source='get_era_display', read_only=True)
+    albums = serializers.SerializerMethodField()
+    singles = serializers.SerializerMethodField()
 
     class Meta:
         model = Artist
         fields = [
             'name', 'slug', 'country','birth_year','death_year', 'artist_type', 'artist_type_display',
-            'era', 'era_display', 'image', 'biography','likes_count','followers_count'
+            'era', 'era_display', 'image', 'biography','likes_count','followers_count' , 'albums', 'singles'
         ]
 
+    def get_albums(self, obj):
+        albums = getattr(obj, 'prefetched_albums', [])
+        return AlbumListSerializer(albums, many=True, context=self.context).data
+
+    def get_singles(self, obj):
+        singles = getattr(obj, 'prefetched_singles', [])
+        return TrackSerializer(singles, many=True, context=self.context).data
 
 
 class ArtistBasicSerializer(serializers.ModelSerializer):
