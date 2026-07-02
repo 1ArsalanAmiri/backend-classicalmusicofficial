@@ -36,7 +36,7 @@ from django.utils import timezone
 from .models import Album, AlbumArchiveUpload, Track, Artist ,Genre
 from django.db.models import Count, Prefetch
 from urllib.parse import quote
-from ..profiles.serializers import ArtistDetailSerializer
+
 
 
 class AlbumBatchUploadAPIView(APIView):
@@ -72,6 +72,7 @@ class AlbumBatchUploadAPIView(APIView):
 
 
 
+
 class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
     permission_classes = [AllowAny]
     queryset = Artist.objects.all()
@@ -81,44 +82,6 @@ class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
     search_fields = ['name']
     lookup_field = 'slug'
 
-    def get_queryset(self):
-        queryset = Artist.objects.all()
-        if self.action == 'retrieve':
-            published_albums = Album.objects.filter(status=PublishStatus.PUBLISHED)
-            published_singles = Track.objects.filter(
-                status=PublishStatus.PUBLISHED,
-                album__isnull=True
-            ).select_related('instrument')
-
-            queryset = queryset.prefetch_related(
-                Prefetch(
-                    'main_albums',
-                    queryset=published_albums,
-                    to_attr='prefetched_albums'
-                ),
-                Prefetch(
-                    'participated_tracks',
-                    queryset=published_singles,
-                    to_attr='prefetched_singles'
-                )
-            )
-        return queryset
-
-    def get_serializer_class(self):
-        if self.action == 'retrieve':
-            return ArtistDetailSerializer
-        return ArtistSerializer
-
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        request = self.request
-        if request and request.user.is_authenticated:
-            context["has_stream_access"] = user_has_stream_access(request.user)
-            context["has_download_access"] = user_has_download_access(request.user)
-        else:
-            context["has_stream_access"] = False
-            context["has_download_access"] = False
-        return context
 
 
 
@@ -201,6 +164,7 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     @method_decorator(vary_on_headers('Authorization', 'Cookie'))
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
+
 
 
 
@@ -315,6 +279,7 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
 
 
 
+
 class GenreViewSet(viewsets.ReadOnlyModelViewSet):
 
     serializer_class = GenreSerializer
@@ -332,6 +297,7 @@ class GenreViewSet(viewsets.ReadOnlyModelViewSet):
     @method_decorator(cache_page(60 * 60 * 24))
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
+
 
 
 
@@ -354,6 +320,7 @@ class InstrumentViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 
+
 class EraListView(APIView):
 
     @method_decorator(cache_page(60 * 60 * 24 * 7))
@@ -366,6 +333,7 @@ class EraListView(APIView):
             for key, label in EraChoices.choices
         ]
         return Response(eras)
+
 
 
 
@@ -414,11 +382,13 @@ class LabelViewSet(FollowableMixin, LikableMixin, viewsets.ReadOnlyModelViewSet)
 
 
 
+
 @sync_to_async
 def get_album_and_tracks(album_slug):
     album = get_object_or_404(Album, slug=album_slug)
     tracks = list(album.tracks.select_related())
     return album, tracks
+
 
 
 @api_view(['GET'])
