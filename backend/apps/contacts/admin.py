@@ -51,4 +51,4 @@ class TicketAdmin(admin.ModelAdmin):
         formset.save_m2m()
 
     def is_answered(self, obj):
-        return obj.ticket.status == TicketStatus.ANSWERED
+        return obj.Ticket.status == TicketStatus.ANSWERED
