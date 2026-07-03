@@ -5,6 +5,7 @@ from apps.common.models import TimeStampedModel, PublishStatus, unique_slugify
 from django.utils.translation import gettext_lazy as _
 from apps.music.models import Artist, EraChoices
 from django.conf import settings
+from django.db import models
 
 
 
@@ -81,7 +82,7 @@ class Video(TimeStampedModel):
         return self.title
 
 
-class VideoHistory(models.fields.Model):
+class VideoHistory(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
