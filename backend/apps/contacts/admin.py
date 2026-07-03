@@ -10,7 +10,7 @@ class TicketMessageInline(admin.TabularInline):
     model = TicketMessage
     extra = 0
     fields = ('sender', 'text', 'secure_attachment_link', 'created_at')
-    readonly_fields = ('sender', 'text', 'secure_attachment_link', 'created_at')
+    readonly_fields = ('sender', 'body', 'secure_attachment_link', 'created_at')
 
     @admin.display(description="فایل ضمیمه")
     def secure_attachment_link(self, obj):
