@@ -36,6 +36,8 @@ urlpatterns = [
 
     path("videos/",include("apps.videos.urls") , name="videos"),
 
+    path("contacts/", include("apps.contacts.urls") , name="contacts"),
+
     # path('sentry-debug/', trigger_error),
 
 ]
