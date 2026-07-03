@@ -1,6 +1,7 @@
 from rest_framework.permissions import BasePermission
 from rest_framework import permissions
-from apps.subscriptions.services import user_has_download_access, user_has_stream_access,user_has_all_access
+from apps.subscriptions.services import user_has_download_access, user_has_stream_access, user_has_all_access, \
+    user_has_video_stream_access
 
 
 class HasDownloadSubscription(BasePermission):
@@ -29,3 +30,13 @@ class IsOwnerOrPublicReadOnly(permissions.BasePermission):
 
         return obj.owner == request.user
 
+
+class HasVideoAccessSubscription(BasePermission):
+    message = "شما اشتراک فعال برای استریم یا دانلود ویدیو ندارید."
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user and
+            request.user.is_authenticated and
+            user_has_video_stream_access(request.user)
+        )

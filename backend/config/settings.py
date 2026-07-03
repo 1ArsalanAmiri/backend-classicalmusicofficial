@@ -93,8 +93,8 @@ INSTALLED_APPS = [
     "apps.contacts",
     "apps.notifications",
     "apps.profiles",
-    "apps.interactions"
-
+    "apps.interactions",
+    "apps.videos"
 ]
 
 
@@ -216,6 +216,10 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'Asia/Tehran'
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+
+CELERY_TASK_ROUTES = {
+    'apps.videos.tasks.convert_video_to_hls': {'queue': 'video_tasks'},
+}
 
 
 #AUTH USER MODEL
