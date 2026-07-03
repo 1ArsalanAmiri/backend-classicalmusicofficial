@@ -22,7 +22,7 @@ class TicketMessageInline(admin.TabularInline):
 
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
-    list_display = ['subject', 'user', 'is_answered' , 'status', 'created_at', 'updated_at']
+    list_display = ['subject', 'user', 'status', 'created_at', 'updated_at']
     list_filter = ['status', 'category', 'created_at']
     search_fields = ['subject', 'user__phone_number', 'user__first_name']
     readonly_fields = ['user', 'category', 'subject', 'created_at', 'updated_at']
@@ -49,6 +49,3 @@ class TicketAdmin(admin.ModelAdmin):
                     instance.ticket.save(update_fields=['status', 'updated_at'])
             instance.save()
         formset.save_m2m()
-
-    def is_answered(self, obj):
-        return obj.Ticket.status == TicketStatus.ANSWERED
