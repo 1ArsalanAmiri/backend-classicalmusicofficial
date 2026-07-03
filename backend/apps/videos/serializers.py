@@ -27,7 +27,7 @@ class VideoDetailSerializer(serializers.ModelSerializer):
         model = Video
         fields = [
             'id', 'title', 'slug', 'artists', 'era', 'recording_year',
-            'duration_seconds', 'hls_file', 'cover_image', 'view_count', 'likes_count',
+            'duration_seconds', 'hls_file', 'cover_image', 'video_file' ,'view_count', 'likes_count',
             'more_from_artist', 'similar_videos'
         ]
 
