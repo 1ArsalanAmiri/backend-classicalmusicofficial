@@ -20,7 +20,6 @@ class VideoDetailSerializer(serializers.ModelSerializer):
     artists = ArtistSerializer(many=True, read_only=True)
     more_from_artist = serializers.SerializerMethodField()
     similar_videos = serializers.SerializerMethodField()
-    video_file = serializers.SerializerMethodField()
     hls_file = serializers.SerializerMethodField()
 
     class Meta:
