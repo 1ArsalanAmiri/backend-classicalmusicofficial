@@ -20,9 +20,9 @@ class TicketMessageInline(admin.TabularInline):
         return mark_safe('<span style="color: gray;">بدون فایل</span>')
 
 
-@admin.register(Ticket)
+@admin.register(Ticket , TicketMessage)
 class TicketAdmin(admin.ModelAdmin):
-    list_display = ['subject', 'user', 'category', 'status', 'created_at', 'updated_at']
+    list_display = ['subject', 'user', 'body', 'status', 'created_at', 'updated_at']
     list_filter = ['status', 'category', 'created_at']
     search_fields = ['subject', 'user__phone_number', 'user__first_name']
     readonly_fields = ['user', 'category', 'subject', 'created_at', 'updated_at']
