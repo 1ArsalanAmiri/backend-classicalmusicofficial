@@ -2,8 +2,8 @@ from django.conf import settings
 from rest_framework import serializers
 from rest_framework.permissions import AllowAny
 from .models import Video, PublishStatus
-from ..common.permissions import HasVideoAccessSubscription
-from ..music.serializers import ArtistSerializer
+from ..subscriptions.services import user_has_all_access
+from ..music.serializers import ArtistBasicSerializer
 
 
 class VideoListSerializer(serializers.ModelSerializer):
@@ -17,7 +17,7 @@ class VideoListSerializer(serializers.ModelSerializer):
 class VideoDetailSerializer(serializers.ModelSerializer):
     permission_classes = [AllowAny]
 
-    artists = ArtistSerializer(many=True, read_only=True)
+    artists = ArtistBasicSerializer(many=True, read_only=True)
     more_from_artist = serializers.SerializerMethodField()
     similar_videos = serializers.SerializerMethodField()
     hls_file = serializers.SerializerMethodField()
@@ -31,7 +31,7 @@ class VideoDetailSerializer(serializers.ModelSerializer):
         ]
 
     def get_hls_file(self, obj):
-        has_access = self.context.get('has_video_access', False)
+        has_access = self.context.get('user_has_all_access', False)
         if has_access and obj.hls_file:
             request = self.context.get('request')
             if request is not None:

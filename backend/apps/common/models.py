@@ -95,3 +95,11 @@ def track_audio_path(instance, filename):
 
     # MEDIA_ROOT/protected/tracks/2026/06/a1b2c3d4e5f6.mp3
     return os.path.join("protected", "tracks", date_path, filename)
+
+def video_path(instance, filename):
+    ext = filename.split('.')[-1]
+    filename = f"{uuid4().hex}.{ext}"
+    date_path = timezone.now().strftime("%Y/%m")
+
+    # MEDIA_ROOT/protected/tracks/2026/06/a1b2c3d4e5f6.mp4
+    return os.path.join("protected", "videos", date_path, filename)

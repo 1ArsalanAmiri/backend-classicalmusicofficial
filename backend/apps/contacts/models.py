@@ -29,14 +29,14 @@ def validate_ticket_attachment(file):
 
 
 class TicketCategory(models.TextChoices):
-    SUPPORT = 'support', _('پشتیبانی')
-    ARTWORK = 'artwork_request', _('درخواست آثار دلخواه (ویژه کاربران با اشتراک طلایی)')
+    SUPPORT = 'support', _('پشتیبانی فنی سایت')
+    ARTWORK = 'artwork_request', _('درخواست آثار دلخواه (فقط کاربران با اشتراک طلایی)')
 
 
 class TicketStatus(models.TextChoices):
     PENDING = 'pending', _('در انتظار پاسخ')
     ANSWERED = 'answered', _('پاسخ داده شده')
-    USER_REPLIED = 'user_replied', _('پاسخ کاربر')
+    USER_REPLIED = 'user_replied', _('کاربر پاسخ داده')
     CLOSED = 'closed', _('بسته شده')
 
 

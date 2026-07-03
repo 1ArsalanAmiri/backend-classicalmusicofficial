@@ -1,7 +1,7 @@
 from uuid import uuid4
 from django.core.validators import FileExtensionValidator
 from django.db import models
-from apps.common.models import TimeStampedModel, PublishStatus, unique_slugify
+from apps.common.models import TimeStampedModel, PublishStatus, unique_slugify , video_path
 from django.utils.translation import gettext_lazy as _
 from apps.music.models import Artist, EraChoices
 from django.conf import settings
@@ -41,7 +41,7 @@ class Video(TimeStampedModel):
     )
 
     video_file = models.FileField(
-        upload_to='videos/raw/',
+        upload_to=video_path,
         verbose_name='فایل خام ویدیو',
         null=True,
         blank=True
