@@ -9,7 +9,7 @@ from .models import Ticket, TicketMessage, TicketStatus
 class TicketMessageInline(admin.TabularInline):
     model = TicketMessage
     extra = 0
-    fields = ('sender', 'text', 'secure_attachment_link', 'created_at')
+    fields = ('sender', 'body', 'secure_attachment_link', 'created_at')
     readonly_fields = ('sender', 'body', 'secure_attachment_link', 'created_at')
 
     @admin.display(description="فایل ضمیمه")
