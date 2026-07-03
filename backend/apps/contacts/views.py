@@ -1,8 +1,12 @@
+import mimetypes
+
+from django.http import HttpResponse, Http404, HttpResponseForbidden
 from rest_framework import viewsets, mixins, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.views import APIView
 
 from .models import Ticket, TicketMessage, TicketStatus
 from .serializers import (
@@ -58,3 +62,32 @@ class TicketViewSet(viewsets.GenericViewSet,
 
         response_serializer = TicketMessageSerializer(message)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+class SecureTicketAttachmentView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, message_id):
+        try:
+            message = TicketMessage.objects.get(id=message_id)
+        except TicketMessage.DoesNotExist:
+            raise Http404("پیام یافت نشد.")
+
+        if message.ticket.user != request.user and not request.user.is_staff:
+            return HttpResponseForbidden("شما اجازه دسترسی به این فایل را ندارید.")
+
+        if not message.attachment:
+            raise Http404("این پیام فایلی ندارد.")
+
+        file_path = message.attachment.name
+
+        response = HttpResponse()
+
+        response['X-Accel-Redirect'] = f'/protected-media/{file_path}'
+
+        content_type, _ = mimetypes.guess_type(file_path)
+        response['Content-Type'] = content_type or 'application/octet-stream'
+
+        # response['Content-Disposition'] = f'attachment; filename="{file_path.split("/")[-1]}"'
+
+        return response

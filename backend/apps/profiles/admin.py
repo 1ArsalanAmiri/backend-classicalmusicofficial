@@ -7,6 +7,7 @@ from apps.subscriptions.models import SubscriptionHistory
 from apps.interactions.models import Like, Follow
 from apps.music.models import Album, Artist, Track
 from apps.playlists.models import Playlist
+from django.utils.safestring import mark_safe
 
 
 class SubscriptionHistoryInline(admin.TabularInline):
@@ -87,9 +88,8 @@ class UserProfileAdmin(admin.ModelAdmin):
                 '<img src="{}" style="width: 60px; height: 60px; border-radius: 50%; object-fit: cover; box-shadow: 0 0 5px rgba(0,0,0,0.2);" />',
                 obj.profile_image.url
             )
-        return format_html('<span style="color: gray;">بدون تصویر</span>')
+        return mark_safe('<span style="color: gray;">بدون تصویر</span>')
 
-    # --- متدهای آماری برای نمایش در ادمین ---
 
     @admin.display(description="تعداد آلبوم‌های لایک‌شده")
     def liked_albums_stat(self, obj):
@@ -125,30 +125,30 @@ class UserProfileAdmin(admin.ModelAdmin):
         count = obj.subscriptionhistory_set.count()
         if count > 0:
             return format_html('<span style="color: green; font-weight: bold;">{}</span>', count)
-        return format_html('<span style="color: red;">بدون اشتراک</span>')
+        return mark_safe('<span style="color: red;">بدون اشتراک</span>')
 
     @admin.display(description="وضعیت اشتراک")
     def subscription_status(self, obj):
         latest = obj.subscriptionhistory_set.order_by("-start_date").first()
         if not latest:
-            return format_html('<span style="color: red;">بدون اشتراک</span>')
+            return mark_safe('<span style="color: red;">بدون اشتراک</span>')
 
         today = jdatetime.date.today()
         start_date = latest.start_date
         end_date = latest.end_date
 
         if start_date and start_date > today:
-            return format_html('<span style="color: orange; font-weight: bold;">هنوز شروع نشده</span>')
+            return mark_safe('<span style="color: orange; font-weight: bold;">هنوز شروع نشده</span>')
 
         if end_date is None:
             if start_date and start_date <= today:
-                return format_html('<span style="color: blue; font-weight: bold;">فعال بدون انقضا</span>')
-            return format_html('<span style="color: orange; font-weight: bold;">هنوز شروع نشده</span>')
+                return mark_safe('<span style="color: blue; font-weight: bold;">فعال بدون انقضا</span>')
+            return mark_safe('<span style="color: orange; font-weight: bold;">هنوز شروع نشده</span>')
 
         if start_date and start_date <= today <= end_date:
-            return format_html('<span style="color: green; font-weight: bold;">فعال</span>')
+            return mark_safe('<span style="color: green; font-weight: bold;">فعال</span>')
 
-        return format_html('<span style="color: red; font-weight: bold;">منقضی شده</span>')
+        return mark_safe('<span style="color: red; font-weight: bold;">منقضی شده</span>')
 
     @admin.display(description="اطلاعات آخرین اشتراک")
     def latest_subscription_info(self, obj):

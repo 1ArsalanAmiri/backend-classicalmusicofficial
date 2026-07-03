@@ -1,3 +1,4 @@
+from django.urls import reverse
 from rest_framework import serializers
 from django.db import transaction
 from .models import Ticket, TicketMessage, TicketCategory
@@ -5,12 +6,18 @@ from apps.subscriptions.services import get_active_subscription
 
 
 class TicketMessageSerializer(serializers.ModelSerializer):
-    sender_name = serializers.CharField(source='sender.first_name', read_only=True)
-    is_admin = serializers.BooleanField(source='sender.is_staff', read_only=True)
 
+    secure_attachment_url = serializers.SerializerMethodField()
     class Meta:
         model = TicketMessage
-        fields = ['id', 'sender_name', 'is_admin', 'body', 'attachment', 'created_at']
+        fields = ['id', 'text', 'sender', 'secure_attachment_url', 'created_at']
+
+    def get_secure_attachment_url(self, obj):
+        if obj.attachment:
+            request = self.context.get('request')
+            path = reverse('secure-ticket-attachment', kwargs={'message_id': obj.id})
+            return request.build_absolute_uri(path) if request else path
+        return None
 
 
 class TicketListSerializer(serializers.ModelSerializer):

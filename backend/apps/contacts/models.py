@@ -1,7 +1,31 @@
 from django.db import models
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
+from django.core.exceptions import ValidationError
+from os import path
 from apps.common.models import TimeStampedModel
+
+
+def validate_ticket_attachment(file):
+    MAX_AUDIO_SIZE = 20 * 1024 * 1024  # 20 MB
+    MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5 MB
+
+    valid_audio_extensions = ['.mp3', '.wav', '.ogg', '.m4a', '.flac']
+    valid_image_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif']
+
+    ext = path.splitext(file.name)[1].lower()
+
+    if ext in valid_audio_extensions:
+        if file.size > MAX_AUDIO_SIZE:
+            raise ValidationError(_('حجم فایل صوتی نباید بیشتر از 20 مگابایت باشد.'))
+
+    elif ext in valid_image_extensions:
+        if file.size > MAX_IMAGE_SIZE:
+            raise ValidationError(_('حجم تصویر نباید بیشتر از 5 مگابایت باشد.'))
+
+    else:
+        raise ValidationError(_('فرمت فایل پشتیبانی نمی‌شود. فقط ارسال عکس و فایل صوتی مجاز است.'))
+
 
 
 class TicketCategory(models.TextChoices):
@@ -64,10 +88,10 @@ class TicketMessage(models.Model):
     )
     body = models.TextField(_("متن پیام"))
     attachment = models.FileField(
-        _("فایل"),
-        upload_to='tickets/attachments/',
+        upload_to="tickets/attachments/",
+        blank=True,
         null=True,
-        blank=True
+        verbose_name="فایل ضمیمه"
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('تاریخ ارسال'))
 

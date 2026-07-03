@@ -4,12 +4,16 @@ from .models import Ticket, TicketMessage, TicketStatus
 
 class TicketMessageInline(admin.TabularInline):
     model = TicketMessage
-    extra = 1
-    readonly_fields = ['sender', 'created_at']
-    fields = ['sender', 'body', 'attachment', 'created_at']
+    extra = 0
+    fields = ('sender', 'text', 'secure_attachment_link', 'created_at')
+    readonly_fields = ('sender', 'text', 'secure_attachment_link', 'created_at')
 
-    def has_change_permission(self, request, obj=None):
-        return False
+    @admin.display(description="فایل ضمیمه")
+    def secure_attachment_link(self, obj):
+        if obj.attachment:
+            url = reverse('secure-ticket-attachment', kwargs={'message_id': obj.id})
+            return format_html('<a href="{}" target="_blank" style="color: blue; text-decoration: underline;">مشاهده / دانلود فایل</a>', url)
+        return mark_safe('<span style="color: gray;">بدون فایل</span>')
 
 
 @admin.register(Ticket)
