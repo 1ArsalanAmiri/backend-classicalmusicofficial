@@ -43,7 +43,7 @@ class TicketCreateSerializer(serializers.ModelSerializer):
             sub_history = get_active_subscription(request.user)
             if not sub_history or sub_history.subscription.subscription_type not in ['both', 'all']:
                 raise serializers.ValidationError({
-                    "category": "برای درخواست آثار دلخواه، باید اشتراک طلایی (دانلود و پخش) داشته باشید."
+                    "category": "برای درخواست آثار دلخواه، باید اشتراک طلایی تهیه کنید."
                 })
 
         return attrs

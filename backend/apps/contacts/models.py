@@ -5,12 +5,12 @@ from apps.common.models import TimeStampedModel
 
 
 class TicketCategory(models.TextChoices):
-    SUPPORT = 'support', _('پشتیبانی عمومی')
-    ARTWORK = 'artwork_request', _('درخواست آثار دلخواه (ویژه طلایی)')
+    SUPPORT = 'support', _('پشتیبانی')
+    ARTWORK = 'artwork_request', _('درخواست آثار دلخواه (ویژه کاربران با اشتراک طلایی)')
 
 
 class TicketStatus(models.TextChoices):
-    PENDING = 'pending', _('در انتظار پاسخ پشتیبان')
+    PENDING = 'pending', _('در انتظار پاسخ')
     ANSWERED = 'answered', _('پاسخ داده شده')
     USER_REPLIED = 'user_replied', _('پاسخ کاربر')
     CLOSED = 'closed', _('بسته شده')
@@ -40,7 +40,7 @@ class Ticket(TimeStampedModel):
     class Meta:
         verbose_name = _('تیکت')
         verbose_name_plural = _('تیکت‌ها')
-        ordering = ['-updated_at'] # تیکت‌های جدیدتر یا تازه آپدیت شده در بالا
+        ordering = ['-updated_at']
         indexes = [
             models.Index(fields=['user', 'status']),
         ]
@@ -64,7 +64,7 @@ class TicketMessage(models.Model):
     )
     body = models.TextField(_("متن پیام"))
     attachment = models.FileField(
-        _("فایل ضمیمه"),
+        _("فایل"),
         upload_to='tickets/attachments/',
         null=True,
         blank=True
