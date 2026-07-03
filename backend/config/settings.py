@@ -94,7 +94,8 @@ INSTALLED_APPS = [
     "apps.notifications",
     "apps.profiles",
     "apps.interactions",
-    "apps.videos"
+    "apps.videos",
+    "apps.contacts"
 ]
 
 

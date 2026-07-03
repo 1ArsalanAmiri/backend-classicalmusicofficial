@@ -27,7 +27,7 @@ class VideoDetailSerializer(serializers.ModelSerializer):
         model = Video
         fields = [
             'id', 'title', 'slug', 'artists', 'era', 'recording_year',
-            'duration_seconds', 'hls_file', 'cover_image', 'video_file' ,'view_count', 'likes_count',
+            'duration_seconds', 'hls_file', 'cover_image', 'view_count', 'likes_count',
             'more_from_artist', 'similar_videos'
         ]
 
@@ -40,15 +40,6 @@ class VideoDetailSerializer(serializers.ModelSerializer):
             return settings.MEDIA_URL + obj.hls_file
         return None
 
-    def get_video_file(self, obj):
-        has_access = self.context.get('has_video_access', False)
-        if has_access and obj.video_file:
-            request = self.context.get('request')
-            if request is not None:
-                return request.build_absolute_uri(obj.video_file.url)
-            return obj.video_file.url
-
-        return None
 
     def get_more_from_artist(self, obj):
         artist_ids = obj.artists.values_list('id', flat=True)
