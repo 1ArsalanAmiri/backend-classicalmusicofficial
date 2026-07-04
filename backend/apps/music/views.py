@@ -14,7 +14,7 @@ from apps.common.pagination import ClassicalMusicPagination
 from apps.common.filters import AlbumFilter,TrackFilter
 from django.db import transaction
 from rest_framework.decorators import action
-from apps.common.permissions import user_has_stream_access ,user_has_download_access , user_has_all_access
+from apps.common.permissions import user_has_stream_access ,user_has_all_access
 from apps.common.models import PublishStatus
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
@@ -145,7 +145,7 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
         request = self.request
         if request and request.user.is_authenticated:
             context["has_stream_access"] = user_has_stream_access(request.user)
-            context["has_download_access"] = user_has_download_access(request.user)
+            context["has_download_access"] = user_has_all_access(request.user)
         else:
             context["has_stream_access"] = False
             context["has_download_access"] = False
@@ -185,7 +185,7 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         request = self.request
         if request and request.user.is_authenticated:
             context["has_stream_access"] = user_has_stream_access(request.user)
-            context["has_download_access"] = user_has_download_access(request.user)
+            context["has_download_access"] = user_has_all_access(request.user)
         else:
             context["has_stream_access"] = False
             context["has_download_access"] = False
@@ -238,7 +238,7 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         track = self.get_object()
         if not track.audio_file:
             return Response({"detail": "فایل صوتی یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
-        if not user_has_download_access(request.user):
+        if not user_has_all_access(request.user):
             return Response({"detail": "شما اشتراک فعال برای دانلود این آهنگ را ندارید."}, status=status.HTTP_403_FORBIDDEN)
         file_path = track.audio_file.name
         content_type, _ = mimetypes.guess_type(file_path)
@@ -374,7 +374,7 @@ class LabelViewSet(FollowableMixin, LikableMixin, viewsets.ReadOnlyModelViewSet)
         request = self.request
         if request and request.user.is_authenticated:
             context["has_stream_access"] = user_has_stream_access(request.user)
-            context["has_download_access"] = user_has_download_access(request.user)
+            context["has_download_access"] = user_has_all_access(request.user)
         else:
             context["has_stream_access"] = False
             context["has_download_access"] = False
@@ -394,7 +394,7 @@ def get_album_and_tracks(album_slug):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def download_album_zip_api(request, album_slug):
-    if not user_has_download_access(request.user):
+    if not user_has_all_access(request.user):
         return Response(
             {"detail": "شما اشتراک فعال برای دانلود آلبوم را ندارید."},
             status=status.HTTP_403_FORBIDDEN

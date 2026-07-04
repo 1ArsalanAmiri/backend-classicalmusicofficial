@@ -4,7 +4,7 @@ from rest_framework import filters
 from .models import Video
 from apps.common.models import PublishStatus
 from .serializers import VideoListSerializer, VideoDetailSerializer
-from ..subscriptions.services import user_has_video_stream_access
+from ..subscriptions.services import user_has_all_access
 
 
 class VideoViewSet(ReadOnlyModelViewSet):
@@ -19,8 +19,8 @@ class VideoViewSet(ReadOnlyModelViewSet):
         request = self.request
         has_access = False
         if request and request.user.is_authenticated:
-            has_access = user_has_video_stream_access(request.user)
-        context['has_video_access'] = has_access
+            has_access = user_has_all_access(request.user)
+        context['has_all_access'] = has_access
         return context
 
     def get_queryset(self):
