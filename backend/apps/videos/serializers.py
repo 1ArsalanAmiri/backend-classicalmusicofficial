@@ -31,7 +31,8 @@ class VideoDetailSerializer(serializers.ModelSerializer):
         ]
 
     def get_hls_file(self, obj):
-        has_access = self.context.get('user_has_all_access', False)
+        has_access = self.context.get('has_all_access', False)
+
         if has_access and obj.hls_file:
             request = self.context.get('request')
             if request is not None:
