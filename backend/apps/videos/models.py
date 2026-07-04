@@ -1,7 +1,5 @@
 from uuid import uuid4
-from django.core.validators import FileExtensionValidator
-from django.db import models
-from apps.common.models import TimeStampedModel, PublishStatus, unique_slugify , video_path
+from apps.common.models import TimeStampedModel, unique_slugify , video_path
 from django.utils.translation import gettext_lazy as _
 from apps.music.models import Artist, EraChoices
 from django.conf import settings
@@ -78,6 +76,7 @@ class Video(TimeStampedModel):
             slug_source = self.title if self.title and self.title.strip() else f"video-{uuid4().hex[:8]}"
             self.slug = unique_slugify(self, "slug", slug_source)
         super().save(*args, **kwargs)
+
     def __str__(self):
         return self.title
 

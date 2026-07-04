@@ -1,4 +1,6 @@
 from django.contrib import admin
+from django.db import transaction
+from .tasks import convert_video_to_hls
 from .models import Video
 
 
@@ -23,3 +25,8 @@ class VideoAdmin(admin.ModelAdmin):
             'fields': ('status', 'view_count', 'likes_count')
         }),
     )
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if obj.video_file and obj.status == 'processing' and not obj.hls_file:
+            transaction.on_commit(lambda: convert_video_to_hls.delay(obj.id))
