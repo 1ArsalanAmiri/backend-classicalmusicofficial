@@ -1,5 +1,7 @@
 from uuid import uuid4
-from apps.common.models import TimeStampedModel, unique_slugify , video_path
+from django.core.validators import FileExtensionValidator
+from django.db import models, transaction
+from apps.common.models import TimeStampedModel, PublishStatus, unique_slugify , video_path
 from django.utils.translation import gettext_lazy as _
 from apps.music.models import Artist, EraChoices
 from django.conf import settings
