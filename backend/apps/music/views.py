@@ -383,6 +383,76 @@ class LabelViewSet(FollowableMixin, LikableMixin, viewsets.ReadOnlyModelViewSet)
 
 
 
+class GenreDetailWithContentAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, slug, *args, **kwargs):
+        genre = get_object_or_404(Genre, slug=slug)
+        limit = int(request.query_params.get('limit', 20))
+
+        albums = Album.objects.filter(
+            tracks__genre=genre,
+            status=PublishStatus.PUBLISHED
+        ).distinct().annotate(
+            annotated_total_tracks=Count('tracks')
+        ).order_by('-release_year')[:limit]
+
+        single_tracks = Track.objects.filter(
+            genre=genre,
+            album__isnull=True,
+            status=PublishStatus.PUBLISHED
+        ).select_related('instrument').prefetch_related('artists').order_by('-release_date')[:limit]
+
+        context = {
+            'request': request,
+            'has_stream_access': user_has_stream_access(request.user) if request.user.is_authenticated else False,
+            'has_download_access': user_has_all_access(request.user) if request.user.is_authenticated else False,
+        }
+
+        return Response({
+            "genre": GenreSerializer(genre, context=context).data,
+            "albums": AlbumListSerializer(albums, many=True, context=context).data,
+            "single_tracks": TrackSerializer(single_tracks, many=True, context=context).data
+        }, status=status.HTTP_200_OK)
+
+
+
+
+class InstrumentDetailWithContentAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, slug, *args, **kwargs):
+        instrument = get_object_or_404(Instrument, slug=slug)
+        limit = int(request.query_params.get('limit', 20))
+
+        albums = Album.objects.filter(
+            tracks__instrument=instrument,
+            status=PublishStatus.PUBLISHED
+        ).distinct().annotate(
+            annotated_total_tracks=Count('tracks')
+        ).order_by('-release_year')[:limit]
+
+        single_tracks = Track.objects.filter(
+            instrument=instrument,
+            album__isnull=True,
+            status=PublishStatus.PUBLISHED
+        ).select_related('genre').prefetch_related('artists').order_by('-release_date')[:limit]
+
+        context = {
+            'request': request,
+            'has_stream_access': user_has_stream_access(request.user) if request.user.is_authenticated else False,
+            'has_download_access': user_has_all_access(request.user) if request.user.is_authenticated else False,
+        }
+
+        return Response({
+            "instrument": InstrumentSerializer(instrument, context=context).data,
+            "albums": AlbumListSerializer(albums, many=True, context=context).data,
+            "single_tracks": TrackSerializer(single_tracks, many=True, context=context).data
+        }, status=status.HTTP_200_OK)
+
+
+
+
 @sync_to_async
 def get_album_and_tracks(album_slug):
     album = get_object_or_404(Album, slug=album_slug)

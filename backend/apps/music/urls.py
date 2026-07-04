@@ -1,7 +1,8 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import ArtistViewSet, AlbumViewSet, TrackViewSet, GenreViewSet, InstrumentViewSet, EraListView, \
-    AlbumBatchUploadAPIView, LabelViewSet , download_album_zip_api
+    AlbumBatchUploadAPIView, LabelViewSet, download_album_zip_api, GenreDetailWithContentAPIView, \
+    InstrumentDetailWithContentAPIView
 from apps.common.search_views import GlobalSearchView
 
 router = DefaultRouter()
@@ -20,4 +21,7 @@ urlpatterns = [
     path('search/', GlobalSearchView.as_view(), name='global-search'),
     path('api/v1/albums/<slug:album_slug>/download-zip/', download_album_zip_api, name='download-album-zip'),
 
+    #Genre and Instrument Albums and singles
+    path('genres/<slug:slug>/content/', GenreDetailWithContentAPIView.as_view(), name='genre-content'),
+    path('instruments/<slug:slug>/content/', InstrumentDetailWithContentAPIView.as_view(), name='instrument-content'),
 ]
