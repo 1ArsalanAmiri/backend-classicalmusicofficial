@@ -1,7 +1,8 @@
 from rest_framework.viewsets import ReadOnlyModelViewSet
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters
-from .models import Video, PublishStatus
+from .models import Video
+from apps.common.models import PublishStatus
 from .serializers import VideoListSerializer, VideoDetailSerializer
 from ..subscriptions.services import user_has_video_stream_access
 
