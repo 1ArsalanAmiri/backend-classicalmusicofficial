@@ -14,9 +14,7 @@ from django.utils import timezone
 logger = getLogger(__name__)
 
 
-# =========================================================
 # Choices
-# =========================================================
 
 class ArtistRole(models.TextChoices):
     # ==========================
@@ -106,9 +104,7 @@ class Instrument(TimeStampedModel):
         return self.name
 
 
-# =========================================================
 # Artist & Label Model
-# =========================================================
 
 class Label(TimeStampedModel):
     name = models.CharField(_("نام لیبل"), max_length=255, unique=True)
@@ -188,6 +184,7 @@ class Album(TimeStampedModel):
 
 class Artist(TimeStampedModel):
     name = models.CharField(_("نام آرتیست"), max_length=255)
+    nickname = models.CharField(_("نام مستعار"), max_length=255, blank=True, null=True, help_text=_("در صورت نداشتن نام مستعار، خالی بگذارید"))
     slug = models.SlugField(_("اسلاگ"), max_length=120, unique=True, blank=True, allow_unicode=True)
     country = models.CharField(_("ملیت/کشور"), max_length=100, blank=True)
     artist_type = models.CharField(_("نوع آرتیست"),max_length=20,choices=ArtistRole.choices,default=ArtistRole.OTHER,db_index=True)
@@ -201,6 +198,7 @@ class Artist(TimeStampedModel):
 
     likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
     followers_count = models.PositiveIntegerField(_("تعداد فالوور"), default=0)
+
 
 
     class Meta:
@@ -235,9 +233,7 @@ class AlbumCredit(TimeStampedModel):
         return f"{self.artist.name} - {self.get_role_display()} in {self.album.title}"
 
 
-# =========================================================
 # Album Model
-# =========================================================
 
 class AlbumArchiveUpload(TimeStampedModel):
     album = models.ForeignKey(Album, on_delete=models.CASCADE, related_name="archive_uploads")
@@ -264,9 +260,7 @@ class AlbumZipExport(models.Model):
         except Album.DoesNotExist:
             return f"(آلبوم حذف شده) - {self.status}"
 
-# =========================================================
 # Track Model
-# =========================================================
 
 class Track(TimeStampedModel):
     album = models.ForeignKey(Album, on_delete=models.CASCADE, related_name="tracks", null=True, blank=True,verbose_name=_("آلبوم"))
@@ -327,9 +321,7 @@ class Track(TimeStampedModel):
         except Album.DoesNotExist:
             return f"{self.title} - (آلبوم نامشخص یا حذف شده)"
 
-# =========================================================
-# PlayHistory Model
-# =========================================================
+
 
 class PlayHistory(TimeStampedModel):
     user = models.ForeignKey(

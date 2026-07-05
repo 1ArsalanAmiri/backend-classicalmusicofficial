@@ -22,6 +22,6 @@ urlpatterns = [
     path('api/v1/albums/<slug:album_slug>/download-zip/', download_album_zip_api, name='download-album-zip'),
 
     #Genre and Instrument Albums and singles
-    path('genres/<slug:slug>/content/', GenreDetailWithContentAPIView.as_view(), name='genre-content'),
-    path('instruments/<slug:slug>/content/', InstrumentDetailWithContentAPIView.as_view(), name='instrument-content'),
+    path('api/v1/genres/<slug:slug>/content/', GenreDetailWithContentAPIView.as_view(), name='genre-content'),
+    path('api/v1/instruments/<slug:slug>/content/', InstrumentDetailWithContentAPIView.as_view(), name='instrument-content'),
 ]

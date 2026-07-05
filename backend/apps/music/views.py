@@ -79,7 +79,7 @@ class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
     serializer_class = ArtistSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['artist_type', 'era', 'country']
-    search_fields = ['name']
+    search_fields = ['name' , 'nickname']
     lookup_field = 'slug'
 
 
@@ -94,7 +94,7 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     pagination_class = ClassicalMusicPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = AlbumFilter
-    search_fields = ['title', 'main_artists__name', 'credits__artist__name']
+    search_fields = ['title', 'main_artists__name', 'main_artists__nickname', 'credits__artist__name','credits__artist__nickname']
     ordering_fields = ['release_year', 'title']
     lookup_field = 'slug'
 
@@ -176,7 +176,7 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
     queryset = Track.objects.filter(status=PublishStatus.PUBLISHED).select_related('album').prefetch_related('artists')
     serializer_class = TrackSerializer
     filterset_fields = ['instrument', 'album__slug']
-    search_fields = ['title', 'artists__name']
+    search_fields = ['title', 'artists__name', 'artists__nickname']
     ordering_fields = ['track_number', 'release_date']
     lookup_field = 'slug'
 

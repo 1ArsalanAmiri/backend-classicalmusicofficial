@@ -11,7 +11,7 @@ class ArtistSerializer(serializers.ModelSerializer):
     class Meta:
         model = Artist
         fields = [
-            'name', 'slug', 'country','birth_year','death_year', 'artist_type', 'artist_type_display',
+            'name', 'slug', 'nickname', 'country','birth_year','death_year', 'artist_type', 'artist_type_display',
             'era', 'era_display', 'image', 'biography','likes_count','followers_count'
         ]
 
