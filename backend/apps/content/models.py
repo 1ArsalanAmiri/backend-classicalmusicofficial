@@ -3,7 +3,7 @@ from django.db import models
 
 class Post(models.Model):
     title = models.CharField(max_length=255, verbose_name="عنوان")
-    slug = models.SlugField(max_length=255, unique=True, allow_unicode=True, verbose_name="نامک (Slug)")
+    slug = models.SlugField(max_length=255, unique=True, allow_unicode=True, verbose_name="اسلاگ")
     body = models.TextField(verbose_name="محتوا")
     cover_image = models.ImageField(upload_to='blog/covers/', null=True, blank=True, verbose_name="تصویر کاور")
 

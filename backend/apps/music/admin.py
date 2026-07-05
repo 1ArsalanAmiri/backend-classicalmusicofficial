@@ -85,7 +85,7 @@ class LabelAdmin(admin.ModelAdmin):
 @admin.register(Artist)
 class ArtistAdmin(admin.ModelAdmin):
     # سال تولد و فوت به لیست نمایش اضافه شد
-    list_display = ("name", "artist_type", "era", "country", "birth_year", "death_year")
+    list_display = ("name", "nickname" ,"artist_type", "era", "country", "birth_year", "death_year")
     list_filter = ("artist_type", "era")
     search_fields = ("name", "country", "biography")
     prepopulated_fields = {"slug": ("name",)}
