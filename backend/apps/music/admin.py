@@ -82,22 +82,24 @@ class LabelAdmin(admin.ModelAdmin):
 # =========================================================
 # Artist Admin
 # =========================================================
+# =========================================================
+# Artist Admin
+# =========================================================
 @admin.register(Artist)
 class ArtistAdmin(admin.ModelAdmin):
-    # سال تولد و فوت به لیست نمایش اضافه شد
     list_display = ("name", "nickname" ,"artist_type", "era", "country", "birth_year", "death_year")
     list_filter = ("artist_type", "era")
-    search_fields = ("name", "country", "biography")
+    search_fields = ("name", "nickname", "country", "biography")
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ("created_at", "updated_at")
     filter_horizontal = ("related_artists",)
 
     fieldsets = (
         (_("اطلاعات پایه"), {
-            "fields": ("name", "slug", "artist_type", "era", "country", "image")
+            "fields": ("name", "nickname", "slug", "artist_type", "era", "country", "image")
         }),
         (_("اطلاعات زمانی (تولد / فوت)"), {
-            "fields": ("birth_year", "death_year")  # فیلدهای جدید
+            "fields": ("birth_year", "death_year")
         }),
         (_("ارتباطات و جزئیات"), {
             "fields": ("related_artists", "biography",)
