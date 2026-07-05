@@ -38,9 +38,12 @@ urlpatterns = [
 
     path("contacts/", include("apps.contacts.urls") , name="contacts"),
 
+    path("content/" , include("apps.content.urls"), name="content")
+
     # path('sentry-debug/', trigger_error),
 
 ]
+
 
 if settings.DEBUG:
     import debug_toolbar
