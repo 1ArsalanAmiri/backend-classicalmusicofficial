@@ -80,7 +80,6 @@ INSTALLED_APPS = [
     'debug_toolbar',
     'corsheaders',
 
-
     #my-apps
     'apps.accounts',
     "apps.common",
@@ -128,6 +127,7 @@ TEMPLATES = [
         },
     },
 ]
+
 
 # WSGI_APPLICATION = 'config.wsgi.application'
 ASGI_APPLICATION = 'config.asgi.application'

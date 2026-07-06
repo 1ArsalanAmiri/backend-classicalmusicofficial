@@ -3,10 +3,11 @@ from django.core.cache import cache
 from django.db import IntegrityError
 from rest_framework.exceptions import Throttled, NotAuthenticated
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.contenttypes.models import ContentType
-from .models import Like, Follow, Comment
+from .models import Like, Follow, Comment, Bookmark
 from .serializers import CommentSerializer
 
 
@@ -129,3 +130,23 @@ class CommentableMixin:
                 return Response({"message": "نظر ثبت شد و در انتظار تایید است."}, status=status.HTTP_201_CREATED)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+class BookmarkableMixin:
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated], url_path='toggle-save')
+    def toggle_save(self, request, *args, **kwargs):
+        obj = self.get_object()
+        user = request.user
+        content_type = ContentType.objects.get_for_model(obj)
+
+        bookmark, created = Bookmark.objects.get_or_create(
+            user=user,
+            content_type=content_type,
+            object_id=obj.id
+        )
+
+        if not created:
+            bookmark.delete()
+            return Response({"detail": "از لیست ذخیره‌ها حذف شد."}, status=200)
+
+        return Response({"detail": "ذخیره شد."}, status=201)

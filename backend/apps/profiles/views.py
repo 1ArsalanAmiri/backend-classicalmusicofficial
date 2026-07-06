@@ -14,7 +14,9 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from apps.music.models import Album, Artist, Track, PlayHistory
 from apps.music.serializers import ArtistSerializer, AlbumListSerializer, TrackSerializer
-from apps.interactions.models import Like, Follow
+from apps.interactions.models import Like, Follow, Bookmark
+from ..content.models import Post
+from ..content.serializers import PostSerializer
 from ..playlists.models import Playlist
 from drf_spectacular.utils import extend_schema, inline_serializer
 
@@ -156,4 +158,29 @@ class UserDashboardViewSet(viewsets.GenericViewSet):
             'artists'
         )
         serializer = TrackSerializer(tracks, many=True, context={'request': request})
+        return Response(serializer.data)
+
+
+    @extend_schema(responses={200: PostSerializer(many=True)})
+    @action(detail=False, methods=['get'], url_path='saved-posts')
+    def saved_posts(self, request):
+        user = request.user
+        post_ct = ContentType.objects.get_for_model(Post)
+
+        saved_post_ids = Bookmark.objects.filter(
+            user=user,
+            content_type=post_ct
+        ).values_list('object_id', flat=True)
+
+        posts = Post.objects.filter(
+            id__in=saved_post_ids,
+            is_published=True
+        ).order_by('-created_at')
+
+        page = self.paginate_queryset(posts)
+        if page is not None:
+            serializer = PostSerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(serializer.data)
+
+        serializer = PostSerializer(posts, many=True, context={'request': request})
         return Response(serializer.data)

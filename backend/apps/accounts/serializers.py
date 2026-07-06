@@ -13,7 +13,7 @@ from django.utils.translation import gettext_lazy as _
 
 User = get_user_model()
 
-
+# USER PROFILE
 class UserProfileSerializer(serializers.ModelSerializer):
 
     date_joined_jalali = serializers.SerializerMethodField()
@@ -31,7 +31,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         return jalali_date.strftime("%Y/%m/%d")
 
 
-
+# LOGIN AND LOGOUT
 class LoginSerializer(serializers.Serializer):
     phone_number = PhoneNumberField(region="IR")
     password = serializers.CharField()
@@ -42,19 +42,13 @@ class LogoutSerializer(serializers.Serializer):
     refresh = serializers.CharField(required=True)
 
 
-
+# CHANGE PHONENUMBER
 class RequestChangePhoneSerializer(serializers.Serializer):
     new_phone_number = serializers.CharField(
         max_length=13,
         validators=[RegexValidator(regex=r'^\+989\d{9}$', message="فرمت شماره موبایل نامعتبر است. (مثال: 989120000000+)")],
         help_text="شماره موبایل جدید کاربر"
     )
-
-
-
-class VerifyChangePhoneSerializer(serializers.Serializer):
-    new_phone_number = serializers.CharField(max_length=13)
-    otp = serializers.CharField(max_length=6)
 
 
 
@@ -66,6 +60,12 @@ class ChangePhoneNumberSerializer(serializers.Serializer):
 
 
 
+class VerifyChangePhoneSerializer(serializers.Serializer):
+    new_phone_number = serializers.CharField(max_length=13)
+    otp = serializers.CharField(max_length=6)
+
+
+# RESET PASSWORD
 class ResetPasswordSerializer(serializers.Serializer):
     phone_number = PhoneNumberField(region="IR")
     otp = serializers.CharField(max_length=6, write_only=True)
@@ -120,6 +120,19 @@ class ResetPasswordSerializer(serializers.Serializer):
 
 
 
+# DELETE ACCOUNT
+class DeleteAccountSerializer(serializers.Serializer):
+    password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+    refresh = serializers.CharField(write_only=True, required=True, help_text="توکن رفرش برای خروج کامل کاربر")
+
+    def validate_password(self, value):
+        user = self.context['request'].user
+        if not user.check_password(value):
+            raise serializers.ValidationError("رمز عبور وارد شده اشتباه است.")
+        return value
+
+
+
 class VerifyDeleteAccountSerializer(serializers.Serializer):
     otp = serializers.CharField(
         max_length=6,
@@ -136,16 +149,4 @@ class VerifyDeleteAccountSerializer(serializers.Serializer):
             RefreshToken(value)
         except TokenError:
             raise serializers.ValidationError(_("توکن نامعتبر است یا قبلاً منقضی شده است."))
-        return value
-
-
-
-class DeleteAccountSerializer(serializers.Serializer):
-    password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
-    refresh = serializers.CharField(write_only=True, required=True, help_text="توکن رفرش برای خروج کامل کاربر")
-
-    def validate_password(self, value):
-        user = self.context['request'].user
-        if not user.check_password(value):
-            raise serializers.ValidationError("رمز عبور وارد شده اشتباه است.")
         return value

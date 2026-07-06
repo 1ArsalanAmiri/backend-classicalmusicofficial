@@ -21,14 +21,14 @@ class ArtistRole(models.TextChoices):
     COMPOSER = "composer", _("آهنگساز")
     CONDUCTOR = "conductor", _("رهبر ارکستر")
     ORCHESTRA = "orchestra", _("ارکستر")
-    SOLOIST = "soloist", _("نوازنده (سولیست)")
+    SOLOIST = "soloist", _("سولیست")
     ENSEMBLE = "ensemble", _("گروه موسیقی")
     SINGER = "singer", _("خواننده")
 
     # سازها
-    PIANIST = "pianist", _("نوازنده پیانو")
-    ORGANIST = "organist", _("نوازنده ارگ")
-    HARPSICHORDIST = "harpsichordist", _("نوازنده هارپسیکورد")
+    PIANIST = "pianist", _("پیانو")
+    ORGANIST = "organist", _("ارگ")
+    HARPSICHORDIST = "harpsichordist", _("هارپسیکورد")
     CELLIST = "cellist", _("ویولنسل")
     VIOLINIST = "violinist", _("ویولن")
     VIOLIST = "violist", _("ویولا")
