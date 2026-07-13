@@ -273,13 +273,20 @@ SECURE_SSL_REDIRECT = False
 #DJANGO DEBUG TOOLBAR
 if DEBUG:
     import socket
+
     hostname, _, ips = socket.gethostbyname_ex(socket.gethostname())
     INTERNAL_IPS = [ip[: ip.rfind(".")] + ".1" for ip in ips] + ["127.0.0.1", "10.0.2.2"]
-def show_toolbar(request):
-    return DEBUG
-DEBUG_TOOLBAR_CONFIG = {
-    "SHOW_TOOLBAR_CALLBACK": "config.settings.show_toolbar",
-    "INSERT_BEFORE": "</body>",}
+
+
+    def show_toolbar(request):
+        return DEBUG
+
+
+    DEBUG_TOOLBAR_CONFIG = {
+        "SHOW_TOOLBAR_CALLBACK": "config.settings.show_toolbar",
+        "INSERT_BEFORE": "</body>",
+    }
+
 mimetypes.add_type("application/javascript", ".js", True)
 
 
