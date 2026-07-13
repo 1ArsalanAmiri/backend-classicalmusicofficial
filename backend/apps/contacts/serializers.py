@@ -10,7 +10,7 @@ class TicketMessageSerializer(serializers.ModelSerializer):
     secure_attachment_url = serializers.SerializerMethodField()
     class Meta:
         model = TicketMessage
-        fields = ['id', 'text', 'sender', 'secure_attachment_url', 'created_at']
+        fields = '__all__'
 
     def get_secure_attachment_url(self, obj):
         if obj.attachment:
