@@ -6,12 +6,17 @@ from apps.music.models import Album
 
 
 class Comment(models.Model):
-
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='comments')
-    album = models.ForeignKey(Album, on_delete=models.CASCADE, related_name='comments' , null=True, blank=True)
     body = models.TextField()
     is_approved = models.BooleanField(default=False)
+    is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.PositiveIntegerField()
+    content_object = GenericForeignKey('content_type', 'object_id')
+
+    parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='replies')
 
     class Meta:
         verbose_name = 'کامنت'
@@ -19,9 +24,7 @@ class Comment(models.Model):
         ordering = ['-created_at']
 
     def __str__(self):
-        if self.album:
-            return f"Comment by {self.user} on {self.album.title}"
-        return f"Comment by {self.user} (No Album)"
+        return f"Comment by {self.user} on {self.content_object}"
 
 
 class Like(models.Model):
