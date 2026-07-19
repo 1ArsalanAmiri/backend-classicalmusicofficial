@@ -36,7 +36,7 @@ from django.utils import timezone
 from .models import Album, AlbumArchiveUpload, Track, Artist ,Genre
 from django.db.models import Count, Prefetch
 from urllib.parse import quote
-
+from django.core.files.storage import default_storage
 
 
 class AlbumBatchUploadAPIView(APIView):
@@ -224,12 +224,9 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         file_path = track.audio_file.name
         content_type, _ = mimetypes.guess_type(file_path)
         file_url = track.audio_file.url
-        accel_path = f"/protected-media/{track.audio_file.name}"
+        safe_filename = os.path.basename(track.audio_file.name)
         response = HttpResponse()
-        response['X-Accel-Redirect'] = accel_path
-        response['Content-Type'] = ''
-        from urllib.parse import quote
-        safe_filename = quote(file_path.split("/")[-1])
+        response['X-Accel-Redirect'] = f"/protected-media/{track.audio_file.name}"
         response['Content-Disposition'] = f'inline; filename="{safe_filename}"'
         return response
 
@@ -497,7 +494,7 @@ def download_album_zip_api(request, album_slug):
             with zipfile.ZipFile(temp_zip.name, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 for track in tracks:
                     audio = getattr(track, "audio_file", None)
-                    if audio and audio.name and os.path.exists(audio.path):
+                    if audio and audio.name and default_storage.exists(audio.name):
                         file_path = audio.path
                         file_name = os.path.basename(file_path)
                         zipf.write(file_path, arcname=file_name)

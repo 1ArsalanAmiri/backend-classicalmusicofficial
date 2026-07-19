@@ -147,24 +147,26 @@ def process_album_archive_task(self, upload_record_id: int):
                 used_track_numbers.add(track_number)
 
                 # 3. Artist Extraction
-                raw_artist_name_list = audio_meta.get("artist", [None])
-                raw_artist_name = raw_artist_name_list[0] if raw_artist_name_list else None
-                track_artist_name = str(raw_artist_name).strip() if raw_artist_name else None
-                track_artists = []
+                album_artists = list(album.main_artists.all())
 
-                if track_artist_name:
-                    found_artist = Artist.objects.filter(name__iexact=track_artist_name).first()
-                    if found_artist:
-                        track_artists.append(found_artist)
+                if album_artists:
+                    track_artists = album_artists
+                else:
+                    raw_artist_name_list = audio_meta.get("artist", [None])
+                    raw_artist_name = raw_artist_name_list[0] if raw_artist_name_list else None
+                    track_artist_name = str(raw_artist_name).strip() if raw_artist_name else None
 
-                if not track_artists:
-                    track_artists = list(album.main_artists.all())
+                    track_artists = []
+                    if track_artist_name:
+                        found_artist = Artist.objects.filter(name__iexact=track_artist_name).first()
+                        if found_artist:
+                            track_artists.append(found_artist)
 
-                if not track_artists:
-                    unknown_artist, _ = Artist.objects.get_or_create(
-                        name="Unknown Artist", defaults={"artist_type": "other"}
-                    )
-                    track_artists.append(unknown_artist)
+                    if not track_artists:
+                        unknown_artist, _ = Artist.objects.get_or_create(
+                            name="Unknown Artist", defaults={"artist_type": "other"}
+                        )
+                        track_artists.append(unknown_artist)
 
                 # -----------------------
                 # 4. Genre
@@ -259,6 +261,23 @@ def process_album_archive_task(self, upload_record_id: int):
         raise self.retry(exc=e, countdown=10)
 
     finally:
+        tracks_to_create = []
+        for data in tracks_to_update:
+            track = Track(
+                album=data["album"],
+                track_number=data["track_number"],
+                title=data["defaults"].get("title"),
+                slug=data["defaults"].get("slug"),
+                genre=data["defaults"].get("genre"),
+                duration_ms=data["defaults"].get("duration_ms"),
+                audio_file=data["defaults"].get("audio_file"),
+                status=data["defaults"].get("status")
+            )
+            tracks_to_create.append(track)
+
+        if tracks_to_create:
+            Track.objects.bulk_create(tracks_to_create)
+            
         if temp_dir and os.path.exists(temp_dir):
             try:
                 shutil.rmtree(temp_dir)

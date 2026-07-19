@@ -9,12 +9,11 @@ app = Celery("config")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 
 app.autodiscover_tasks()
-app.autodiscover_tasks(['apps.music'])
 
 
 app.conf.beat_schedule = {
     'cleanup-zip-files-every-night': {
-        'task': 'your_app.tasks.cleanup_old_zip_exports',
+        'task': 'apps.music.tasks.cleanup_old_album_zips',
         'schedule': crontab(hour="3", minute="0"),
     },
 }

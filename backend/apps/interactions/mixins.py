@@ -10,56 +10,27 @@ from django.contrib.contenttypes.models import ContentType
 from .models import Like, Follow, Comment, Bookmark
 from .serializers import CommentSerializer
 
-
-
 def check_comment_rate_limit(user_id):
     cache_key = f"comment_rate_limit_{user_id}"
     comment_timestamps = cache.get(cache_key, [])
-
     now = time.time()
-    ten_minutes_ago = now - 600
-
-    valid_timestamps = [ts for ts in comment_timestamps if ts > ten_minutes_ago]
-
+    valid_timestamps = [ts for ts in comment_timestamps if ts > (now - 600)]
     if len(valid_timestamps) >= 5:
-        raise Throttled(detail="شما بیش از حد مجاز کامنت ثبت کرده‌اید. لطفاً بعدا مجددا تلاش کنید.")
-
+        raise Throttled(detail="شما بیش از حد مجاز کامنت ثبت کرده‌اید.")
     valid_timestamps.append(now)
     cache.set(cache_key, valid_timestamps, timeout=600)
 
 
-
 class LikableMixin:
-    @action(detail=True, methods=['post', 'delete'], url_path='like')
+    @action(detail=True, methods=['post', 'delete'], url_path='like', permission_classes=[IsAuthenticated])
     def like_toggle(self, request, *args, **kwargs):
-        if not request.user.is_authenticated:
-            raise NotAuthenticated(detail="برای لایک کردن باید وارد حساب کاربری شوید.")
-
         obj = self.get_object()
         content_type = ContentType.objects.get_for_model(obj)
-
         if request.method == 'POST':
-            try:
-                like, created = Like.objects.get_or_create(
-                    user=request.user,
-                    content_type=content_type,
-                    object_id=obj.pk
-                )
-                if created:
-                    return Response({"message": "لایک شد."}, status=status.HTTP_201_CREATED)
-                return Response({"message": "قبلا لایک شده بود."}, status=status.HTTP_200_OK)
-            except IntegrityError:
-                return Response({"message": "قبلا لایک شده بود."}, status=status.HTTP_200_OK)
-
-        elif request.method == 'DELETE':
-            deleted, _ = Like.objects.filter(
-                user=request.user, content_type=content_type, object_id=obj.pk
-            ).delete()
-            if deleted:
-                return Response({"message": "لایک برداشته شد."}, status=status.HTTP_204_NO_CONTENT)
-            return Response({"error": "لایکی یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
-
-        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+            _, created = Like.objects.get_or_create(user=request.user, content_type=content_type, object_id=obj.pk)
+            return Response({"message": "لایک شد."}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+        deleted, _ = Like.objects.filter(user=request.user, content_type=content_type, object_id=obj.pk).delete()
+        return Response({"message": "لایک برداشته شد."} if deleted else {"error": "یافت نشد."}, status=status.HTTP_204_NO_CONTENT if deleted else status.HTTP_404_NOT_FOUND)
 
 
 class FollowableMixin:
@@ -97,56 +68,30 @@ class FollowableMixin:
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
+class BookmarkableMixin:
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated], url_path='toggle-save')
+    def toggle_save(self, request, *args, **kwargs):
+        obj = self.get_object()
+        content_type = ContentType.objects.get_for_model(obj)
+        bookmark, created = Bookmark.objects.get_or_create(user=request.user, content_type=content_type, object_id=obj.id)
+        if not created:
+            bookmark.delete()
+            return Response({"detail": "از لیست ذخیره‌ها حذف شد."}, status=200)
+        return Response({"detail": "ذخیره شد."}, status=201)
+
+
 class CommentableMixin:
     @action(detail=True, methods=['get', 'post'], url_path='comments')
     def manage_comments(self, request, *args, **kwargs):
         obj = self.get_object()
         content_type = ContentType.objects.get_for_model(obj)
-
         if request.method == 'GET':
-            comments = Comment.objects.filter(
-                content_type=content_type,
-                object_id=obj.pk,
-                is_approved=True,
-                is_deleted=False
-            ).select_related('user')
-
-            serializer = CommentSerializer(comments, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-
-        elif request.method == 'POST':
-            if not request.user.is_authenticated:
-                raise NotAuthenticated(detail="برای ثبت نظر باید وارد حساب کاربری شوید.")
-
-            check_comment_rate_limit(request.user.id)
-
-            serializer = CommentSerializer(data=request.data)
-            if serializer.is_valid():
-                serializer.save(
-                    user=request.user,
-                    content_type=content_type,
-                    object_id=obj.pk
-                )
-                return Response({"message": "نظر ثبت شد و در انتظار تایید است."}, status=status.HTTP_201_CREATED)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
-
-
-class BookmarkableMixin:
-    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated], url_path='toggle-save')
-    def toggle_save(self, request, *args, **kwargs):
-        obj = self.get_object()
-        user = request.user
-        content_type = ContentType.objects.get_for_model(obj)
-
-        bookmark, created = Bookmark.objects.get_or_create(
-            user=user,
-            content_type=content_type,
-            object_id=obj.id
-        )
-
-        if not created:
-            bookmark.delete()
-            return Response({"detail": "از لیست ذخیره‌ها حذف شد."}, status=200)
-
-        return Response({"detail": "ذخیره شد."}, status=201)
+            comments = Comment.objects.filter(content_type=content_type, object_id=obj.pk, is_approved=True, is_deleted=False, parent__isnull=True).prefetch_related('replies__user', 'user')
+            return Response(CommentSerializer(comments, many=True).data)
+        if not request.user.is_authenticated:
+            raise NotAuthenticated()
+        check_comment_rate_limit(request.user.id)
+        serializer = CommentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(user=request.user, content_type=content_type, object_id=obj.pk)
+        return Response({"message": "نظر ثبت شد."}, status=status.HTTP_201_CREATED)

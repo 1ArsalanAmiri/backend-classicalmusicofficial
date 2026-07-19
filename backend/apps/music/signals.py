@@ -16,7 +16,7 @@ def invalidate_album_cache_on_track_change(sender, instance, **kwargs):
     try:
         if instance.album_id:
             cache.delete(f"album_detail_{instance.album.slug}")
-            cache.delete_pattern("*.album_list.*")
+            cache.delete_pattern("album_list_*")
     except Album.DoesNotExist:
         pass
 

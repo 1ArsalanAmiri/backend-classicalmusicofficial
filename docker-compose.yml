@@ -7,6 +7,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: UTC
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -19,38 +20,26 @@ services:
     image: redis:7-alpine
     container_name: classicalmusic_redis
     restart: unless-stopped
+    command: redis-server --appendonly yes
 
   backend:
     build: ./backend
     container_name: classicalmusic_backend
     restart: unless-stopped
-    command:
-           sh -c "python manage.py migrate --noinput &&
-           python manage.py collectstatic --noinput &&
-           gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers 4"
-    env_file:
-      - .env
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    command: gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers 2
+    env_file: .env
     environment:
       DJANGO_SETTINGS_MODULE: config.settings
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
+      TZ: UTC
     volumes:
       - ./backend:/app
       - static_volume:/app/staticfiles
       - media_volume:/app/media
-    expose:
-      - "8000"
     depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_started
-
+      db: {condition: service_healthy}
+      redis: {condition: service_started}
   celery:
     build: ./backend
     container_name: classicalmusic_celery
@@ -65,13 +54,40 @@ services:
     volumes:
       - ./backend:/app
       - media_volume:/app/media
-      - static_volume:/app/static
+      - static_volume:/app/staticfiles
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_started
       backend:
+        condition: service_started
+
+  celery_video_worker:
+    build: ./backend
+    container_name: classicalmusic_video_worker
+    restart: unless-stopped
+    command: sh -c "celery -A config worker -l info -Q video_tasks -n video_worker@%h --concurrency=1"
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+      - media_volume:/app/media
+      - static_volume:/app/staticfiles
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
         condition: service_started
 
   nginx:
@@ -98,11 +114,11 @@ services:
       - /etc/letsencrypt:/etc/letsencrypt
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
 
-  celery_video_worker:
+  celery_beat:
     build: ./backend
-    container_name: classicalmusic_video_worker
+    container_name: classicalmusic_celery_beat
     restart: unless-stopped
-    command: sh -c "celery -A config worker -l info -Q video_tasks -n video_worker@%h"
+    command: sh -c "celery -A config beat -l info"
     env_file:
       - .env
     environment:
@@ -112,19 +128,12 @@ services:
     volumes:
       - ./backend:/app
       - media_volume:/app/media
+      - static_volume:/app/staticfiles
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_started
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
-        reservations:
-          cpus: '1.0'
-          memory: 1G
 volumes:
   postgres_data:
   static_volume:

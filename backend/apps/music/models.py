@@ -68,6 +68,10 @@ class EraChoices(models.TextChoices):
     IMPRESSIONISM = "impressionism", _("امپرسیونیسم")
     MODERN = "modern", _("مدرن")
     CONTEMPORARY = "contemporary", _("معاصر")
+    MEDIEVAL = "medieval", _("قرون وسطی")
+    EARLY_20TH = "early_20th", _("اوایل قرن بیستم")
+    LATE_20TH = "late_20th", _("اواخر قرن بیستم")
+    CENTURY_21ST = "century_21st", _("قرن بیست و یکم")
 
 
 class Genre(TimeStampedModel):
