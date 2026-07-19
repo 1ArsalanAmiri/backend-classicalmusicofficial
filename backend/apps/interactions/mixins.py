@@ -69,7 +69,7 @@ class FollowableMixin:
 
 
 class BookmarkableMixin:
-    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated], url_path='toggle-save')
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated], url_path='bookmark')
     def toggle_save(self, request, *args, **kwargs):
         obj = self.get_object()
         content_type = ContentType.objects.get_for_model(obj)
