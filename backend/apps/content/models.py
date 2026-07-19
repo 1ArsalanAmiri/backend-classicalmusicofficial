@@ -3,7 +3,7 @@ from apps.common.models import unique_slugify # استفاده از متد مو�
 
 class Post(models.Model):
     title = models.CharField(max_length=255, verbose_name="عنوان")
-    author = models.CharField(max_length=255, verbose_name="نویسنده")
+    author = models.CharField(max_length=255, verbose_name="نویسنده",null=True, blank=True)
     slug = models.SlugField(max_length=255, unique=True, allow_unicode=True, blank=True, verbose_name="اسلاگ")
     body = models.TextField(verbose_name="محتوا")
     cover_image = models.ImageField(upload_to='blog/covers/', null=True, blank=True, verbose_name="تصویر کاور")
