@@ -28,6 +28,11 @@ services:
     restart: unless-stopped
     command: gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers 2
     env_file: .env
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health/" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     environment:
       DJANGO_SETTINGS_MODULE: config.settings
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}

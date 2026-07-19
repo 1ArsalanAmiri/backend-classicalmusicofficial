@@ -1,5 +1,5 @@
 from django.db import models
-from apps.common.models import unique_slugify # استفاده از متد موجود در پروژه
+from apps.common.models import unique_slugify
 
 class Post(models.Model):
     title = models.CharField(max_length=255, verbose_name="عنوان")
