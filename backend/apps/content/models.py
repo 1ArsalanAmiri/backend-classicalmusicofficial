@@ -1,5 +1,6 @@
 from django.db import models
 from apps.common.models import unique_slugify
+from apps.interactions.models import Like, Bookmark
 
 class Post(models.Model):
     title = models.CharField(max_length=255, verbose_name="عنوان")
@@ -17,6 +18,14 @@ class Post(models.Model):
         verbose_name = "مقاله"
         verbose_name_plural = "مقالات"
         ordering = ['-created_at']
+
+    @property
+    def likes(self):
+        return Like.objects.filter(content_type__model='post', object_id=self.id)
+
+    @property
+    def bookmarks(self):
+        return Bookmark.objects.filter(content_type__model='post', object_id=self.id)
 
     def save(self, *args, **kwargs):
         if not self.slug:
