@@ -118,13 +118,11 @@ services:
         condition: service_started
 
   frontend:
-      image: node:20-alpine
+      build:
+        context: ../front
+        dockerfile: Dockerfile
       container_name: classicalmusic_frontend
       restart: unless-stopped
-      working_dir: /app
-      volumes:
-        - ../../cl-build:/app
-      command: node server.js
       ports:
         - "3000:3000"
       depends_on:
