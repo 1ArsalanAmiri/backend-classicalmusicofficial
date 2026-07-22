@@ -118,14 +118,13 @@ services:
         condition: service_started
 
   frontend:
-      build:
-        context: ../../cl-build
-        dockerfile: Dockerfile
+      image: node:20-alpine
       container_name: classicalmusic_frontend
       restart: unless-stopped
-      environment:
-        - PORT=3000
-        - HOSTNAME=0.0.0.0
+      working_dir: /app
+      volumes:
+        - ../../cl-build:/app
+      command: npx serve -s . -l 3000
       ports:
         - "3000:3000"
       depends_on:
