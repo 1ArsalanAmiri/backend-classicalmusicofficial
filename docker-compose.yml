@@ -118,19 +118,18 @@ services:
         condition: service_started
 
   frontend:
-    build:
-      context: ./frontend  # مسیر پوشه پروژه فرانت‌اند شما
-      dockerfile: Dockerfile
-    container_name: classicalmusic_frontend
-    restart: unless-stopped
-    environment:
-      - PORT=3000
-      - HOSTNAME=0.0.0.0
-    ports:
-      - "3000:3000"
-    depends_on:
-      - backend
-
+      build:
+        context: ../cl-build
+        dockerfile: Dockerfile
+      container_name: classicalmusic_frontend
+      restart: unless-stopped
+      environment:
+        - PORT=3000
+        - HOSTNAME=0.0.0.0
+      ports:
+        - "3000:3000"
+      depends_on:
+        - backend
   nginx:
     build: ./nginx
     container_name: classicalmusic_nginx
