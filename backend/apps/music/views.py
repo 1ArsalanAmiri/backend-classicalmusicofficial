@@ -83,9 +83,12 @@ class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
 
 class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     permission_classes = [AllowAny]
-    queryset = Album.objects.filter(status=PublishStatus.PUBLISHED).prefetch_related(
-        "tracks__artists",
-        "main_artists"
+    queryset = Album.objects.filter(status=PublishStatus.PUBLISHED).select_related('label').prefetch_related(
+        'main_artists',
+        Prefetch(
+            'tracks',
+            queryset=Track.objects.filter(status=PublishStatus.PUBLISHED).prefetch_related('artists')
+        )
     ).annotate(annotated_total_tracks=Count("tracks"))
     pagination_class = ClassicalMusicPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -95,18 +98,18 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     lookup_field = 'slug'
 
     def get_on_this_album(self, obj):
-        main_artists_ids = [artist.id for artist in obj.main_artists.all()]
-        track_artists_ids = [
-            artist.id
-            for track in obj.tracks.all()for artist in track.artists.all()
-        ]
-        all_artist_ids = set(main_artists_ids) | set(track_artists_ids)
-        all_artist_ids.discard(None)
-        if not all_artist_ids:
-            return []
-        artists = Artist.objects.filter(id__in=all_artist_ids).distinct()
-        serializer = ArtistBasicSerializer(artists, many=True, context=self.context)
-        return serializer.data
+        main_artists = list(obj.main_artists.all())
+        main_artists_ids = {artist.id for artist in main_artists}
+        track_artists = []
+        for track in obj.tracks.all():
+            for artist in track.artists.all():
+                if artist.id not in main_artists_ids:
+                    track_artists.append(artist)
+                    main_artists_ids.add(artist.id)
+
+        all_artists = main_artists + track_artists
+        return ArtistBasicSerializer(all_artists, many=True, context=self.context).data
+
 
     @extend_schema(methods=['POST'],request=CommentSerializer,responses={201: CommentSerializer},)
     @action(detail=True,methods=["get", "post"],url_path="comments",permission_classes=[IsAuthenticatedOrReadOnly],)
