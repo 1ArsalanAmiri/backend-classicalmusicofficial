@@ -141,7 +141,7 @@ services:
         condition: service_started
   frontend:
     build:
-      context: root/cl-build
+      context: /root/cl-build
       dockerfile: Dockerfile
     container_name: classicalmusic_frontend
     restart: unless-stopped
