@@ -124,7 +124,7 @@ services:
       working_dir: /app
       volumes:
         - ../../cl-build:/app
-      command: npx serve -s . -l 3000
+      command: node server.js
       ports:
         - "3000:3000"
       depends_on:
