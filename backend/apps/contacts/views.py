@@ -22,6 +22,20 @@ class TicketViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.Retri
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return TicketListSerializer
+        elif self.action == 'retrieve':
+            return TicketDetailSerializer
+        elif self.action == 'create':
+            return TicketCreateSerializer
+        return TicketListSerializer
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
     def get_queryset(self):
         return Ticket.objects.filter(user=self.request.user).prefetch_related('messages__sender')
 
@@ -33,12 +47,14 @@ class TicketViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.Retri
         ticket = self.get_object()
         if ticket.status == TicketStatus.CLOSED:
             return Response({"detail": "تیکت بسته شده است."}, status=status.HTTP_400_BAD_REQUEST)
-        serializer = TicketReplySerializer(data=request.data)
+
+        serializer = TicketReplySerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         message = TicketMessage.objects.create(ticket=ticket, sender=request.user, **serializer.validated_data)
         ticket.status = TicketStatus.USER_REPLIED
         ticket.save(update_fields=['status', 'updated_at'])
-        return Response(TicketMessageSerializer(message).data, status=status.HTTP_201_CREATED)
+        return Response(TicketMessageSerializer(message, context={'request': request}).data,
+                        status=status.HTTP_201_CREATED)
 
 
 class SecureTicketAttachmentView(APIView):

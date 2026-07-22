@@ -39,6 +39,7 @@ class TrackSerializer(serializers.ModelSerializer):
     audio_url = serializers.SerializerMethodField()
     duration_seconds = serializers.SerializerMethodField()
     download_url = serializers.SerializerMethodField()
+    album = serializers.SlugRelatedField(slug_field='slug',read_only=True)
 
     class Meta:
         model = Track

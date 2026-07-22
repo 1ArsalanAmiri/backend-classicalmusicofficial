@@ -71,8 +71,6 @@ class AlbumBatchUploadAPIView(APIView):
         }, status=status.HTTP_202_ACCEPTED)
 
 
-
-
 class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
     permission_classes = [AllowAny]
     queryset = Artist.objects.all()
@@ -81,8 +79,6 @@ class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
     filterset_fields = ['artist_type', 'era', 'country']
     search_fields = ['name' , 'nickname']
     lookup_field = 'slug'
-
-
 
 
 class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
@@ -164,8 +160,6 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     @method_decorator(vary_on_headers('Authorization', 'Cookie'))
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
-
-
 
 
 class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
@@ -275,8 +269,6 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         return Response({"message": "پخش با موفقیت ثبت شد."}, status=status.HTTP_200_OK)
 
 
-
-
 class GenreViewSet(viewsets.ReadOnlyModelViewSet):
 
     serializer_class = GenreSerializer
@@ -294,8 +286,6 @@ class GenreViewSet(viewsets.ReadOnlyModelViewSet):
     @method_decorator(cache_page(60 * 60 * 24))
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
-
-
 
 
 class InstrumentViewSet(viewsets.ReadOnlyModelViewSet):
@@ -316,8 +306,6 @@ class InstrumentViewSet(viewsets.ReadOnlyModelViewSet):
         return super().retrieve(request, *args, **kwargs)
 
 
-
-
 class EraListView(APIView):
 
     @method_decorator(cache_page(60 * 60 * 24 * 7))
@@ -330,8 +318,6 @@ class EraListView(APIView):
             for key, label in EraChoices.choices
         ]
         return Response(eras)
-
-
 
 
 class LabelViewSet(FollowableMixin, LikableMixin, viewsets.ReadOnlyModelViewSet):
@@ -378,8 +364,6 @@ class LabelViewSet(FollowableMixin, LikableMixin, viewsets.ReadOnlyModelViewSet)
         return context
 
 
-
-
 class GenreDetailWithContentAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -411,8 +395,6 @@ class GenreDetailWithContentAPIView(APIView):
             "albums": AlbumListSerializer(albums, many=True, context=context).data,
             "single_tracks": TrackSerializer(single_tracks, many=True, context=context).data
         }, status=status.HTTP_200_OK)
-
-
 
 
 class InstrumentDetailWithContentAPIView(APIView):
@@ -448,14 +430,11 @@ class InstrumentDetailWithContentAPIView(APIView):
         }, status=status.HTTP_200_OK)
 
 
-
-
 @sync_to_async
 def get_album_and_tracks(album_slug):
     album = get_object_or_404(Album, slug=album_slug)
     tracks = list(album.tracks.select_related())
     return album, tracks
-
 
 
 @api_view(['GET'])
