@@ -50,12 +50,14 @@ class TrackSerializer(serializers.ModelSerializer):
 
     def get_artists(self, obj):
         track_artists = list(obj.artists.all())
-        track_artist_ids = [artist.id for artist in track_artists]
+        track_artist_ids = {artist.id for artist in track_artists}
+
         if obj.album:
             album_main_artists = obj.album.main_artists.all()
             for main_artist in reversed(list(album_main_artists)):
                 if main_artist.id not in track_artist_ids:
                     track_artists.insert(0, main_artist)
+                    track_artist_ids.add(main_artist.id)
         return ArtistBasicSerializer(track_artists, many=True, context=self.context).data
 
     def get_cover_image(self, obj):

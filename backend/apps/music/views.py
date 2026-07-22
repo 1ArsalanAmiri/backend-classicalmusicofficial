@@ -167,7 +167,7 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
     pagination_class = ClassicalMusicPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = TrackFilter
-    queryset = Track.objects.filter(status=PublishStatus.PUBLISHED).select_related('album').prefetch_related('artists')
+    queryset = Track.objects.filter(status=PublishStatus.PUBLISHED).select_related('album').prefetch_related('artists',Prefetch('album__main_artists', queryset=Artist.objects.all()))
     serializer_class = TrackSerializer
     filterset_fields = ['instrument', 'album__slug']
     search_fields = ['title', 'artists__name', 'artists__nickname']
