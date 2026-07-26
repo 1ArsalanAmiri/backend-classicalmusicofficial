@@ -12,7 +12,6 @@ from .models import Like ,Comment
 from .serializers import CommentSerializer
 
 
-
 class AlbumViewSet(CommentableMixin,viewsets.ReadOnlyModelViewSet):
     queryset = Album.objects.all()
     serializer_class = AlbumListSerializer
@@ -56,6 +55,19 @@ class TrackViewSet(LikableMixin, viewsets.ReadOnlyModelViewSet):
     queryset = Track.objects.all()
     serializer_class = TrackSerializer
     lookup_field = 'slug'
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if user.is_authenticated:
+            track_ct = ContentType.objects.get_for_model(Track)
+            liked_subquery = Like.objects.filter(
+                user=user,
+                content_type=track_ct,
+                object_id=OuterRef('pk')
+            )
+            qs = qs.annotate(is_liked=Exists(liked_subquery))
+        return qs
 
 
 class ArtistViewSet(FollowableMixin, viewsets.ReadOnlyModelViewSet):

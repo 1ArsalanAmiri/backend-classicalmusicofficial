@@ -504,4 +504,10 @@ def download_album_zip_api(request, album_slug):
     response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
     response['Content-Type'] = 'application/zip'
 
+    origin = request.headers.get('Origin')
+    if origin:
+        response['Access-Control-Allow-Origin'] = origin
+        response['Access-Control-Allow-Credentials'] = 'true'
+        response['Access-Control-Expose-Headers'] = 'Content-Disposition'
+
     return response
