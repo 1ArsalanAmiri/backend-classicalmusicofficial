@@ -12,6 +12,7 @@ from .models import Like ,Comment
 from .serializers import CommentSerializer
 
 
+
 class AlbumViewSet(CommentableMixin,viewsets.ReadOnlyModelViewSet):
     queryset = Album.objects.all()
     serializer_class = AlbumListSerializer

@@ -39,9 +39,6 @@ class TicketViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.Retri
     def get_queryset(self):
         return Ticket.objects.filter(user=self.request.user).prefetch_related('messages__sender')
 
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
-
     @action(detail=True, methods=['post'], url_path='reply')
     def reply(self, request, pk=None):
         ticket = self.get_object()

@@ -58,7 +58,8 @@ class TicketCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         message_body = validated_data.pop('message_body')
         attachment = validated_data.pop('attachment', None)
-        user = self.context['request'].user
+        request = self.context.get('request')
+        user = request.user
 
         with transaction.atomic():
             ticket = Ticket.objects.create(user=user, **validated_data)
