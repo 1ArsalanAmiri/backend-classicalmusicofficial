@@ -37,6 +37,9 @@ from .models import Album, AlbumArchiveUpload, Track, Artist ,Genre
 from django.db.models import Count, Prefetch
 from urllib.parse import quote
 from django.core.files.storage import default_storage
+from django.contrib.contenttypes.models import ContentType
+from django.db.models import OuterRef, Exists
+from apps.interactions.models import Like
 
 
 class AlbumBatchUploadAPIView(APIView):
@@ -177,6 +180,19 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
     ordering_fields = ['track_number', 'release_date']
     lookup_field = 'slug'
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if user.is_authenticated:
+            track_ct = ContentType.objects.get_for_model(Track)
+            liked_subquery = Like.objects.filter(
+                user=user,
+                content_type=track_ct,
+                object_id=OuterRef('pk')
+            )
+            qs = qs.annotate(is_liked=Exists(liked_subquery))
+        return qs
+
     def get_serializer_context(self):
         context = super().get_serializer_context()
         request = self.request
@@ -270,6 +286,8 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         else:
             PlayHistory.objects.filter(id=history.id).update(play_count=1)
         return Response({"message": "پخش با موفقیت ثبت شد."}, status=status.HTTP_200_OK)
+
+
 
 
 class GenreViewSet(viewsets.ReadOnlyModelViewSet):

@@ -16,6 +16,7 @@ class ArtistSerializer(serializers.ModelSerializer):
         ]
 
 
+
 class ArtistBasicSerializer(serializers.ModelSerializer):
     artist_type = serializers.CharField(source='get_artist_type_display', read_only=True)
 
@@ -40,12 +41,13 @@ class TrackSerializer(serializers.ModelSerializer):
     duration_seconds = serializers.SerializerMethodField()
     download_url = serializers.SerializerMethodField()
     album = serializers.SlugRelatedField(slug_field='slug',read_only=True)
+    is_liked = serializers.BooleanField(read_only=True, default=False)
 
     class Meta:
         model = Track
         fields = [
             'id', 'title', 'album', 'artists', 'slug', 'cover_image',
-            'duration_seconds', 'status', 'likes_count', 'audio_url', 'download_url'
+            'duration_seconds', 'status', 'likes_count', 'is_liked', 'audio_url', 'download_url'
         ]
 
     def get_artists(self, obj):

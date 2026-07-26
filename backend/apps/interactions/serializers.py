@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import Comment
-from apps.music.models import Album , Track
+from apps.music.models import Album, Track
 
 
 class AlbumSerializer(serializers.ModelSerializer):
@@ -9,7 +9,7 @@ class AlbumSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Album
-        fields = ['id', 'title', 'slug', 'likes_count', 'is_liked',]
+        fields = ['id', 'title', 'slug', 'likes_count', 'is_liked']
 
 
 class TrackSerializer(serializers.ModelSerializer):
@@ -18,7 +18,7 @@ class TrackSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Track
-        fields = ['id', 'title', 'slug', 'likes_count', 'is_liked',]
+        fields = ['id', 'title', 'slug', 'likes_count', 'is_liked']
 
 
 class CommentUserSerializer(serializers.Serializer):
