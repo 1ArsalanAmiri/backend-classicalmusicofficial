@@ -106,27 +106,42 @@ class VerifyOTPView(APIView):
 
                 return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
 
-
             with transaction.atomic():
                 user, created = User.objects.get_or_create(phone_number=phone_number)
                 UserProfile.objects.get_or_create(user=user)
 
-
             cache.delete(cache_key_otp)
             cache.delete(cache_key_attempts)
-
 
             refresh = RefreshToken.for_user(user)
 
             message = "User registered successfully." if created else "User Logged in successfully."
             status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
 
-            return Response(
-                {"notice": message,
-                    "access": str(refresh.access_token),
-                    "refresh": str(refresh)}, status=status_code)
+            response = Response(
+                {
+                    "notice": message,
+                    "access": str(refresh.access_token)
+                },
+                status=status_code
+            )
+
+            response.set_cookie(
+                key='refresh_token',
+                value=str(refresh),
+                max_age=30 * 24 * 60 * 60,
+                httponly=True,
+                samesite='Lax',
+                secure=True,
+            )
+
+            return response
+
         except Exception as e:
-            return Response({"error": "An unexpected error occurred.", "details": str(e)},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {"error": "An unexpected error occurred.", "details": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 

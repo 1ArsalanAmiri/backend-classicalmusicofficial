@@ -3,14 +3,13 @@ from rest_framework import status, serializers
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework_simplejwt.exceptions import TokenError
-from .serializers import LogoutSerializer, ChangePhoneNumberSerializer, ResetPasswordSerializer, \
+from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
+from rest_framework_simplejwt.views import TokenObtainPairView ,TokenRefreshView
+from .serializers import LogoutSerializer, ResetPasswordSerializer, \
     DeleteAccountSerializer, LoginSerializer, VerifyDeleteAccountSerializer
-from .models import CustomUser
 import uuid
 import time
 from django.core.cache import cache
-from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 
 
@@ -21,7 +20,6 @@ MAX_OTP_ATTEMPTS = 3
 
 
 class LoginView(APIView):
-
     serializer_class = LoginSerializer
 
     def post(self, request):
@@ -29,51 +27,75 @@ class LoginView(APIView):
         password = request.data.get('password')
 
         user = authenticate(request, phone_number=phone_number, password=password)
-        if not user :
+        if not user:
             raise serializers.ValidationError("Username or password is incorrect.")
 
         refresh = RefreshToken.for_user(user)
 
-        return Response({"access": str(refresh.access_token), "refresh": str(refresh), "message": "Authenticated successfully"})
+        response = Response({
+            "access": str(refresh.access_token),
+            "message": "Authenticated successfully"
+        })
+
+        response.set_cookie(
+            key='refresh_token',
+            value=str(refresh),
+            max_age=30 * 24 * 60 * 60,
+            httponly=True,
+            samesite='Lax',
+            secure=True,
+        )
+
+        return response
 
 
 
 class LogoutView(APIView):
-
-    serializer_class = LogoutSerializer
     permission_classes = [IsAuthenticated]
 
-
     def post(self, request):
-        serializer = LogoutSerializer(data=request.data)
-
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        phone_number = serializer.validated_data["phone_number"]
-        refresh_token_string = serializer.validated_data.get("refresh")
+        refresh_token_string = request.COOKIES.get('refresh_token')
 
         if not refresh_token_string:
-            return Response({"error": "Refresh Token is Required"}, status=status.HTTP_400_BAD_REQUEST)
-
-        if not phone_number:
-            return Response({"error": "Phone number is required"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "Refresh Token is Required (Not found in cookies)"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         try:
             token = RefreshToken(refresh_token_string)
 
             if str(token['user_id']) != str(request.user.id):
-                return Response({"error": "You Dont Have Permission For This Operation."}, status=status.HTTP_403_FORBIDDEN)
+                return Response(
+                    {"error": "You Dont Have Permission For This Operation."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
 
             token.blacklist()
 
-            return Response({"message": "Logout Success, Blacklisted Token. "},status=status.HTTP_205_RESET_CONTENT)
+            response = Response(
+                {"message": "Logout Success, Blacklisted Token."},
+                status=status.HTTP_205_RESET_CONTENT
+            )
+
+            response.delete_cookie(
+                key='refresh_token',
+                samesite='Lax',
+            )
+
+            return response
 
         except TokenError:
-            return Response({"error": "Refresh Token Invalid Or Used."},status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "Refresh Token Invalid Or Used."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         except Exception as e:
-            return Response({"error": "Internal Server Error While Logging out. Please Try Again..."},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {"error": "Internal Server Error While Logging out. Please Try Again..."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 
@@ -101,7 +123,7 @@ class DeleteAccountView(APIView):
         serializer.is_valid(raise_exception=True)
 
         user = request.user
-        refresh_token_string = serializer.validated_data['refresh']
+        refresh_token_string = request.COOKIES.get('refresh_token')
 
         try:
             token = RefreshToken(refresh_token_string)
@@ -120,10 +142,14 @@ class DeleteAccountView(APIView):
 
         user.save()
 
-        return Response(
+        response = Response(
             {"message": "حساب کاربری شما با موفقیت غیرفعال و حذف شد."},
             status=status.HTTP_204_NO_CONTENT
         )
+
+        response.delete_cookie('refresh_token', samesite='Lax')
+
+        return response
 
 
 
@@ -134,7 +160,7 @@ class VerifyDeleteAccountView(APIView):
 
     def delete(self, request):
         otp_input = request.data.get("otp")
-        refresh_token = request.data.get("refresh")
+        refresh_token = request.COOKIES.get('refresh_token')
 
         if not otp_input or not refresh_token:
             return Response(
@@ -196,13 +222,76 @@ class VerifyDeleteAccountView(APIView):
             cache.delete(cache_key_otp)
             cache.delete(cache_key_attempts)
 
-            return Response(
+            response = Response(
                 {"notice": "حساب کاربری شما با موفقیت حذف شد."},
                 status=status.HTTP_204_NO_CONTENT
             )
+            response.delete_cookie('refresh_token', samesite='Lax')
+            return response
 
         except Exception as e:
             return Response(
                 {"error": "An unexpected error occurred.", "details": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+
+        if response.status_code == 200:
+            refresh_token = response.data.get('refresh')
+
+            if 'refresh' in response.data:
+                del response.data['refresh']
+
+            response.set_cookie(
+                key='refresh_token',
+                value=refresh_token,
+                max_age=30 * 24 * 60 * 60,
+                httponly=True,
+                samesite='Lax',
+                secure=True,
+            )
+        return response
+
+
+
+class CustomTokenRefreshView(TokenRefreshView):
+    def post(self, request, *args, **kwargs):
+        refresh_token = request.COOKIES.get('refresh_token')
+
+        if not refresh_token:
+            return Response(
+                {"detail": "توکن رفرش در کوکی یافت نشد."},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        data = request.data.copy()
+        data['refresh'] = refresh_token
+
+        serializer = self.get_serializer(data=data)
+
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError as e:
+            raise InvalidToken(e.args[0])
+
+        response_data = serializer.validated_data
+        response = Response(response_data, status=status.HTTP_200_OK)
+
+        if 'refresh' in response_data:
+            new_refresh = response_data['refresh']
+            del response.data['refresh']
+
+            response.set_cookie(
+                key='refresh_token',
+                value=new_refresh,
+                max_age=30 * 24 * 60 * 60,
+                httponly=True,
+                samesite='Lax',
+                secure=True,
+            )
+        return response
