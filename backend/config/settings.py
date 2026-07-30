@@ -302,19 +302,18 @@ rarfile.ORIGINAL_RARPATH = '/usr/bin/unrar'
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://clmusic.ir",
+    "https://www.clmusic.ir",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
 # CORS_ALLOW_ALL_ORIGINS = True
-
 
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     'https://clmusic.ir',
     'https://www.clmusic.ir',
-    "https://clmusic.ir:3000",
-    "https://www.clmusic.ir:3000",
 ]
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
