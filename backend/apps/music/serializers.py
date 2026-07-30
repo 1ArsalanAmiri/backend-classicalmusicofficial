@@ -19,10 +19,19 @@ class ArtistSerializer(serializers.ModelSerializer):
 
 class ArtistBasicSerializer(serializers.ModelSerializer):
     artist_type = serializers.CharField(source='get_artist_type_display', read_only=True)
+    image = serializers.SerializerMethodField()
 
     class Meta:
         model = Artist
-        fields = ['name', 'slug','artist_type']
+        fields = ['name', 'slug', 'artist_type', 'image']
+
+    def get_image(self, obj):
+        request = self.context.get('request')
+        if obj.image:
+            if request:
+                return request.build_absolute_uri(obj.image.url)
+            return obj.image.url
+        return None
 
 
 
@@ -124,12 +133,13 @@ class AlbumDetailSerializer(serializers.ModelSerializer):
     total_duration_ms = serializers.IntegerField(source='annotated_total_duration_ms', read_only=True)
     on_this_album = serializers.SerializerMethodField()
     main_artists = ArtistBasicSerializer(many=True, read_only=True)
+    label = serializers.SlugRelatedField(slug_field='slug', read_only=True)
 
     class Meta:
         model = Album
         fields = [
             'id', 'title', 'title_fa', 'slug', 'cover_image',
-            'release_year', 'description', 'main_artists', 'on_this_album','label',
+            'release_year', 'description', 'main_artists', 'on_this_album', 'label',
             'total_tracks', 'total_duration_ms', 'status', 'tracks'
         ]
 

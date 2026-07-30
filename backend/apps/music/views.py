@@ -288,8 +288,6 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         return Response({"message": "پخش با موفقیت ثبت شد."}, status=status.HTTP_200_OK)
 
 
-
-
 class GenreViewSet(viewsets.ReadOnlyModelViewSet):
 
     serializer_class = GenreSerializer
