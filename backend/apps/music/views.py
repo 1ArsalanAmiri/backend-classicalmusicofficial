@@ -113,6 +113,25 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
         all_artists = main_artists + track_artists
         return ArtistBasicSerializer(all_artists, many=True, context=self.context).data
 
+    def get_queryset(self):
+        qs = Album.objects.filter(status=PublishStatus.PUBLISHED).select_related('label').prefetch_related(
+            'main_artists',
+            Prefetch(
+                'tracks',
+                queryset=Track.objects.filter(status=PublishStatus.PUBLISHED).prefetch_related('artists')
+            )
+        ).annotate(annotated_total_tracks=Count("tracks"))
+
+        user = self.request.user
+        if user.is_authenticated:
+            album_ct = ContentType.objects.get_for_model(Album)
+            liked_subquery = Like.objects.filter(
+                user=user,
+                content_type=album_ct,
+                object_id=OuterRef('pk')
+            )
+            qs = qs.annotate(is_liked=Exists(liked_subquery))
+        return qs
 
     @extend_schema(methods=['POST'],request=CommentSerializer,responses={201: CommentSerializer},)
     @action(detail=True,methods=["get", "post"],url_path="comments",permission_classes=[IsAuthenticatedOrReadOnly],)
@@ -152,6 +171,7 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
             context["has_stream_access"] = False
             context["has_download_access"] = False
         return context
+
 
     def get_serializer_class(self):
         if self.action == 'list':

@@ -134,13 +134,14 @@ class AlbumDetailSerializer(serializers.ModelSerializer):
     on_this_album = serializers.SerializerMethodField()
     main_artists = ArtistBasicSerializer(many=True, read_only=True)
     label = serializers.SlugRelatedField(slug_field='slug', read_only=True)
+    is_liked = serializers.BooleanField(read_only=True, default=False)
 
     class Meta:
         model = Album
         fields = [
             'id', 'title', 'title_fa', 'slug', 'cover_image',
             'release_year', 'description', 'main_artists', 'on_this_album', 'label',
-            'total_tracks', 'total_duration_ms', 'status', 'tracks'
+            'total_tracks', 'total_duration_ms', 'likes_count', 'is_liked', 'status', 'tracks'
         ]
 
     def get_on_this_album(self, obj):
@@ -201,3 +202,6 @@ class LabelDetailSerializer(serializers.ModelSerializer):
     def get_singles(self, obj):
         singles = getattr(obj, 'prefetched_singles', [])
         return TrackSerializer(singles, many=True, context=self.context).data
+
+
+
