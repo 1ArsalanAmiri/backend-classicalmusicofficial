@@ -204,7 +204,6 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
             context["has_download_access"] = False
         return context
 
-
     @extend_schema(parameters=[
         OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),
         OpenApiParameter(name='search', description='جستجو در عنوان، خواننده و آهنگساز', required=False, type=OpenApiTypes.STR, location=OpenApiParameter.QUERY),
@@ -262,11 +261,34 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
         return response
 
-    @extend_schema(parameters=[OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),])
-    @action(detail=False, methods=['get'], url_path='chosen')
+    @extend_schema(parameters=[
+            OpenApiParameter(
+                name="page",
+                description="شماره صفحه",
+                required=False,
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+            ),
+            OpenApiParameter(
+                name="page_size",
+                description="تعداد آیتم در هر صفحه",
+                required=False,
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+            ),
+            OpenApiParameter(
+                name="search",
+                description="جستجو در عنوان، نام و لقب هنرمند",
+                required=False,
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+            ),
+        ])
+    @action(detail=False, methods=["get"], url_path="chosen")
     def chosen(self, request):
-
-        queryset = self.filter_queryset(self.get_queryset().filter(is_chosen=True))
+        queryset = self.filter_queryset(
+            self.get_queryset().filter(is_chosen=True)
+        )
 
         page = self.paginate_queryset(queryset)
         if page is not None:
