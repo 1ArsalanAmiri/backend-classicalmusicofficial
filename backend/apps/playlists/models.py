@@ -54,8 +54,7 @@ class Playlist(TimeStampedModel):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.title} - ({self.user.username})"
-
+        return f"{username} - {self.title}"
 
 class PlaylistItem(TimeStampedModel):
     playlist = models.ForeignKey(
