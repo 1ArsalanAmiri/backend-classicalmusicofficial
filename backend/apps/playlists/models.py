@@ -54,6 +54,7 @@ class Playlist(TimeStampedModel):
         super().save(*args, **kwargs)
 
     def __str__(self):
+        username = self.user.username if self.user else "Unknown"
         return f"{username} - {self.title}"
 
 class PlaylistItem(TimeStampedModel):
