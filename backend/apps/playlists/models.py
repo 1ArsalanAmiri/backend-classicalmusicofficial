@@ -34,8 +34,8 @@ class Playlist(TimeStampedModel):
         upload_to="playlists/covers/",
         null=True, blank=True
     )
-    is_public = models.BooleanField(_("عمومی است؟"), default=False)
-    is_editorial = models.BooleanField(_("پلی‌لیست ادیتوریال است؟"), default=False)
+    is_public = models.BooleanField(_("عمومی"), default=False)
+    is_editorial = models.BooleanField(_("پلی‌لیست ادیتوریال"), default=False)
     tracks = models.ManyToManyField(
         Track,
         through='PlaylistItem',
