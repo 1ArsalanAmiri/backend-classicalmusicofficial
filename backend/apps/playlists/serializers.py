@@ -14,21 +14,26 @@ class PlaylistTrackSerializer(serializers.ModelSerializer):
 
 
 class PlaylistListSerializer(serializers.ModelSerializer):
+    total_tracks = serializers.IntegerField(source='annotated_total_tracks', read_only=True)
+    total_duration_ms = serializers.IntegerField(source='annotated_total_duration_ms', read_only=True)
+
     class Meta:
         model = Playlist
         fields = [
-            "id", "slug", "title", "title_fa", "cover_image",
+            "id", "slug", "title", "title_fa", "cover_image", "is_editorial",
             "total_tracks", "total_duration_ms", "created_at",
         ]
 
 
 class PlaylistDetailSerializer(serializers.ModelSerializer):
     tracks = PlaylistTrackSerializer(source="playlist_tracks", many=True, read_only=True)
+    total_tracks = serializers.IntegerField(source='annotated_total_tracks', read_only=True)
+    total_duration_ms = serializers.IntegerField(source='annotated_total_duration_ms', read_only=True)
 
     class Meta:
         model = Playlist
         fields = [
-            "id", "slug", "title", "title_fa", "description",
+            "id", "slug", "title", "title_fa", "description", "is_editorial",
             "cover_image", "total_tracks", "total_duration_ms",
             "created_at", "updated_at", "tracks",
         ]

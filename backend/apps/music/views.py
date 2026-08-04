@@ -1,29 +1,30 @@
 from django.http import HttpResponse
 import mimetypes
-from rest_framework.permissions import AllowAny , IsAuthenticated , IsAuthenticatedOrReadOnly
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.shortcuts import get_object_or_404
 from .models import *
 from .tasks import process_album_archive_task
-from rest_framework import viewsets, filters , status
+from rest_framework import viewsets, filters, status
 from django_filters.rest_framework import DjangoFilterBackend
 from .serializers import *
 from apps.common.pagination import ClassicalMusicPagination
-from apps.common.filters import AlbumFilter,TrackFilter
+from apps.common.filters import AlbumFilter, TrackFilter
 from django.db import transaction
 from rest_framework.decorators import action
-from apps.common.permissions import user_has_stream_access ,user_has_all_access
+from apps.common.permissions import user_has_stream_access, user_has_all_access
 from apps.common.models import PublishStatus
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 from rest_framework.viewsets import ReadOnlyModelViewSet
-from apps.interactions.mixins import LikableMixin, FollowableMixin ,CommentableMixin
-from django.db.models import F
+from apps.interactions.mixins import LikableMixin, FollowableMixin, CommentableMixin
+from django.db.models import F, Count, Sum, Prefetch, OuterRef, Exists
+from django.db.models.functions import Coalesce
 from django.views.decorators.vary import vary_on_headers
-from ..interactions.models import Comment
-from ..interactions.serializers import CommentSerializer , CommentCreateSerializer
+from ..interactions.models import Comment, Like
+from ..interactions.serializers import CommentSerializer, CommentCreateSerializer
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 from asgiref.sync import sync_to_async
@@ -33,13 +34,9 @@ import tempfile
 import zipfile
 from django.core.files import File
 from django.utils import timezone
-from .models import Album, AlbumArchiveUpload, Track, Artist ,Genre
-from django.db.models import Count, Prefetch
 from urllib.parse import quote
 from django.core.files.storage import default_storage
 from django.contrib.contenttypes.models import ContentType
-from django.db.models import OuterRef, Exists
-from apps.interactions.models import Like
 
 
 class AlbumBatchUploadAPIView(APIView):
@@ -80,47 +77,34 @@ class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
     serializer_class = ArtistSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['artist_type', 'era', 'country']
-    search_fields = ['name' , 'nickname']
+    search_fields = ['name', 'nickname']
     lookup_field = 'slug'
 
 
 class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     permission_classes = [AllowAny]
-    queryset = Album.objects.filter(status=PublishStatus.PUBLISHED).select_related('label').prefetch_related(
-        'main_artists',
-        Prefetch(
-            'tracks',
-            queryset=Track.objects.filter(status=PublishStatus.PUBLISHED).prefetch_related('artists')
-        )
-    ).annotate(annotated_total_tracks=Count("tracks"))
     pagination_class = ClassicalMusicPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = AlbumFilter
-    search_fields = ['title', 'main_artists__name', 'main_artists__nickname', 'credits__artist__name','credits__artist__nickname']
+    search_fields = ['title', 'main_artists__name', 'main_artists__nickname', 'credits__artist__name',
+                     'credits__artist__nickname']
     ordering_fields = ['release_year', 'title']
     lookup_field = 'slug'
 
-    def get_on_this_album(self, obj):
-        main_artists = list(obj.main_artists.all())
-        main_artists_ids = {artist.id for artist in main_artists}
-        track_artists = []
-        for track in obj.tracks.all():
-            for artist in track.artists.all():
-                if artist.id not in main_artists_ids:
-                    track_artists.append(artist)
-                    main_artists_ids.add(artist.id)
-
-        all_artists = main_artists + track_artists
-        return ArtistBasicSerializer(all_artists, many=True, context=self.context).data
-
     def get_queryset(self):
-        qs = Album.objects.filter(status=PublishStatus.PUBLISHED).select_related('label').prefetch_related(
+        qs = Album.objects.filter(
+            status=PublishStatus.PUBLISHED,
+            album_type=AlbumType.OFFICIAL
+        ).select_related('label').prefetch_related(
             'main_artists',
             Prefetch(
                 'tracks',
                 queryset=Track.objects.filter(status=PublishStatus.PUBLISHED).prefetch_related('artists')
             )
-        ).annotate(annotated_total_tracks=Count("tracks"))
+        ).annotate(
+            annotated_total_tracks=Count("tracks", distinct=True),
+            annotated_total_duration_ms=Coalesce(Sum("tracks__duration_ms"), 0)
+        )
 
         user = self.request.user
         if user.is_authenticated:
@@ -133,8 +117,8 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
             qs = qs.annotate(is_liked=Exists(liked_subquery))
         return qs
 
-    @extend_schema(methods=['POST'],request=CommentSerializer,responses={201: CommentSerializer},)
-    @action(detail=True,methods=["get", "post"],url_path="comments",permission_classes=[IsAuthenticatedOrReadOnly],)
+    @extend_schema(methods=['POST'], request=CommentSerializer, responses={201: CommentSerializer})
+    @action(detail=True, methods=["get", "post"], url_path="comments", permission_classes=[IsAuthenticatedOrReadOnly])
     def comments(self, request, slug=None):
         album = self.get_object()
 
@@ -172,7 +156,6 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
             context["has_download_access"] = False
         return context
 
-
     def get_serializer_class(self):
         if self.action == 'list':
             return AlbumListSerializer
@@ -193,7 +176,10 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
     pagination_class = ClassicalMusicPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = TrackFilter
-    queryset = Track.objects.filter(status=PublishStatus.PUBLISHED).select_related('album').prefetch_related('artists',Prefetch('album__main_artists', queryset=Artist.objects.all()))
+    queryset = Track.objects.filter(status=PublishStatus.PUBLISHED).select_related('album').prefetch_related('artists',
+                                                                                                             Prefetch(
+                                                                                                                 'album__main_artists',
+                                                                                                                 queryset=Artist.objects.all()))
     serializer_class = TrackSerializer
     filterset_fields = ['instrument', 'album__slug']
     search_fields = ['title', 'artists__name', 'artists__nickname']
@@ -225,9 +211,12 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         return context
 
     @extend_schema(parameters=[
-        OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY),
-        OpenApiParameter(name='search', description='جستجو در عنوان، خواننده و آهنگساز', required=False, type=OpenApiTypes.STR, location=OpenApiParameter.QUERY),
-        OpenApiParameter(name='instrument', description='فیلتر بر اساس ساز', required=False, type=OpenApiTypes.STR, location=OpenApiParameter.QUERY),
+        OpenApiParameter(name='page', description='شماره صفحه', required=False, type=OpenApiTypes.INT,
+                         location=OpenApiParameter.QUERY),
+        OpenApiParameter(name='search', description='جستجو در عنوان، خواننده و آهنگساز', required=False,
+                         type=OpenApiTypes.STR, location=OpenApiParameter.QUERY),
+        OpenApiParameter(name='instrument', description='فیلتر بر اساس ساز', required=False, type=OpenApiTypes.STR,
+                         location=OpenApiParameter.QUERY),
     ])
     @action(detail=False, methods=['get'], url_path='singles')
     def singles(self, request):
@@ -252,10 +241,9 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         if not track.audio_file:
             return Response({"detail": "فایل صوتی یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
         if not user_has_stream_access(request.user):
-            return Response({"detail": "شما اشتراک فعال برای پخش این آهنگ را ندارید."},status=status.HTTP_403_FORBIDDEN)
-        file_path = track.audio_file.name
-        content_type, _ = mimetypes.guess_type(file_path)
-        file_url = track.audio_file.url
+            return Response({"detail": "شما اشتراک فعال برای پخش این آهنگ را ندارید."},
+                            status=status.HTTP_403_FORBIDDEN)
+
         safe_filename = os.path.basename(track.audio_file.name)
         response = HttpResponse()
         response['X-Accel-Redirect'] = f"/protected-media/{track.audio_file.name}"
@@ -268,42 +256,25 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         if not track.audio_file:
             return Response({"detail": "فایل صوتی یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
         if not user_has_all_access(request.user):
-            return Response({"detail": "شما اشتراک فعال برای دانلود این آهنگ را ندارید."}, status=status.HTTP_403_FORBIDDEN)
-        file_path = track.audio_file.name
-        content_type, _ = mimetypes.guess_type(file_path)
-        file_url = track.audio_file.url
+            return Response({"detail": "شما اشتراک فعال برای دانلود این آهنگ را ندارید."},
+                            status=status.HTTP_403_FORBIDDEN)
+
         accel_path = f"/protected-media/{track.audio_file.name}"
         response = HttpResponse()
         response['X-Accel-Redirect'] = accel_path
         response['Content-Type'] = ''
-        from urllib.parse import quote
-        safe_filename = quote(file_path.split("/")[-1])
+        safe_filename = quote(track.audio_file.name.split("/")[-1])
         response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
         return response
 
     @extend_schema(parameters=[
-            OpenApiParameter(
-                name="page",
-                description="شماره صفحه",
-                required=False,
-                type=OpenApiTypes.INT,
-                location=OpenApiParameter.QUERY,
-            ),
-            OpenApiParameter(
-                name="page_size",
-                description="تعداد آیتم در هر صفحه",
-                required=False,
-                type=OpenApiTypes.INT,
-                location=OpenApiParameter.QUERY,
-            ),
-            OpenApiParameter(
-                name="search",
-                description="جستجو در عنوان، نام و لقب هنرمند",
-                required=False,
-                type=OpenApiTypes.STR,
-                location=OpenApiParameter.QUERY,
-            ),
-        ])
+        OpenApiParameter(name="page", description="شماره صفحه", required=False, type=OpenApiTypes.INT,
+                         location=OpenApiParameter.QUERY),
+        OpenApiParameter(name="page_size", description="تعداد آیتم در هر صفحه", required=False, type=OpenApiTypes.INT,
+                         location=OpenApiParameter.QUERY),
+        OpenApiParameter(name="search", description="جستجو در عنوان، نام و لقب هنرمند", required=False,
+                         type=OpenApiTypes.STR, location=OpenApiParameter.QUERY),
+    ])
     @action(detail=False, methods=["get"], url_path="chosen")
     def chosen(self, request):
         queryset = self.filter_queryset(
@@ -322,16 +293,21 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
     def record_play(self, request, slug=None):
         track = self.get_object()
         Track.objects.filter(id=track.id).update(play_count=F('play_count') + 1)
-        history, created = PlayHistory.objects.update_or_create(user=request.user,track=track,defaults={'last_played_at': timezone.now()})
+
+        history, created = PlayHistory.objects.get_or_create(
+            user=request.user,
+            track=track,
+            defaults={'last_played_at': timezone.now(), 'play_count': 1}
+        )
         if not created:
-            PlayHistory.objects.filter(id=history.id).update(play_count=F('play_count') + 1)
-        else:
-            PlayHistory.objects.filter(id=history.id).update(play_count=1)
+            PlayHistory.objects.filter(id=history.id).update(
+                play_count=F('play_count') + 1,
+                last_played_at=timezone.now()
+            )
         return Response({"message": "پخش با موفقیت ثبت شد."}, status=status.HTTP_200_OK)
 
 
 class GenreViewSet(viewsets.ReadOnlyModelViewSet):
-
     serializer_class = GenreSerializer
     lookup_field = 'slug'
 
@@ -368,7 +344,6 @@ class InstrumentViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class EraListView(APIView):
-
     @method_decorator(cache_page(60 * 60 * 24 * 7))
     def get(self, request):
         eras = [
@@ -510,7 +485,8 @@ def download_album_zip_api(request, album_slug):
     tracks = list(album.tracks.all())
 
     if not tracks:
-        return Response({"error": "آهنگی توی این آلبوم پیدا نشد. دوباره برسی کنید یا به پشتیبانی پیام بدید."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"error": "آهنگی توی این آلبوم پیدا نشد. دوباره بررسی کنید یا به پشتیبانی پیام بدید."},
+                        status=status.HTTP_404_NOT_FOUND)
 
     with transaction.atomic():
         existing_export = AlbumZipExport.objects.select_for_update().filter(
@@ -545,15 +521,15 @@ def download_album_zip_api(request, album_slug):
             export_record.status = 'completed'
             export_record.save()
 
-        except Exception as e:
+        except Exception:
             if os.path.exists(temp_zip.name):
                 os.unlink(temp_zip.name)
-            return Response({"error": "ساخت فایل زیپ به مشکل خورد ، به پشتیبانی پیام بدید."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"error": "ساخت فایل زیپ به مشکل خورد، به پشتیبانی پیام بدید."},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         finally:
             if os.path.exists(temp_zip.name):
                 os.unlink(temp_zip.name)
 
-    file_url = export_record.zip_file.url
     nginx_internal_path = f"/protected-media/{export_record.zip_file.name}"
 
     response = HttpResponse()

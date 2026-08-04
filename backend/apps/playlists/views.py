@@ -3,7 +3,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from django.shortcuts import get_object_or_404
-from django.db.models import Prefetch , Max
+from django.db.models import Prefetch, Max, Count, Sum, Subquery, OuterRef, IntegerField
+from django.db.models.functions import Coalesce
 
 from .models import Playlist, PlaylistTrack
 from apps.music.models import Track
@@ -13,7 +14,7 @@ from .serializers import (
     PlaylistCreateUpdateSerializer
 )
 from django.db import transaction
-from apps.interactions.mixins import LikableMixin , FollowableMixin
+from apps.interactions.mixins import LikableMixin, FollowableMixin
 from apps.common.pagination import CustomMetaDataPagination
 
 
@@ -29,7 +30,31 @@ class PlaylistViewSet(LikableMixin, FollowableMixin, viewsets.ModelViewSet):
         return [IsAdminUser()]
 
     def get_queryset(self):
-        queryset = Playlist.objects.all()
+        track_count_sq = (
+            PlaylistTrack.objects
+            .filter(playlist=OuterRef('pk'))
+            .order_by()
+            .values('playlist')
+            .annotate(c=Count('id'))
+            .values('c')
+        )
+        duration_sq = (
+            PlaylistTrack.objects
+            .filter(playlist=OuterRef('pk'))
+            .order_by()
+            .values('playlist')
+            .annotate(s=Sum('track__duration_ms'))
+            .values('s')
+        )
+
+        queryset = Playlist.objects.annotate(
+            annotated_total_tracks=Coalesce(
+                Subquery(track_count_sq, output_field=IntegerField()), 0
+            ),
+            annotated_total_duration_ms=Coalesce(
+                Subquery(duration_sq, output_field=IntegerField()), 0
+            ),
+        )
 
         if self.action == "retrieve":
             queryset = queryset.prefetch_related(
@@ -52,9 +77,21 @@ class PlaylistViewSet(LikableMixin, FollowableMixin, viewsets.ModelViewSet):
             return PlaylistDetailSerializer
         return PlaylistListSerializer
 
+    def _block_editorial_manual_track_edit(self, playlist):
+        if playlist.is_editorial:
+            return Response(
+                {"detail": "این پلی‌لیست به‌صورت خودکار از یک آلبوم ادیتوریال ساخته شده و ترک‌های آن را نمی‌توان دستی ویرایش کرد."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return None
+
     @action(detail=True, methods=['post'], url_path='add-track')
     def add_track(self, request, slug=None):
         playlist = self.get_object()
+        blocked = self._block_editorial_manual_track_edit(playlist)
+        if blocked:
+            return blocked
+
         track_slug = request.data.get("track_slug")
         if not track_slug:
             return Response({"detail": "track_slug is required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -76,10 +113,13 @@ class PlaylistViewSet(LikableMixin, FollowableMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='remove-track')
     def remove_track(self, request, slug=None):
         playlist = self.get_object()
+        blocked = self._block_editorial_manual_track_edit(playlist)
+        if blocked:
+            return blocked
+
         track_slug = request.data.get('track_slug')
         track = get_object_or_404(Track, slug=track_slug)
         deleted_count, _ = PlaylistTrack.objects.filter(playlist=playlist, track=track).delete()
         if deleted_count == 0:
             return Response({"error": "Track not found in this playlist."}, status=status.HTTP_404_NOT_FOUND)
         return Response(status=status.HTTP_204_NO_CONTENT)
-

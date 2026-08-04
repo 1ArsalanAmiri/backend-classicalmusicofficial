@@ -15,9 +15,8 @@ from django.db import transaction
 from celery import shared_task
 from mutagen import File as MutagenFile
 from django.utils.text import get_valid_filename
-from .models import AlbumArchiveUpload, Track, Artist, AlbumZipExport, Genre
+from .models import AlbumArchiveUpload, Track, Artist, AlbumZipExport, Genre, AlbumType
 from .utils import MockStorageConnector
-
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +72,6 @@ def process_album_archive_task(self, upload_record_id: int):
 
         used_track_numbers = set(album.tracks.values_list('track_number', flat=True))
 
-
         for index, file_path in enumerate(audio_files):
             raw_filename = os.path.basename(file_path)
             filename = get_valid_filename(raw_filename).replace(" ", "_").replace("%", "_")
@@ -122,7 +120,6 @@ def process_album_archive_task(self, upload_record_id: int):
                         logger.warning(f"Failed to extract cover from {file_path}: {cover_error}")
 
                 # -------- Metadata Extraction --------
-                # 1. Title & Slug
                 raw_title_list = audio_meta.get("title", [filename])
                 raw_title = raw_title_list[0] if raw_title_list else filename
                 safe_title = (str(raw_title) or "Untitled")[:450]
@@ -134,7 +131,6 @@ def process_album_archive_task(self, upload_record_id: int):
                 if not safe_slug:
                     safe_slug = f"track-{uuid.uuid4().hex[:10]}"
 
-                # 2. Track Number
                 raw_track_number_list = audio_meta.get("tracknumber", [str(index + 1)])
                 raw_track_number = raw_track_number_list[0] if raw_track_number_list else str(index + 1)
                 try:
@@ -146,7 +142,6 @@ def process_album_archive_task(self, upload_record_id: int):
                     track_number += 1
                 used_track_numbers.add(track_number)
 
-                # 3. Artist Extraction
                 album_artists = list(album.main_artists.all())
 
                 if album_artists:
@@ -168,15 +163,12 @@ def process_album_archive_task(self, upload_record_id: int):
                         )
                         track_artists.append(unknown_artist)
 
-                # -----------------------
-                # 4. Genre
                 genre_name_list = audio_meta.get("genre", [None])
                 genre_name = genre_name_list[0] if genre_name_list else None
                 genre_obj = None
                 if genre_name:
                     genre_obj = Genre.objects.filter(name=str(genre_name)).only("id").first()
 
-                # 5. Duration
                 duration_ms = 0
                 if hasattr(audio_meta, "info") and hasattr(audio_meta.info, "length"):
                     try:
@@ -184,17 +176,16 @@ def process_album_archive_task(self, upload_record_id: int):
                     except (ValueError, TypeError):
                         pass
 
-                # -------- Upload file --------
                 target_relative_path = f"tracks/{album.slug}/{filename}"
                 saved_path = None
                 try:
                     with open(file_path, 'rb') as f:
                         saved_path = default_storage.save(target_relative_path, File(f))
-
                 except Exception as upload_err:
                     logger.error(f"Upload failed for {file_path}: {upload_err}")
                     task_warnings.append(f"خطا در ذخیره‌سازی فایل {filename}")
                     continue
+
                 tracks_to_update.append({
                     "album": album,
                     "track_number": track_number,
@@ -208,7 +199,7 @@ def process_album_archive_task(self, upload_record_id: int):
                     },
                     "artist_objs": track_artists
                 })
-                # -------- Progress update --------
+
                 if index % 5 == 0 or index == total_files - 1:
                     progress = int(((index + 1) / total_files) * 90)
                     AlbumArchiveUpload.objects.filter(id=upload_record_id).update(progress=progress)
@@ -218,7 +209,6 @@ def process_album_archive_task(self, upload_record_id: int):
                 task_warnings.append(f"خطا در پردازش کامل فایل {filename}")
                 continue
 
-        # -------- Database Save --------
         # -------- Database Save --------
         saved_tracks_count = 0
         for data in tracks_to_update:
@@ -237,6 +227,15 @@ def process_album_archive_task(self, upload_record_id: int):
             except Exception as db_err:
                 logger.error(f"DB Update failed for track {track_title}: {db_err}")
                 task_warnings.append(f"خطای دیتابیس در ذخیره ترک {track_title}")
+
+        # -------- Auto-Sync پلی‌لیست‌های ادیتوریال --------
+        if album.album_type == AlbumType.EDITORIAL_PLAYLIST:
+            from apps.playlists.models import sync_editorial_album_to_playlist
+            try:
+                sync_editorial_album_to_playlist(album)
+            except Exception as sync_err:
+                logger.error(f"Editorial playlist sync failed for album {album.id}: {sync_err}")
+                task_warnings.append("خطا در همگام‌سازی پلی‌لیست ادیتوریال")
 
         upload_record.status = "completed"
         upload_record.progress = 100
@@ -257,33 +256,14 @@ def process_album_archive_task(self, upload_record_id: int):
             upload_record.error_log = str(e)
             upload_record.save(update_fields=["status", "error_log"])
         logger.exception(f"Unexpected error in task {upload_record_id}")
-        # Retrying only on unexpected exceptions (like DB deadlock, storage timeouts, etc.)
         raise self.retry(exc=e, countdown=10)
 
     finally:
-        tracks_to_create = []
-        for data in tracks_to_update:
-            track = Track(
-                album=data["album"],
-                track_number=data["track_number"],
-                title=data["defaults"].get("title"),
-                slug=data["defaults"].get("slug"),
-                genre=data["defaults"].get("genre"),
-                duration_ms=data["defaults"].get("duration_ms"),
-                audio_file=data["defaults"].get("audio_file"),
-                status=data["defaults"].get("status")
-            )
-            tracks_to_create.append(track)
-
-        if tracks_to_create:
-            Track.objects.bulk_create(tracks_to_create)
-            
         if temp_dir and os.path.exists(temp_dir):
             try:
                 shutil.rmtree(temp_dir)
             except Exception as cleanup_err:
                 logger.error(f"Failed to delete temp dir {temp_dir}: {cleanup_err}")
-
 
 
 @shared_task
@@ -306,7 +286,6 @@ def extract_track_metadata_task(track_id):
         pass
     except Exception as e:
         logger.error(f"Metadata extraction failed for track {track_id}: {e}")
-
 
 
 @shared_task

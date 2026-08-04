@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Artist, Album, Track , Genre, Instrument , Label
+from .models import Artist, Album, Track, Genre, Instrument, Label
 from drf_spectacular.utils import extend_schema_field
 from rest_framework.reverse import reverse
 
@@ -11,10 +11,9 @@ class ArtistSerializer(serializers.ModelSerializer):
     class Meta:
         model = Artist
         fields = [
-            'name', 'slug', 'nickname', 'country','birth_year','death_year', 'artist_type', 'artist_type_display',
-            'era', 'era_display', 'image', 'biography','likes_count','followers_count'
+            'name', 'slug', 'nickname', 'country', 'birth_year', 'death_year', 'artist_type', 'artist_type_display',
+            'era', 'era_display', 'image', 'biography', 'likes_count', 'followers_count'
         ]
-
 
 
 class ArtistBasicSerializer(serializers.ModelSerializer):
@@ -34,13 +33,10 @@ class ArtistBasicSerializer(serializers.ModelSerializer):
         return None
 
 
-
 class RelatedArtistSerializer(serializers.ModelSerializer):
-
     class Meta:
         model = Artist
         fields = ["name", "slug"]
-
 
 
 class TrackSerializer(serializers.ModelSerializer):
@@ -49,7 +45,7 @@ class TrackSerializer(serializers.ModelSerializer):
     audio_url = serializers.SerializerMethodField()
     duration_seconds = serializers.SerializerMethodField()
     download_url = serializers.SerializerMethodField()
-    album = serializers.SlugRelatedField(slug_field='slug',read_only=True)
+    album = serializers.SlugRelatedField(slug_field='slug', read_only=True)
     is_liked = serializers.BooleanField(read_only=True, default=False)
 
     class Meta:
@@ -102,7 +98,7 @@ class TrackSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if request:
             try:
-                return reverse('track-download',kwargs={'slug': obj.slug},request=request)
+                return reverse('track-download', kwargs={'slug': obj.slug}, request=request)
             except Exception:
                 return None
         return None
@@ -114,7 +110,6 @@ class TrackSerializer(serializers.ModelSerializer):
         return obj.duration_ms // 1000
 
 
-
 class AlbumListSerializer(serializers.ModelSerializer):
     total_tracks = serializers.IntegerField(read_only=True)
 
@@ -124,7 +119,6 @@ class AlbumListSerializer(serializers.ModelSerializer):
             'title', 'slug', 'cover_image',
             'release_year', 'total_tracks'
         ]
-
 
 
 class AlbumDetailSerializer(serializers.ModelSerializer):
@@ -145,14 +139,13 @@ class AlbumDetailSerializer(serializers.ModelSerializer):
         ]
 
     def get_on_this_album(self, obj):
-        main_artists_ids = obj.main_artists.values_list('id', flat=True)
-        track_artists_ids = obj.tracks.values_list('artists__id', flat=True)
-        all_artist_ids = set(main_artists_ids) | set(track_artists_ids)
-        all_artist_ids.discard(None)
-        artists = Artist.objects.filter(id__in=all_artist_ids).distinct()
-        serializer = ArtistBasicSerializer(artists, many=True, context=self.context)
-        return serializer.data
+        artists_dict = {artist.id: artist for artist in obj.main_artists.all()}
+        for track in obj.tracks.all():
+            for artist in track.artists.all():
+                if artist.id not in artists_dict:
+                    artists_dict[artist.id] = artist
 
+        return ArtistBasicSerializer(list(artists_dict.values()), many=True, context=self.context).data
 
 
 class GenreSerializer(serializers.ModelSerializer):
@@ -163,7 +156,6 @@ class GenreSerializer(serializers.ModelSerializer):
         fields = ['name', 'slug', 'track_count']
 
 
-
 class InstrumentSerializer(serializers.ModelSerializer):
     track_count = serializers.IntegerField(read_only=True)
 
@@ -172,12 +164,10 @@ class InstrumentSerializer(serializers.ModelSerializer):
         fields = ['name', 'slug', 'track_count']
 
 
-
 class LabelListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Label
-        fields = ['name', 'slug', 'logo' , 'likes_count','followers_count']
-
+        fields = ['name', 'slug', 'logo', 'likes_count', 'followers_count']
 
 
 class LabelDetailSerializer(serializers.ModelSerializer):
@@ -202,6 +192,3 @@ class LabelDetailSerializer(serializers.ModelSerializer):
     def get_singles(self, obj):
         singles = getattr(obj, 'prefetched_singles', [])
         return TrackSerializer(singles, many=True, context=self.context).data
-
-
-

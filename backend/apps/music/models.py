@@ -2,14 +2,15 @@ from django.db import models
 from django.core.validators import FileExtensionValidator
 from django.db.models import Sum
 from django.utils.translation import gettext_lazy as _
-from apps.common.models import (TimeStampedModel, ArchiveUploadStatus, PublishStatus,
-    unique_slugify, artist_image_path , album_cover_path,
-    track_cover_path ,track_audio_path, AlbumManager)
+from apps.common.models import (
+    TimeStampedModel, ArchiveUploadStatus, PublishStatus,
+    unique_slugify, artist_image_path, album_cover_path,
+    track_cover_path, track_audio_path, AlbumManager
+)
 from uuid import uuid4
 from logging import getLogger
 from django.conf import settings
 from django.utils import timezone
-
 
 logger = getLogger(__name__)
 
@@ -17,7 +18,6 @@ logger = getLogger(__name__)
 # Choices
 
 class ArtistRole(models.TextChoices):
-    # ==========================
     COMPOSER = "composer", _("آهنگساز")
     CONDUCTOR = "conductor", _("رهبر ارکستر")
     ORCHESTRA = "orchestra", _("ارکستر")
@@ -108,8 +108,6 @@ class Instrument(TimeStampedModel):
         return self.name
 
 
-# Artist & Label Model
-
 class Label(TimeStampedModel):
     name = models.CharField(_("نام لیبل"), max_length=255, unique=True)
     slug = models.SlugField(_("اسلاگ"), max_length=300, unique=True, allow_unicode=True)
@@ -127,7 +125,6 @@ class Label(TimeStampedModel):
     likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
     followers_count = models.PositiveIntegerField(_("تعداد فالوور"), default=0)
 
-
     class Meta:
         verbose_name = _("لیبل (ناشر)")
         verbose_name_plural = _("لیبل‌ها")
@@ -142,19 +139,25 @@ class Label(TimeStampedModel):
         return self.name
 
 
+class AlbumType(models.TextChoices):
+    OFFICIAL = 'official', _('آلبوم رسمی')
+    EDITORIAL_PLAYLIST = 'editorial_playlist', _('پلی‌لیست ادیتوریال')
+
+
 class Album(TimeStampedModel):
-    main_artists = models.ManyToManyField('Artist',blank=True,verbose_name=_("آرتیست‌های اصلی"),related_name="main_albums")
+    main_artists = models.ManyToManyField('Artist', blank=True, verbose_name=_("آرتیست‌های اصلی"), related_name="main_albums")
     title = models.CharField(_("عنوان آلبوم"), max_length=300, blank=True, default="untitled")
     title_fa = models.CharField(_("عنوان فارسی"), max_length=300, blank=True, null=True)
     slug = models.SlugField(_("اسلاگ"), max_length=300, unique=True, blank=True, allow_unicode=True)
     source_path = models.CharField(max_length=500, unique=True, blank=True, null=True)
-    cover_image = models.ImageField(_("تصویر آلبوم"), upload_to=album_cover_path, null=True, blank=True,validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])])
+    cover_image = models.ImageField(_("تصویر آلبوم"), upload_to=album_cover_path, null=True, blank=True, validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])])
     release_year = models.PositiveIntegerField(_("سال انتشار"), null=True, blank=True)
     description = models.TextField(_("توضیحات نهایی آلبوم"), blank=True)
-    status = models.CharField(_("وضعیت انتشار"), max_length=20, choices=PublishStatus.choices,default=PublishStatus.PUBLISHED, db_index=True)
-    label = models.ForeignKey(Label, on_delete=models.SET_NULL, null=True, blank=True, related_name="albums_by_label",verbose_name=_("لیبل ناشر"))
+    status = models.CharField(_("وضعیت انتشار"), max_length=20, choices=PublishStatus.choices, default=PublishStatus.PUBLISHED, db_index=True)
+    label = models.ForeignKey(Label, on_delete=models.SET_NULL, null=True, blank=True, related_name="albums_by_label", verbose_name=_("لیبل ناشر"))
     likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
     comments_count = models.PositiveIntegerField(_("تعداد کامنت"), default=0)
+    album_type = models.CharField(_("نوع انتشار"), max_length=20, choices=AlbumType.choices, default=AlbumType.OFFICIAL, db_index=True)
     objects = AlbumManager()
 
     class Meta:
@@ -174,8 +177,8 @@ class Album(TimeStampedModel):
 
     @property
     def total_duration_ms(self):
-        if hasattr(self, 'annotated_total_duration'):
-            return self.annotated_total_duration or 0
+        if hasattr(self, 'annotated_total_duration_ms'):
+            return self.annotated_total_duration_ms or 0
         return self.tracks.aggregate(total=Sum("duration_ms"))["total"] or 0
 
     @property
@@ -191,10 +194,10 @@ class Artist(TimeStampedModel):
     nickname = models.CharField(_("نام مستعار"), max_length=255, blank=True, null=True, help_text=_("در صورت نداشتن نام مستعار، خالی بگذارید"))
     slug = models.SlugField(_("اسلاگ"), max_length=120, unique=True, blank=True, allow_unicode=True)
     country = models.CharField(_("ملیت/کشور"), max_length=100, blank=True)
-    artist_type = models.CharField(_("نوع آرتیست"),max_length=20,choices=ArtistRole.choices,default=ArtistRole.OTHER,db_index=True)
-    related_artists = models.ManyToManyField("self",blank=True,symmetrical=False)
-    era = models.CharField(_("دوره زمانی"),max_length=20,choices=EraChoices.choices,null=True,blank=True,db_index=True)
-    image = models.ImageField(_("عکس"),upload_to=artist_image_path,null=True,blank=True,validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])])
+    artist_type = models.CharField(_("نوع آرتیست"), max_length=20, choices=ArtistRole.choices, default=ArtistRole.OTHER, db_index=True)
+    related_artists = models.ManyToManyField("self", blank=True, symmetrical=False)
+    era = models.CharField(_("دوره زمانی"), max_length=20, choices=EraChoices.choices, null=True, blank=True, db_index=True)
+    image = models.ImageField(_("عکس"), upload_to=artist_image_path, null=True, blank=True, validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])])
     biography = models.TextField(_("بیوگرافی"), blank=True)
 
     birth_year = models.PositiveIntegerField(_("سال تولد"), null=True, blank=True, help_text=_("مثال:1958"))
@@ -202,8 +205,6 @@ class Artist(TimeStampedModel):
 
     likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
     followers_count = models.PositiveIntegerField(_("تعداد فالوور"), default=0)
-
-
 
     class Meta:
         verbose_name = _("آرتیست")
@@ -237,14 +238,12 @@ class AlbumCredit(TimeStampedModel):
         return f"{self.artist.name} - {self.get_role_display()} in {self.album.title}"
 
 
-# Album Model
-
 class AlbumArchiveUpload(TimeStampedModel):
     album = models.ForeignKey(Album, on_delete=models.CASCADE, related_name="archive_uploads")
     archive_file = models.FileField(upload_to="protected/tmp/archives/")
     task_id = models.CharField(max_length=255, blank=True, null=True)
     status = models.CharField(max_length=20, choices=ArchiveUploadStatus.choices, default=ArchiveUploadStatus.PENDING)
-    progress = models.PositiveIntegerField(default=0, help_text=_("درصد پیشرفت از $0$ تا $100$"))
+    progress = models.PositiveIntegerField(default=0, help_text=_("درصد پیشرفت از 0 تا 100"))
     error_log = models.TextField(blank=True, null=True)
 
     class Meta:
@@ -264,27 +263,25 @@ class AlbumZipExport(models.Model):
         except Album.DoesNotExist:
             return f"(آلبوم حذف شده) - {self.status}"
 
-# Track Model
 
 class Track(TimeStampedModel):
-    album = models.ForeignKey(Album, on_delete=models.CASCADE, related_name="tracks", null=True, blank=True,verbose_name=_("آلبوم"))
+    album = models.ForeignKey(Album, on_delete=models.CASCADE, related_name="tracks", null=True, blank=True, verbose_name=_("آلبوم"))
     title = models.CharField(_("عنوان ترک"), max_length=300, blank=True, default="Untitled")
     slug = models.SlugField(_("اسلاگ"), max_length=300, unique=True, blank=True, allow_unicode=True)
-    genre = models.ForeignKey(Genre, on_delete=models.SET_NULL, null=True, blank=True, related_name="tracks",verbose_name=_("ژانر"))
-    audio_file = models.FileField(_("فایل صوتی"), upload_to=track_audio_path,validators=[FileExtensionValidator(["mp3", "wav", "flac"])], max_length=500)
+    genre = models.ForeignKey(Genre, on_delete=models.SET_NULL, null=True, blank=True, related_name="tracks", verbose_name=_("ژانر"))
+    audio_file = models.FileField(_("فایل صوتی"), upload_to=track_audio_path, validators=[FileExtensionValidator(["mp3", "wav", "flac"])], max_length=500)
     cover_image = models.ImageField(_("کاور اختصاصی ترک"), upload_to=track_cover_path, null=True, blank=True)
     release_date = models.DateField(_("تاریخ انتشار ترک"), null=True, blank=True)
-    artists = models.ManyToManyField(Artist, related_name="participated_tracks", blank=True,verbose_name=_("آرتیست‌های مشارکت‌کننده"))
+    artists = models.ManyToManyField(Artist, related_name="participated_tracks", blank=True, verbose_name=_("آرتیست‌های مشارکت‌کننده"))
     duration_ms = models.PositiveIntegerField(_("مدت زمان (میلی‌ثانیه)"), null=True, blank=True)
     description = models.TextField(_("توضیحات"), blank=True)
     track_number = models.PositiveIntegerField(_("شماره ترک در آلبوم"), null=True, blank=True)
-    status = models.CharField(_("وضعیت انتشار"), max_length=20, choices=PublishStatus.choices,default=PublishStatus.PUBLISHED, db_index=True)
-    instrument = models.ForeignKey(Instrument, on_delete=models.SET_NULL, related_name="tracks", verbose_name=_("ساز"),null=True, blank=True)
+    status = models.CharField(_("وضعیت انتشار"), max_length=20, choices=PublishStatus.choices, default=PublishStatus.PUBLISHED, db_index=True)
+    instrument = models.ForeignKey(Instrument, on_delete=models.SET_NULL, related_name="tracks", verbose_name=_("ساز"), null=True, blank=True)
     is_chosen = models.BooleanField(default=False)
-    label = models.ForeignKey(Label, on_delete=models.SET_NULL, null=True, blank=True, related_name="tracks",verbose_name=_("لیبل ناشر"))
+    label = models.ForeignKey(Label, on_delete=models.SET_NULL, null=True, blank=True, related_name="tracks", verbose_name=_("لیبل ناشر"))
     likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
     play_count = models.PositiveBigIntegerField(_("تعداد کل پخش"), default=0)
-
 
     class Meta:
         verbose_name = _("ترک")
@@ -324,7 +321,6 @@ class Track(TimeStampedModel):
             return f"{self.title} - {self.album.title}"
         except Album.DoesNotExist:
             return f"{self.title} - (آلبوم نامشخص یا حذف شده)"
-
 
 
 class PlayHistory(TimeStampedModel):

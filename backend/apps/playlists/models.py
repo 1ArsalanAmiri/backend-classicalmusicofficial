@@ -1,10 +1,9 @@
 import uuid
-from django.db import models
+from django.db import models, transaction
 from django.utils.text import slugify
-from apps.common.models import TimeStampedModel
-from apps.music.models import Track
+from apps.common.models import TimeStampedModel, PublishStatus
+from apps.music.models import Track, AlbumType
 from django.contrib.contenttypes.fields import GenericRelation
-
 
 
 def playlist_cover_path(instance, filename):
@@ -21,6 +20,9 @@ class Playlist(TimeStampedModel):
 
     likes = GenericRelation('interactions.Like', related_query_name='playlist')
     follows = GenericRelation('interactions.Follow', related_query_name='playlist')
+
+    album = models.OneToOneField('music.Album', on_delete=models.CASCADE, null=True, blank=True, related_name='synced_playlist', verbose_name="آلبوم متناظر")
+    is_editorial = models.BooleanField(default=False, verbose_name="پلی‌لیست رسمی/ادیتوریال", db_index=True)
 
     class Meta:
         verbose_name = "پلی لیست"
@@ -46,10 +48,12 @@ class Playlist(TimeStampedModel):
 
     @property
     def total_tracks(self):
-        return self.playlist_tracks.count()
+        return getattr(self, 'annotated_total_tracks', self.playlist_tracks.count())
 
     @property
     def total_duration_ms(self):
+        if hasattr(self, 'annotated_total_duration_ms'):
+            return self.annotated_total_duration_ms
         result = self.tracks.aggregate(total=models.Sum('duration_ms'))
         return result['total'] or 0
 
@@ -74,3 +78,33 @@ class PlaylistTrack(models.Model):
     def __str__(self):
         return f"{self.playlist.title} - {self.track.title} (Order: {self.order})"
 
+
+def sync_editorial_album_to_playlist(album):
+    if album.album_type != AlbumType.EDITORIAL_PLAYLIST:
+        return None
+
+    with transaction.atomic():
+        playlist, _ = Playlist.objects.update_or_create(
+            album=album,
+            defaults={
+                'title': album.title,
+                'title_fa': album.title_fa,
+                'description': album.description,
+                'cover_image': album.cover_image,
+                'is_editorial': True
+            }
+        )
+
+        PlaylistTrack.objects.filter(playlist=playlist).delete()
+
+        album_tracks = album.tracks.filter(status=PublishStatus.PUBLISHED).order_by('track_number', 'id')
+        new_playlist_tracks = [
+            PlaylistTrack(
+                playlist=playlist,
+                track=track,
+                order=idx + 1
+            )
+            for idx, track in enumerate(album_tracks)
+        ]
+        PlaylistTrack.objects.bulk_create(new_playlist_tracks)
+        return playlist
