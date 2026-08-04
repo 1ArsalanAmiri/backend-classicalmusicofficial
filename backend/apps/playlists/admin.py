@@ -1,15 +1,16 @@
 from django.contrib import admin
 from django.utils.html import format_html
 from django.db.models import Count, Sum
-from .models import Playlist, PlaylistTrack
+from django.utils.translation import gettext_lazy as _
+from .models import Playlist, PlaylistItem
 
 
-class PlaylistTrackInline(admin.TabularInline):
-    model = PlaylistTrack
+class PlaylistItemInline(admin.TabularInline):
+    model = PlaylistItem
     extra = 1
     autocomplete_fields = ['track']
     ordering = ['order']
-    readonly_fields = ['added_at']
+    readonly_fields = ['created_at']
 
 
 @admin.register(Playlist)
@@ -17,55 +18,71 @@ class PlaylistAdmin(admin.ModelAdmin):
     list_display = [
         'title',
         'title_fa',
+        'user_display',
+        'is_editorial',
+        'is_public',
         'tracks_count',
         'duration_display',
-        'created_at',
-        'cover_preview_thumbnail'
+        'cover_preview_thumbnail',
+        'created_at'
     ]
-    list_filter = ['created_at', 'updated_at']
-    search_fields = ['title', 'title_fa', 'slug']
+    list_filter = ['is_editorial', 'is_public', 'created_at', 'updated_at']
+    search_fields = ['title', 'title_fa', 'slug', 'user__username', 'user__email']
     prepopulated_fields = {'slug': ('title',)}
-    inlines = [PlaylistTrackInline]
+    inlines = [PlaylistItemInline]
     date_hierarchy = 'created_at'
-
+    autocomplete_fields = ['user', 'album']
     readonly_fields = ['created_at', 'updated_at', 'cover_image_preview']
 
     fieldsets = (
-        ('اطلاعات پایه', {
-            'fields': ('title', 'title_fa', 'slug', 'description')
+        (_('اطلاعات پایه'), {
+            'fields': ('title', 'title_fa', 'slug', 'description', 'user', 'album')
         }),
-        ('رسانه (Media)', {
+        (_('نوع و دسترسی'), {
+            'fields': ('is_editorial', 'is_public')
+        }),
+        (_('رسانه (Media)'), {
             'fields': ('cover_image', 'cover_image_preview')
         }),
-        ('تنظیمات و تاریخ‌ها', {
+        (_('تنظیمات و تاریخ‌ها'), {
             'fields': ('created_at', 'updated_at')
         }),
     )
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        # حذف owner از select_related به دلیل عدم وجود در مدل جدید
-        qs = qs.annotate(
-            admin_total_tracks=Count('playlist_tracks', distinct=True),
-            admin_total_duration=Sum('tracks__duration_ms')
+        return qs.select_related('user', 'album').annotate(
+            admin_total_tracks=Count('items', distinct=True),
+            admin_total_duration=Sum('items__track__duration_ms')
         )
-        return qs
 
-    @admin.display(description='تعداد ترک‌ها', ordering='admin_total_tracks')
+    @admin.display(description=_('کاربر / مالک'))
+    def user_display(self, obj):
+        if obj.is_editorial:
+            return format_html('<span style="color: #2b78e4; font-weight: bold;">سیستمی (ادیتوریال)</span>')
+        return obj.user.username if obj.user else "-"
+
+    @admin.display(description=_('تعداد ترک‌ها'), ordering='admin_total_tracks')
     def tracks_count(self, obj):
         return getattr(obj, 'admin_total_tracks', 0)
 
-    @admin.display(description='مدت زمان کل', ordering='admin_total_duration')
+    @admin.display(description=_('مدت زمان کل'), ordering='admin_total_duration')
     def duration_display(self, obj):
         total_ms = getattr(obj, 'admin_total_duration', 0) or 0
         if not total_ms:
             return "00:00"
 
-        minutes = total_ms // 60000
-        seconds = (total_ms % 60000) // 1000
-        return f"{minutes}:{seconds:02d}"
+        total_seconds = total_ms // 1000
+        minutes = total_seconds // 60
+        seconds = total_seconds % 60
+        hours = minutes // 60
+        minutes = minutes % 60
 
-    @admin.display(description='کاور')
+        if hours > 0:
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes:02d}:{seconds:02d}"
+
+    @admin.display(description=_('کاور'))
     def cover_preview_thumbnail(self, obj):
         if obj.cover_image:
             return format_html(
@@ -74,7 +91,7 @@ class PlaylistAdmin(admin.ModelAdmin):
             )
         return "-"
 
-    @admin.display(description='پیش‌نمایش تصویر')
+    @admin.display(description=_('پیش‌نمایش تصویر'))
     def cover_image_preview(self, obj):
         if obj.cover_image:
             return format_html(
@@ -84,10 +101,10 @@ class PlaylistAdmin(admin.ModelAdmin):
         return "تصویری آپلود نشده است"
 
 
-@admin.register(PlaylistTrack)
-class PlaylistTrackAdmin(admin.ModelAdmin):
-    list_display = ['playlist', 'track', 'added_at']
-    list_filter = ['added_at']
+@admin.register(PlaylistItem)
+class PlaylistItemAdmin(admin.ModelAdmin):
+    list_display = ['playlist', 'track', 'order', 'created_at']
+    list_filter = ['created_at']
     search_fields = ['playlist__title', 'track__title', 'track__slug']
     autocomplete_fields = ['playlist', 'track']
     ordering = ['playlist', 'order']

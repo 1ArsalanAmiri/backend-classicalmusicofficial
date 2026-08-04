@@ -1,9 +1,9 @@
-import uuid
 from django.db import models, transaction
-from django.utils.text import slugify
-from apps.common.models import TimeStampedModel, PublishStatus
+from apps.common.models import TimeStampedModel, PublishStatus, unique_slugify
 from apps.music.models import Track, AlbumType
-from django.contrib.contenttypes.fields import GenericRelation
+from django.utils.translation import gettext_lazy as _
+from django.conf import settings
+
 
 
 def playlist_cover_path(instance, filename):
@@ -11,51 +11,75 @@ def playlist_cover_path(instance, filename):
 
 
 class Playlist(TimeStampedModel):
-    title = models.CharField(max_length=255, verbose_name="Title")
-    title_fa = models.CharField(max_length=255, verbose_name="Title FA", blank=True, null=True)
-    slug = models.SlugField(max_length=255, unique=True, allow_unicode=True, blank=True, verbose_name="Slug")
-    description = models.TextField(blank=True, null=True, verbose_name="Description")
-    cover_image = models.ImageField(upload_to=playlist_cover_path, blank=True, null=True, verbose_name="Cover Image")
-    tracks = models.ManyToManyField(Track, through='PlaylistTrack', related_name='playlists', blank=True, verbose_name="Tracks")
-
-    likes = GenericRelation('interactions.Like', related_query_name='playlist')
-    follows = GenericRelation('interactions.Follow', related_query_name='playlist')
-
-    album = models.OneToOneField('music.Album', on_delete=models.CASCADE, null=True, blank=True, related_name='synced_playlist', verbose_name="آلبوم متناظر")
-    is_editorial = models.BooleanField(default=False, verbose_name="پلی‌لیست رسمی/ادیتوریال", db_index=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="playlists",
+        verbose_name=_("کاربر"),
+        null=True, blank=True
+    )
+    album = models.ForeignKey(
+        'music.Album',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='synced_playlists',
+        verbose_name=_("آلبوم ادیتوریال مرتبط")
+    )
+    title = models.CharField(_("عنوان پلی‌لیست"), max_length=255)
+    title_fa = models.CharField(_("عنوان فارسی"), max_length=255, blank=True)
+    slug = models.SlugField(_("اسلاگ"), max_length=280, unique=True, blank=True, allow_unicode=True)
+    description = models.TextField(_("توضیحات"), blank=True)
+    cover_image = models.ImageField(
+        _("تصویر کاور"),
+        upload_to="playlists/covers/",
+        null=True, blank=True
+    )
+    is_public = models.BooleanField(_("عمومی است؟"), default=False)
+    is_editorial = models.BooleanField(_("پلی‌لیست ادیتوریال است؟"), default=False)
+    tracks = models.ManyToManyField(
+        Track,
+        through='PlaylistItem',
+        related_name='in_playlists',
+        verbose_name=_("ترک‌ها")
+    )
 
     class Meta:
-        verbose_name = "پلی لیست"
-        verbose_name_plural = "پلی لیست ها"
+        verbose_name = _("پلی‌لیست شخصی")
+        verbose_name_plural = _("پلی‌لیست‌های شخصی")
         ordering = ['-created_at']
-
-    def __str__(self):
-        return f"{self.title}"
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            base_slug = slugify(self.title, allow_unicode=True)
-            if not base_slug:
-                base_slug = uuid.uuid4().hex[:8]
-
-            unique_slug = base_slug
-            counter = 1
-            while Playlist.objects.filter(slug=unique_slug).exists():
-                unique_slug = f"{base_slug}-{counter}"
-                counter += 1
-            self.slug = unique_slug
+            self.slug = unique_slugify(self, "slug", f"{self.title}-{self.user_id}")
         super().save(*args, **kwargs)
 
-    @property
-    def total_tracks(self):
-        return getattr(self, 'annotated_total_tracks', self.playlist_tracks.count())
+    def __str__(self):
+        return f"{self.title} - ({self.user.username})"
 
-    @property
-    def total_duration_ms(self):
-        if hasattr(self, 'annotated_total_duration_ms'):
-            return self.annotated_total_duration_ms
-        result = self.tracks.aggregate(total=models.Sum('duration_ms'))
-        return result['total'] or 0
+
+class PlaylistItem(TimeStampedModel):
+    playlist = models.ForeignKey(
+        Playlist,
+        on_delete=models.CASCADE,
+        related_name="items",
+        verbose_name=_("پلی‌لیست")
+    )
+    track = models.ForeignKey(
+        Track,
+        on_delete=models.CASCADE,
+        related_name="playlist_items",
+        verbose_name=_("ترک")
+    )
+    order = models.PositiveIntegerField(_("ترتیب"), default=0)
+
+    class Meta:
+        verbose_name = _("آیتم پلی‌لیست")
+        verbose_name_plural = _("آیتم‌های پلی‌لیست")
+        unique_together = ('playlist', 'track')
+        ordering = ['order', '-created_at']
+
+    def __str__(self):
+        return f"{self.track.title} in {self.playlist.title}"
 
 
 class PlaylistTrack(models.Model):

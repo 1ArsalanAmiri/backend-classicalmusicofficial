@@ -1,4 +1,4 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
@@ -6,16 +6,17 @@ from django.shortcuts import get_object_or_404
 from django.db.models import Prefetch, Max, Count, Sum, Subquery, OuterRef, IntegerField
 from django.db.models.functions import Coalesce
 
-from .models import Playlist, PlaylistTrack
+from .models import Playlist, PlaylistTrack, PlaylistItem
 from apps.music.models import Track
 from .serializers import (
     PlaylistListSerializer,
     PlaylistDetailSerializer,
-    PlaylistCreateUpdateSerializer
+    PlaylistCreateUpdateSerializer, TrackActionSerializer
 )
 from django.db import transaction
 from apps.interactions.mixins import LikableMixin, FollowableMixin
 from apps.common.pagination import CustomMetaDataPagination
+from ..common.models import PublishStatus
 
 
 class PlaylistViewSet(LikableMixin, FollowableMixin, viewsets.ModelViewSet):
@@ -123,3 +124,81 @@ class PlaylistViewSet(LikableMixin, FollowableMixin, viewsets.ModelViewSet):
         if deleted_count == 0:
             return Response({"error": "Track not found in this playlist."}, status=status.HTTP_404_NOT_FOUND)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class UserPlaylistViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['title', 'description']
+    ordering_fields = ['created_at', 'title']
+    lookup_field = 'slug'
+
+    def get_queryset(self):
+        return Playlist.objects.filter(user=self.request.user).prefetch_related(
+            Prefetch(
+                'items',
+                queryset=PlaylistItem.objects.select_related('track').prefetch_related(
+                    'track__artists', 'track__album'
+                )
+            )
+        )
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return PlaylistListSerializer
+        elif self.action in ['create', 'update', 'partial_update']:
+            return PlaylistCreateUpdateSerializer
+        elif self.action in ['add_track', 'remove_track']:
+            return TrackActionSerializer
+        return PlaylistDetailSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+    @action(detail=True, methods=['post'], url_path='add-track')
+    def add_track(self, request, slug=None):
+        playlist = self.get_object()
+        serializer = TrackActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        track_id = serializer.validated_data['track_id']
+        track = get_object_or_404(Track, id=track_id, status=PublishStatus.PUBLISHED)
+
+        item, created = PlaylistItem.objects.get_or_create(
+            playlist=playlist,
+            track=track
+        )
+
+        if not created:
+            return Response(
+                {"detail": "این ترک قبلاً به پلی‌لیست اضافه شده است."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        return Response(
+            {"message": "ترک با موفقیت به پلی‌لیست اضافه شد."},
+            status=status.HTTP_201_CREATED
+        )
+
+    @action(detail=True, methods=['post'], url_path='remove-track')
+    def remove_track(self, request, slug=None):
+        playlist = self.get_object()
+        serializer = TrackActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        track_id = serializer.validated_data['track_id']
+        deleted_count, _ = PlaylistItem.objects.filter(
+            playlist=playlist,
+            track_id=track_id
+        ).delete()
+
+        if deleted_count == 0:
+            return Response(
+                {"detail": "این ترک در پلی‌لیست یافت نشد."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        return Response(
+            {"message": "ترک با موفقیت از پلی‌لیست حذف شد."},
+            status=status.HTTP_200_OK
+        )
