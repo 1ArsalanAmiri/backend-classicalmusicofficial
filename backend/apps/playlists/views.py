@@ -1,7 +1,7 @@
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
+from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db.models import Prefetch, Max, Count, Sum, Subquery, OuterRef, IntegerField
 from django.db.models.functions import Coalesce
@@ -15,8 +15,6 @@ from .serializers import (
     PlaylistCreateUpdateSerializer,
     TrackActionSerializer
 )
-from apps.interactions.mixins import LikableMixin, FollowableMixin
-from apps.common.pagination import CustomMetaDataPagination
 from apps.common.models import PublishStatus
 
 
@@ -46,43 +44,6 @@ def get_annotated_playlist_queryset():
             Subquery(duration_sq, output_field=IntegerField()), 0
         ),
     )
-
-
-class PlaylistViewSet(LikableMixin, FollowableMixin, viewsets.ReadOnlyModelViewSet):
-    lookup_field = "slug"
-    pagination_class = CustomMetaDataPagination
-
-    def get_permissions(self):
-        if self.action in ['list', 'retrieve']:
-            return [AllowAny()]
-        elif self.action in ['like_toggle', 'follow_toggle']:
-            return [IsAuthenticated()]
-        return [IsAdminUser()]
-
-    def get_queryset(self):
-        qs = get_annotated_playlist_queryset().filter(is_public=True)
-
-        if self.action == 'list':
-            qs = qs.filter(is_editorial=True)
-
-        if self.action == "retrieve":
-            qs = qs.prefetch_related(
-                Prefetch(
-                    "items",
-                    queryset=PlaylistItem.objects.select_related(
-                        "track",
-                        "track__album",
-                        "track__instrument",
-                        "track__genre"
-                    ).prefetch_related("track__artists").order_by("order")
-                )
-            )
-        return qs
-
-    def get_serializer_class(self):
-        if self.action == "retrieve":
-            return PlaylistDetailSerializer
-        return PlaylistListSerializer
 
 
 class UserPlaylistViewSet(viewsets.ModelViewSet):
@@ -139,12 +100,6 @@ class UserPlaylistViewSet(viewsets.ModelViewSet):
     def add_track(self, request, slug=None):
         playlist = self.get_object()
 
-        if playlist.is_editorial:
-            return Response(
-                {"detail": "ترک‌های پلی‌لیست ادیتوریال قابل تغییر دستی نیستند."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
         serializer = TrackActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         track_id = serializer.validated_data['track_id']
@@ -173,12 +128,6 @@ class UserPlaylistViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='remove-track')
     def remove_track(self, request, slug=None):
         playlist = self.get_object()
-
-        if playlist.is_editorial:
-            return Response(
-                {"detail": "ترک‌های پلی‌لیست ادیتوریال قابل تغییر دستی نیستند."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
 
         serializer = TrackActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

@@ -1,6 +1,5 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from django.utils.safestring import mark_safe
 from django.db.models import Count, Sum
 from django.utils.translation import gettext_lazy as _
 from .models import Playlist, PlaylistItem
@@ -19,28 +18,23 @@ class PlaylistAdmin(admin.ModelAdmin):
     list_display = [
         'title',
         'title_fa',
-        'user_display',
-        'is_editorial',
-        'is_public',
+        'user',
         'tracks_count',
         'duration_display',
         'cover_preview_thumbnail',
         'created_at'
     ]
-    list_filter = ['is_editorial', 'is_public', 'created_at', 'updated_at']
+    list_filter = ['created_at', 'updated_at']
     search_fields = ['title', 'title_fa', 'slug', 'user__username', 'user__email']
     prepopulated_fields = {'slug': ('title',)}
     inlines = [PlaylistItemInline]
     date_hierarchy = 'created_at'
-    autocomplete_fields = ['user', 'album']
+    autocomplete_fields = ['user']
     readonly_fields = ['created_at', 'updated_at', 'cover_image_preview']
 
     fieldsets = (
         (_('اطلاعات پایه'), {
-            'fields': ('title', 'title_fa', 'slug', 'description', 'user', 'album')
-        }),
-        (_('نوع و دسترسی'), {
-            'fields': ('is_editorial', 'is_public')
+            'fields': ('title', 'title_fa', 'slug', 'description', 'user')
         }),
         (_('رسانه (Media)'), {
             'fields': ('cover_image', 'cover_image_preview')
@@ -52,16 +46,10 @@ class PlaylistAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related('user', 'album').annotate(
+        return qs.select_related('user').annotate(
             admin_total_tracks=Count('items', distinct=True),
             admin_total_duration=Sum('items__track__duration_ms')
         )
-
-    @admin.display(description=_('کاربر / مالک'))
-    def user_display(self, obj):
-        if obj.is_editorial:
-            return format_html('<span style="color: #2b78e4; font-weight: bold;">{}</span>', _('سیستمی (ادیتوریال)'))
-        return obj.user.username if obj.user else "-"
 
     @admin.display(description=_('تعداد ترک‌ها'), ordering='admin_total_tracks')
     def tracks_count(self, obj):

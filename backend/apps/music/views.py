@@ -90,11 +90,15 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
                      'credits__artist__nickname']
     ordering_fields = ['release_year', 'title']
     lookup_field = 'slug'
+    # نوع آلبومی که این ViewSet برمی‌گرداند. کلاس‌های فرزند (مثل EditorialPlaylistViewSet)
+    # فقط همین یک مقدار را override می‌کنند تا بقیه‌ی منطق عیناً بین آلبوم رسمی و
+    # پلی‌لیست ادیتوریال به اشتراک گذاشته شود و از drift بین دو پیاده‌سازی جلوگیری شود.
+    album_type = AlbumType.OFFICIAL
 
     def get_queryset(self):
         qs = Album.objects.filter(
             status=PublishStatus.PUBLISHED,
-            album_type=AlbumType.OFFICIAL
+            album_type=self.album_type
         ).select_related('label').prefetch_related(
             'main_artists',
             Prefetch(
@@ -368,7 +372,10 @@ class LabelViewSet(FollowableMixin, LikableMixin, viewsets.ReadOnlyModelViewSet)
             ).prefetch_related(
                 Prefetch(
                     'albums_by_label',
-                    queryset=Album.objects.filter(status=PublishStatus.PUBLISHED).annotate(
+                    queryset=Album.objects.filter(
+                        status=PublishStatus.PUBLISHED,
+                        album_type=AlbumType.OFFICIAL
+                    ).annotate(
                         annotated_total_tracks=Count('tracks')
                     )
                 ),
@@ -409,7 +416,8 @@ class GenreDetailWithContentAPIView(APIView):
 
         albums = Album.objects.filter(
             tracks__genre=genre,
-            status=PublishStatus.PUBLISHED
+            status=PublishStatus.PUBLISHED,
+            album_type=AlbumType.OFFICIAL
         ).distinct().annotate(
             annotated_total_tracks=Count('tracks')
         ).order_by('-release_year')[:limit]
@@ -442,7 +450,8 @@ class InstrumentDetailWithContentAPIView(APIView):
 
         albums = Album.objects.filter(
             tracks__instrument=instrument,
-            status=PublishStatus.PUBLISHED
+            status=PublishStatus.PUBLISHED,
+            album_type=AlbumType.OFFICIAL
         ).distinct().annotate(
             annotated_total_tracks=Count('tracks')
         ).order_by('-release_year')[:limit]
@@ -465,33 +474,9 @@ class InstrumentDetailWithContentAPIView(APIView):
             "single_tracks": TrackSerializer(single_tracks, many=True, context=context).data
         }, status=status.HTTP_200_OK)
 
-    
-class EditorialPlaylistViewSet(AlbumViewSet):
-    def get_queryset(self):
-        qs = Album.objects.filter(
-            status=PublishStatus.PUBLISHED,
-            album_type=AlbumType.EDITORIAL_PLAYLIST
-        ).select_related('label').prefetch_related(
-            'main_artists',
-            Prefetch(
-                'tracks',
-                queryset=Track.objects.filter(status=PublishStatus.PUBLISHED).prefetch_related('artists')
-            )
-        ).annotate(
-            annotated_total_tracks=Count("tracks", distinct=True),
-            annotated_total_duration_ms=Coalesce(Sum("tracks__duration_ms"), 0)
-        )
 
-        user = self.request.user
-        if user.is_authenticated:
-            album_ct = ContentType.objects.get_for_model(Album)
-            liked_subquery = Like.objects.filter(
-                user=user,
-                content_type=album_ct,
-                object_id=OuterRef('pk')
-            )
-            qs = qs.annotate(is_liked=Exists(liked_subquery))
-        return qs
+class EditorialPlaylistViewSet(AlbumViewSet):
+    album_type = AlbumType.EDITORIAL_PLAYLIST
 
 
 @sync_to_async

@@ -1,6 +1,6 @@
-from django.db import models, transaction
-from apps.common.models import TimeStampedModel, PublishStatus, unique_slugify
-from apps.music.models import Track, AlbumType
+from django.db import models
+from apps.common.models import TimeStampedModel, unique_slugify
+from apps.music.models import Track
 from django.utils.translation import gettext_lazy as _
 from django.conf import settings
 
@@ -14,15 +14,7 @@ class Playlist(TimeStampedModel):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="playlists",
-        verbose_name=_("کاربر"),
-        null=True, blank=True
-    )
-    album = models.ForeignKey(
-        'music.Album',
-        on_delete=models.SET_NULL,
-        null=True, blank=True,
-        related_name='synced_playlists',
-        verbose_name=_("آلبوم ادیتوریال مرتبط")
+        verbose_name=_("کاربر")
     )
     title = models.CharField(_("عنوان پلی‌لیست"), max_length=255)
     title_fa = models.CharField(_("عنوان فارسی"), max_length=255, blank=True)
@@ -33,8 +25,6 @@ class Playlist(TimeStampedModel):
         upload_to="playlists/covers/",
         null=True, blank=True
     )
-    is_public = models.BooleanField(_("عمومی"), default=False)
-    is_editorial = models.BooleanField(_("پلی‌لیست ادیتوریال"), default=False)
     tracks = models.ManyToManyField(
         Track,
         through='PlaylistItem',
@@ -49,13 +39,12 @@ class Playlist(TimeStampedModel):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            base_str = f"{self.title}-{self.user_id}" if self.user_id else self.title
+            base_str = f"{self.title}-{self.user_id}"
             self.slug = unique_slugify(self, "slug", base_str)
         super().save(*args, **kwargs)
 
     def __str__(self):
-        username = self.user.username if self.user else "System Editorial"
-        return f"{username} - {self.title}"
+        return f"{self.user.username} - {self.title}"
 
 
 class PlaylistItem(TimeStampedModel):
@@ -84,35 +73,3 @@ class PlaylistItem(TimeStampedModel):
 
     def __str__(self):
         return f"{self.track.title} in {self.playlist.title}"
-
-
-def sync_editorial_album_to_playlist(album):
-    if album.album_type != AlbumType.EDITORIAL_PLAYLIST:
-        return None
-
-    with transaction.atomic():
-        playlist, _ = Playlist.objects.update_or_create(
-            album=album,
-            defaults={
-                'title': album.title,
-                'title_fa': album.title_fa,
-                'description': album.description,
-                'cover_image': album.cover_image,
-                'is_editorial': True,
-                'is_public': True
-            }
-        )
-
-        PlaylistItem.objects.filter(playlist=playlist).delete()
-
-        album_tracks = album.tracks.filter(status=PublishStatus.PUBLISHED).order_by('track_number', 'id')
-        new_items = [
-            PlaylistItem(
-                playlist=playlist,
-                track=track,
-                order=idx + 1
-            )
-            for idx, track in enumerate(album_tracks)
-        ]
-        PlaylistItem.objects.bulk_create(new_items)
-        return playlist

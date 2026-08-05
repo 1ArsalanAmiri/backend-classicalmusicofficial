@@ -20,8 +20,7 @@ class PlaylistListSerializer(serializers.ModelSerializer):
         model = Playlist
         fields = [
             'id', 'title', 'title_fa', 'slug', 'description', 'cover_image',
-            'is_public', 'is_editorial', 'owner_username', 'tracks_count',
-            'total_duration_ms', 'created_at'
+            'owner_username', 'tracks_count', 'total_duration_ms', 'created_at'
         ]
 
 
@@ -35,15 +34,14 @@ class PlaylistDetailSerializer(serializers.ModelSerializer):
         model = Playlist
         fields = [
             'id', 'title', 'title_fa', 'slug', 'description', 'cover_image',
-            'is_public', 'is_editorial', 'owner_username', 'tracks_count',
-            'total_duration_ms', 'created_at', 'items'
+            'owner_username', 'tracks_count', 'total_duration_ms', 'created_at', 'items'
         ]
 
 
 class PlaylistCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Playlist
-        fields = ['title', 'title_fa', 'description', 'cover_image', 'is_public']
+        fields = ['title', 'title_fa', 'description', 'cover_image']
 
 
 class TrackActionSerializer(serializers.Serializer):
