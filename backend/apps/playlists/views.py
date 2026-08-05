@@ -48,7 +48,7 @@ def get_annotated_playlist_queryset():
     )
 
 
-class PlaylistViewSet(LikableMixin, FollowableMixin, viewsets.ModelViewSet):
+class PlaylistViewSet(LikableMixin, FollowableMixin, viewsets.ReadOnlyModelViewSet):
     lookup_field = "slug"
     pagination_class = CustomMetaDataPagination
 
@@ -61,6 +61,9 @@ class PlaylistViewSet(LikableMixin, FollowableMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = get_annotated_playlist_queryset().filter(is_public=True)
+
+        if self.action == 'list':
+            qs = qs.filter(is_editorial=True)
 
         if self.action == "retrieve":
             qs = qs.prefetch_related(
@@ -77,9 +80,7 @@ class PlaylistViewSet(LikableMixin, FollowableMixin, viewsets.ModelViewSet):
         return qs
 
     def get_serializer_class(self):
-        if self.action in ["create", "update", "partial_update"]:
-            return PlaylistCreateUpdateSerializer
-        elif self.action == "retrieve":
+        if self.action == "retrieve":
             return PlaylistDetailSerializer
         return PlaylistListSerializer
 
@@ -114,8 +115,25 @@ class UserPlaylistViewSet(viewsets.ModelViewSet):
             return TrackActionSerializer
         return PlaylistDetailSerializer
 
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        playlist = serializer.save(user=request.user)
+
+        playlist_qs = get_annotated_playlist_queryset().get(pk=playlist.pk)
+        response_serializer = PlaylistDetailSerializer(playlist_qs, context={'request': request})
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        playlist = serializer.save()
+
+        playlist_qs = get_annotated_playlist_queryset().get(pk=playlist.pk)
+        response_serializer = PlaylistDetailSerializer(playlist_qs, context={'request': request})
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='add-track')
     def add_track(self, request, slug=None):
