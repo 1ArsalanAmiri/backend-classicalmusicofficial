@@ -10,7 +10,7 @@ from django.urls import reverse
 from .models import (Artist, Album, Track, AlbumArchiveUpload, ArchiveUploadStatus,
                      Genre, Instrument, Label, AlbumCredit)
 from .tasks import process_album_archive_task
-
+from .models import AlbumType
 
 # =========================================================
 # Inlines
@@ -269,3 +269,36 @@ class InstrumentAdmin(admin.ModelAdmin):
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ("created_at", "updated_at")
     ordering = ("name",)
+
+
+
+@admin.register(Album)
+class AlbumAdmin(admin.ModelAdmin):
+    list_display = ('title', 'title_fa', 'display_main_artists', 'label', 'status', 'display_album_type', 'upload_archive_button', 'display_cover_image')
+
+    list_filter = ('status', 'album_type', 'release_year', 'label')
+
+    search_fields = ('title', 'title_fa', 'main_artists__name', 'credits__artist__name', 'label__name')
+    prepopulated_fields = {"slug": ("title",)}
+    readonly_fields = ("created_at", "updated_at")
+    autocomplete_fields = ['main_artists', 'label']
+    inlines = [AlbumCreditInline, TrackInline]
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.prefetch_related('main_artists')
+
+    @admin.display(description=_('نوع انتشار'), ordering='album_type')
+    def display_album_type(self, obj):
+        if obj.album_type == AlbumType.OFFICIAL:
+            return format_html('<span style="background-color: #28a745; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;">{}</span>', obj.get_album_type_display())
+        elif obj.album_type == AlbumType.EDITORIAL_PLAYLIST:
+            return format_html('<span style="background-color: #dc3545; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;">{}</span>', obj.get_album_type_display())
+        return obj.get_album_type_display()
+
+    @admin.display(description=_('آرتیست‌های اصلی'))
+    def display_main_artists(self, obj):
+        artists = obj.main_artists.all()
+        if artists.exists():
+            return ", ".join([artist.name for artist in artists])
+        return "-"

@@ -117,7 +117,7 @@ class AlbumListSerializer(serializers.ModelSerializer):
         model = Album
         fields = [
             'title', 'slug', 'cover_image',
-            'release_year', 'total_tracks'
+            'release_year', 'total_tracks', 'album_type'
         ]
 
 
@@ -135,17 +135,8 @@ class AlbumDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'title_fa', 'slug', 'cover_image',
             'release_year', 'description', 'main_artists', 'on_this_album', 'label',
-            'total_tracks', 'total_duration_ms', 'likes_count', 'is_liked', 'status', 'tracks'
+            'total_tracks', 'total_duration_ms', 'likes_count', 'is_liked', 'status', 'album_type', 'tracks' # ✅ اضافه شد
         ]
-
-    def get_on_this_album(self, obj):
-        artists_dict = {artist.id: artist for artist in obj.main_artists.all()}
-        for track in obj.tracks.all():
-            for artist in track.artists.all():
-                if artist.id not in artists_dict:
-                    artists_dict[artist.id] = artist
-
-        return ArtistBasicSerializer(list(artists_dict.values()), many=True, context=self.context).data
 
 
 class GenreSerializer(serializers.ModelSerializer):

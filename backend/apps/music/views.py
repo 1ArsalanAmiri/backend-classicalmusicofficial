@@ -465,6 +465,34 @@ class InstrumentDetailWithContentAPIView(APIView):
             "single_tracks": TrackSerializer(single_tracks, many=True, context=context).data
         }, status=status.HTTP_200_OK)
 
+    
+class EditorialPlaylistViewSet(AlbumViewSet):
+    def get_queryset(self):
+        qs = Album.objects.filter(
+            status=PublishStatus.PUBLISHED,
+            album_type=AlbumType.EDITORIAL_PLAYLIST
+        ).select_related('label').prefetch_related(
+            'main_artists',
+            Prefetch(
+                'tracks',
+                queryset=Track.objects.filter(status=PublishStatus.PUBLISHED).prefetch_related('artists')
+            )
+        ).annotate(
+            annotated_total_tracks=Count("tracks", distinct=True),
+            annotated_total_duration_ms=Coalesce(Sum("tracks__duration_ms"), 0)
+        )
+
+        user = self.request.user
+        if user.is_authenticated:
+            album_ct = ContentType.objects.get_for_model(Album)
+            liked_subquery = Like.objects.filter(
+                user=user,
+                content_type=album_ct,
+                object_id=OuterRef('pk')
+            )
+            qs = qs.annotate(is_liked=Exists(liked_subquery))
+        return qs
+
 
 @sync_to_async
 def get_album_and_tracks(album_slug):

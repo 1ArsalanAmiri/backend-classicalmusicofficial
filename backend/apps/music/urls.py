@@ -2,13 +2,14 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import ArtistViewSet, AlbumViewSet, TrackViewSet, GenreViewSet, InstrumentViewSet, EraListView, \
     AlbumBatchUploadAPIView, LabelViewSet, download_album_zip_api, GenreDetailWithContentAPIView, \
-    InstrumentDetailWithContentAPIView
+    InstrumentDetailWithContentAPIView, EditorialPlaylistViewSet
 from apps.common.search_views import GlobalSearchView
 
 router = DefaultRouter()
 
 router.register(r'artists', ArtistViewSet, basename='artist')
 router.register(r'albums', AlbumViewSet, basename='album')
+router.register(r'editorial-playlists', EditorialPlaylistViewSet, basename='editorial-playlist')
 router.register(r'tracks', TrackViewSet, basename='track')
 router.register(r'genres', GenreViewSet, basename='genre')
 router.register(r'instruments', InstrumentViewSet, basename='instrument')
