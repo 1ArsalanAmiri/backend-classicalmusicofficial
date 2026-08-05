@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 from django.db.models import Count, Sum
 from django.utils.translation import gettext_lazy as _
 from .models import Playlist, PlaylistItem
@@ -59,7 +60,7 @@ class PlaylistAdmin(admin.ModelAdmin):
     @admin.display(description=_('کاربر / مالک'))
     def user_display(self, obj):
         if obj.is_editorial:
-            return format_html('<span style="color: #2b78e4; font-weight: bold;">سیستمی (ادیتوریال)</span>')
+            return format_html('<span style="color: #2b78e4; font-weight: bold;">{}</span>', _('سیستمی (ادیتوریال)'))
         return obj.user.username if obj.user else "-"
 
     @admin.display(description=_('تعداد ترک‌ها'), ordering='admin_total_tracks')
@@ -99,13 +100,3 @@ class PlaylistAdmin(admin.ModelAdmin):
                 obj.cover_image.url
             )
         return "تصویری آپلود نشده است"
-
-
-@admin.register(PlaylistItem)
-class PlaylistItemAdmin(admin.ModelAdmin):
-    list_display = ['playlist', 'track', 'order', 'created_at']
-    list_filter = ['created_at']
-    search_fields = ['playlist__title', 'track__title', 'track__slug']
-    autocomplete_fields = ['playlist', 'track']
-    ordering = ['playlist', 'order']
-    list_select_related = ['playlist', 'track']
