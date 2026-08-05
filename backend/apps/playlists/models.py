@@ -5,7 +5,6 @@ from django.utils.translation import gettext_lazy as _
 from django.conf import settings
 
 
-
 def playlist_cover_path(instance, filename):
     return f"playlists/{instance.slug}/{filename}"
 
@@ -44,18 +43,20 @@ class Playlist(TimeStampedModel):
     )
 
     class Meta:
-        verbose_name = _("پلی‌لیست شخصی")
-        verbose_name_plural = _("پلی‌لیست‌های شخصی")
+        verbose_name = _("پلی‌لیست")
+        verbose_name_plural = _("پلی‌لیست‌ها")
         ordering = ['-created_at']
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = unique_slugify(self, "slug", f"{self.title}-{self.user_id}")
+            base_str = f"{self.title}-{self.user_id}" if self.user_id else self.title
+            self.slug = unique_slugify(self, "slug", base_str)
         super().save(*args, **kwargs)
 
     def __str__(self):
-        username = self.user.username if self.user else "Unknown"
+        username = self.user.username if self.user else "System Editorial"
         return f"{username} - {self.title}"
+
 
 class PlaylistItem(TimeStampedModel):
     playlist = models.ForeignKey(
@@ -76,31 +77,13 @@ class PlaylistItem(TimeStampedModel):
         verbose_name = _("آیتم پلی‌لیست")
         verbose_name_plural = _("آیتم‌های پلی‌لیست")
         unique_together = ('playlist', 'track')
-        ordering = ['order', '-created_at']
-
-    def __str__(self):
-        return f"{self.track.title} in {self.playlist.title}"
-
-
-class PlaylistTrack(models.Model):
-    playlist = models.ForeignKey(Playlist, on_delete=models.CASCADE, related_name='playlist_tracks')
-    track = models.ForeignKey(Track, on_delete=models.CASCADE, related_name='playlist_entries')
-    order = models.PositiveIntegerField(default=0, verbose_name="Track Order")
-    added_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        verbose_name = "ترک پلی لیست"
-        verbose_name_plural = "ترک های پلی لیست"
-        ordering = ['order']
+        ordering = ['order', 'created_at']
         indexes = [
             models.Index(fields=["playlist", "order"]),
         ]
-        constraints = [
-            models.UniqueConstraint(fields=["playlist", "track"], name="unique_playlist_track")
-        ]
 
     def __str__(self):
-        return f"{self.playlist.title} - {self.track.title} (Order: {self.order})"
+        return f"{self.track.title} in {self.playlist.title}"
 
 
 def sync_editorial_album_to_playlist(album):
@@ -115,20 +98,21 @@ def sync_editorial_album_to_playlist(album):
                 'title_fa': album.title_fa,
                 'description': album.description,
                 'cover_image': album.cover_image,
-                'is_editorial': True
+                'is_editorial': True,
+                'is_public': True
             }
         )
 
-        PlaylistTrack.objects.filter(playlist=playlist).delete()
+        PlaylistItem.objects.filter(playlist=playlist).delete()
 
         album_tracks = album.tracks.filter(status=PublishStatus.PUBLISHED).order_by('track_number', 'id')
-        new_playlist_tracks = [
-            PlaylistTrack(
+        new_items = [
+            PlaylistItem(
                 playlist=playlist,
                 track=track,
                 order=idx + 1
             )
             for idx, track in enumerate(album_tracks)
         ]
-        PlaylistTrack.objects.bulk_create(new_playlist_tracks)
+        PlaylistItem.objects.bulk_create(new_items)
         return playlist

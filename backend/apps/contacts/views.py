@@ -1,74 +1,82 @@
-import mimetypes
-
-from django.http import HttpResponse, Http404, HttpResponseForbidden
-from rest_framework import viewsets, mixins, status
+from rest_framework import viewsets, status, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from rest_framework.views import APIView
+from django_filters.rest_framework import DjangoFilterBackend
+from django.db import transaction
+from django.db.models import Prefetch
 
 from .models import Ticket, TicketMessage, TicketStatus
 from .serializers import (
     TicketListSerializer,
     TicketDetailSerializer,
     TicketCreateSerializer,
-    TicketReplySerializer,
-    TicketMessageSerializer
+    TicketMessageSerializer,
+    TicketReplySerializer
 )
 
 
-class TicketViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.CreateModelMixin):
-    permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser, JSONParser]
-
-    def get_serializer_class(self):
-        if self.action == 'list':
-            return TicketListSerializer
-        elif self.action == 'retrieve':
-            return TicketDetailSerializer
-        elif self.action == 'create':
-            return TicketCreateSerializer
-        return TicketListSerializer
-
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        context['request'] = self.request
-        return context
+class TicketViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ['get', 'post']
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['status', 'ticket_type']
+    search_fields = ['subject', 'messages__message']
+    ordering_fields = ['created_at', 'updated_at']
 
     def get_queryset(self):
-        return Ticket.objects.filter(user=self.request.user).prefetch_related('messages__sender')
+        return Ticket.objects.filter(user=self.request.user).prefetch_related(
+            Prefetch('messages', queryset=TicketMessage.objects.select_related('sender'))
+        )
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return TicketCreateSerializer
+        elif self.action == 'retrieve':
+            return TicketDetailSerializer
+        elif self.action == 'reply':
+            return TicketReplySerializer
+        return TicketListSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        ticket = serializer.save()
+
+        response_serializer = TicketDetailSerializer(ticket, context={'request': request})
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='reply')
     def reply(self, request, pk=None):
         ticket = self.get_object()
+
         if ticket.status == TicketStatus.CLOSED:
-            return Response({"detail": "تیکت بسته شده است."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "این تیکت بسته شده است و امکان ارسال پاسخ وجود ندارد."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        serializer = TicketReplySerializer(data=request.data, context={'request': request})
+        serializer = TicketReplySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        message = TicketMessage.objects.create(ticket=ticket, sender=request.user, **serializer.validated_data)
-        ticket.status = TicketStatus.USER_REPLIED
+
+        with transaction.atomic():
+            message = TicketMessage.objects.create(
+                ticket=ticket,
+                sender=request.user,
+                message=serializer.validated_data['message']
+            )
+            ticket.status = TicketStatus.USER_REPLIED
+            ticket.save(update_fields=['status', 'updated_at'])
+
+        message_serializer = TicketMessageSerializer(message, context={'request': request})
+        return Response(message_serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='close')
+    def close(self, request, pk=None):
+        ticket = self.get_object()
+        ticket.status = TicketStatus.CLOSED
         ticket.save(update_fields=['status', 'updated_at'])
-        return Response(TicketMessageSerializer(message, context={'request': request}).data,
-                        status=status.HTTP_201_CREATED)
 
-
-class SecureTicketAttachmentView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, message_id):
-        try:
-            message = TicketMessage.objects.get(id=message_id)
-        except TicketMessage.DoesNotExist:
-            raise Http404("پیام یافت نشد.")
-
-        if message.ticket.user != request.user and not request.user.is_staff:
-            return HttpResponseForbidden("شما اجازه دسترسی به این فایل را ندارید.")
-
-        if not message.attachment:
-            raise Http404("این پیام فایلی ندارد.")
-
-        response = HttpResponse()
-        response['X-Accel-Redirect'] = f'/protected-media/{message.attachment.name}'
-        return response
+        return Response(
+            {"detail": "تیکت با موفقیت بسته شد.", "status": ticket.status},
+            status=status.HTTP_200_OK
+        )

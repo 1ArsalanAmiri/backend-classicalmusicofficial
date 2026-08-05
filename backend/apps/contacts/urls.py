@@ -1,17 +1,12 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import TicketViewSet
-from .views import SecureTicketAttachmentView
 
 router = DefaultRouter()
-router.register(r'tickets', TicketViewSet, basename='tickets')
+router.register(r'', TicketViewSet, basename='ticket')
+
+app_name = 'tickets'
 
 urlpatterns = [
-    path('', include(router.urls)),
-
-    path(
-        'messages/<int:message_id>/attachment/',
-        SecureTicketAttachmentView.as_view(),
-        name='secure-ticket-attachment'
-    ),
+    path('api/v1/', include(router.urls)),
 ]

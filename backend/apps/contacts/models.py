@@ -1,33 +1,18 @@
 from django.db import models
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
-from django.core.exceptions import ValidationError
-from os import path
 from apps.common.models import TimeStampedModel
 
 
-def validate_ticket_attachment(file):
-    MAX_FILE_SIZE = 1 * 1024 * 1024  # 1 MB
-    valid_extensions = ['.jpg', '.jpeg', '.png', '.mp4']
-
-    ext = path.splitext(file.name)[1].lower()
-
-    if ext not in valid_extensions:
-        raise ValidationError(_('فرمت فایل پشتیبانی نمی‌شود. فرمت‌های مجاز: jpg, png, jpeg, mp4'))
-
-    if file.size > MAX_FILE_SIZE:
-        raise ValidationError(_('حجم فایل نباید بیشتر از ۱ مگابایت باشد.'))
-
-
-class TicketCategory(models.TextChoices):
-    SUPPORT = 'support', _('پشتیبانی فنی سایت')
-    ARTWORK = 'artwork_request', _('درخواست آثار دلخواه (فقط کاربران با اشتراک طلایی)')
+class TicketType(models.TextChoices):
+    SUPPORT = 'support', _('پشتیبانی عمومی')
+    TRACK_REQUEST = 'track_request', _('درخواست اثر')
 
 
 class TicketStatus(models.TextChoices):
-    PENDING = 'pending', _('در انتظار پاسخ')
-    ANSWERED = 'answered', _('پاسخ داده شده')
-    USER_REPLIED = 'user_replied', _('کاربر پاسخ داده')
+    OPEN = 'open', _('منتظر پاسخ ادمین')
+    USER_REPLIED = 'user_replied', _('پاسخ کاربر')
+    ANSWERED = 'answered', _('پاسخ داده شد')
     CLOSED = 'closed', _('بسته شده')
 
 
@@ -36,62 +21,50 @@ class Ticket(TimeStampedModel):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='tickets',
-        verbose_name=_('کاربر')
+        verbose_name=_("کاربر")
     )
-    category = models.CharField(
+    ticket_type = models.CharField(
+        _("نوع تیکت"),
         max_length=20,
-        choices=TicketCategory.choices,
-        default=TicketCategory.SUPPORT,
-        verbose_name=_('دسته‌بندی')
+        choices=TicketType.choices,
+        default=TicketType.SUPPORT
     )
     subject = models.CharField(_("موضوع"), max_length=255)
     status = models.CharField(
+        _("وضعیت"),
         max_length=20,
         choices=TicketStatus.choices,
-        default=TicketStatus.PENDING,
-        verbose_name=_('وضعیت')
+        default=TicketStatus.OPEN,
+        db_index=True
     )
 
     class Meta:
-        verbose_name = _('تیکت')
-        verbose_name_plural = _('تیکت‌ها')
+        verbose_name = _("تیکت")
+        verbose_name_plural = _("تیکت‌ها")
         ordering = ['-updated_at']
-        indexes = [
-            models.Index(fields=['user', 'status']),
-        ]
 
     def __str__(self):
-        return f"{self.subject} - {self.user.phone_number}"
+        return f"[{self.get_ticket_type_display()}] {self.subject} - {self.user.username}"
 
 
-class TicketMessage(models.Model):
+class TicketMessage(TimeStampedModel):
     ticket = models.ForeignKey(
         Ticket,
         on_delete=models.CASCADE,
         related_name='messages',
-        verbose_name=_('تیکت')
+        verbose_name=_("تیکت")
     )
     sender = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name='sent_messages',
-        verbose_name=_('ارسال کننده')
+        verbose_name=_("فرستنده")
     )
-    body = models.TextField(_("متن پیام"))
-    attachment = models.FileField(
-        upload_to="tickets/attachments/",
-        blank=True,
-        null=True,
-        verbose_name=_("فایل ضمیمه"),
-        validators=[validate_ticket_attachment]
-    )
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('تاریخ ارسال'))
+    message = models.TextField(_("متن پیام"))
 
     class Meta:
-        verbose_name = _('پیام تیکت')
-        verbose_name_plural = _('پیام‌های تیکت')
+        verbose_name = _("پیام تیکت")
+        verbose_name_plural = _("پیام‌های تیکت")
         ordering = ['created_at']
 
     def __str__(self):
-        return f"Message by {self.sender.phone_number} on {self.ticket.subject}"
-
+        return f"پیام از {self.sender.username} برای تیکت {self.ticket_id}"

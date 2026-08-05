@@ -1,8 +1,6 @@
 from rest_framework import serializers
 from .models import Playlist, PlaylistItem
 from apps.music.serializers import TrackSerializer
-from apps.music.models import Track
-from django.db.models import Sum
 
 
 class PlaylistItemSerializer(serializers.ModelSerializer):
@@ -14,37 +12,39 @@ class PlaylistItemSerializer(serializers.ModelSerializer):
 
 
 class PlaylistListSerializer(serializers.ModelSerializer):
-    tracks_count = serializers.IntegerField(source='items.count', read_only=True)
+    tracks_count = serializers.IntegerField(source='annotated_total_tracks', read_only=True, default=0)
+    total_duration_ms = serializers.IntegerField(source='annotated_total_duration_ms', read_only=True, default=0)
+    owner_username = serializers.CharField(source='user.username', read_only=True, default=None)
 
     class Meta:
         model = Playlist
         fields = [
-            'id', 'title', 'slug', 'description', 'cover_image',
-            'is_public', 'tracks_count', 'created_at'
+            'id', 'title', 'title_fa', 'slug', 'description', 'cover_image',
+            'is_public', 'is_editorial', 'owner_username', 'tracks_count',
+            'total_duration_ms', 'created_at'
         ]
 
 
 class PlaylistDetailSerializer(serializers.ModelSerializer):
     items = PlaylistItemSerializer(many=True, read_only=True)
-    tracks_count = serializers.IntegerField(source='items.count', read_only=True)
-    total_duration_ms = serializers.SerializerMethodField()
+    tracks_count = serializers.IntegerField(source='annotated_total_tracks', read_only=True, default=0)
+    total_duration_ms = serializers.IntegerField(source='annotated_total_duration_ms', read_only=True, default=0)
+    owner_username = serializers.CharField(source='user.username', read_only=True, default=None)
 
     class Meta:
         model = Playlist
         fields = [
-            'id', 'title', 'slug', 'description', 'cover_image',
-            'is_public', 'tracks_count', 'total_duration_ms', 'created_at', 'items'
+            'id', 'title', 'title_fa', 'slug', 'description', 'cover_image',
+            'is_public', 'is_editorial', 'owner_username', 'tracks_count',
+            'total_duration_ms', 'created_at', 'items'
         ]
-
-    def get_total_duration_ms(self, obj):
-        return obj.tracks.aggregate(total=Sum('duration_ms'))['total'] or 0
 
 
 class PlaylistCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Playlist
-        fields = ['title', 'description', 'cover_image', 'is_public']
+        fields = ['title', 'title_fa', 'description', 'cover_image', 'is_public']
 
 
 class TrackActionSerializer(serializers.Serializer):
-    track_id = serializers.IntegerField(required=True)
+    track_id = serializers.IntegerField(required=True, help_text="شناسه ترک مورد نظر")

@@ -1,51 +1,78 @@
 from django.contrib import admin
-from django.urls import reverse
 from django.utils.html import format_html
-from django.utils.safestring import mark_safe
-
+from django.utils.translation import gettext_lazy as _
 from .models import Ticket, TicketMessage, TicketStatus
 
 
 class TicketMessageInline(admin.TabularInline):
     model = TicketMessage
-    extra = 0
-    fields = ('sender', 'body', 'secure_attachment_link', 'created_at')
-    readonly_fields = ('sender', 'body', 'secure_attachment_link', 'created_at')
+    extra = 1
+    fields = ['sender', 'message', 'created_at']
+    readonly_fields = ['created_at']
 
-    @admin.display(description="فایل ضمیمه")
-    def secure_attachment_link(self, obj):
-        if obj.attachment:
-            url = reverse('secure-ticket-attachment', kwargs={'message_id': obj.id})
-            return format_html('<a href="{}" target="_blank" style="color: blue; text-decoration: underline;">مشاهده / دانلود فایل</a>', url)
-        return mark_safe('<span style="color: gray;">بدون فایل</span>')
+    def get_extra(self, request, obj=None):
+        if obj and obj.status == TicketStatus.CLOSED:
+            return 0
+        return 1
 
 
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
-    list_display = ['subject', 'user', 'status', 'created_at', 'updated_at']
-    list_filter = ['status', 'category', 'created_at']
-    search_fields = ['subject', 'user__phone_number', 'user__first_name']
-    readonly_fields = ['user', 'category', 'subject', 'created_at', 'updated_at']
+    list_display = ['id', 'subject', 'user', 'ticket_type', 'status_badge', 'updated_at', 'created_at']
+    list_filter = ['status', 'ticket_type', 'created_at']
+    search_fields = ['subject', 'user__username', 'user__email', 'messages__message']
+    readonly_fields = ['status', 'created_at', 'updated_at']
     inlines = [TicketMessageInline]
-    list_editable = ['status']
+    actions = ['mark_as_closed', 'mark_as_open']
 
     fieldsets = (
-        ('اطلاعات تیکت', {
-            'fields': ('user', 'category', 'subject', 'status')
+        (_('اطلاعات تیکت'), {
+            'fields': ('user', 'ticket_type', 'subject', 'status')
         }),
-        ('تاریخ‌ها', {
+        (_('تاریخ‌ها'), {
             'fields': ('created_at', 'updated_at')
         }),
     )
 
-    def save_formset(self, request, form, formset, change):
+    @admin.display(description=_('وضعیت'))
+    def status_badge(self, obj):
+        colors = {
+            TicketStatus.OPEN: '#e67e22',        # نارنجی
+            TicketStatus.USER_REPLIED: '#3498db', # آبی
+            TicketStatus.ANSWERED: '#2ecc71',     # سبز
+            TicketStatus.CLOSED: '#7f8c8d',       # خاکستری
+        }
+        color = colors.get(obj.status, '#000')
+        return format_html(
+            '<span style="background-color: {}; color: #fff; padding: 3px 8px; border-radius: 4px; font-weight: bold;">{}</span>',
+            color,
+            obj.get_status_display()
+        )
 
+    def save_formset(self, request, form, formset, change):
         instances = formset.save(commit=False)
+        has_new_admin_reply = False
+
         for instance in instances:
             if isinstance(instance, TicketMessage):
-                if not getattr(instance, 'sender_id', None):
+                is_new = instance.pk is None
+                if is_new and not instance.sender_id:
                     instance.sender = request.user
-                    instance.ticket.status = TicketStatus.ANSWERED
-                    instance.ticket.save(update_fields=['status', 'updated_at'])
-            instance.save()
+                if is_new and instance.sender.is_staff:
+                    has_new_admin_reply = True
+                instance.save()
         formset.save_m2m()
+
+        if has_new_admin_reply and form.instance.status != TicketStatus.CLOSED:
+            form.instance.status = TicketStatus.ANSWERED
+            form.instance.save(update_fields=['status', 'updated_at'])
+
+    @admin.action(description=_("بستن تیکت‌های انتخاب شده"))
+    def mark_as_closed(self, request, queryset):
+        updated = queryset.update(status=TicketStatus.CLOSED)
+        self.message_user(request, f"{updated} تیکت با موفقیت بسته شدند.")
+
+    @admin.action(description=_("تغییر وضعیت به منتظر پاسخ"))
+    def mark_as_open(self, request, queryset):
+        updated = queryset.update(status=TicketStatus.OPEN)
+        self.message_user(request, f"{updated} تیکت به وضعیت منتظر پاسخ تغییر کردند.")

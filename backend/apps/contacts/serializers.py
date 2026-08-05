@@ -1,78 +1,75 @@
-from django.urls import reverse
 from rest_framework import serializers
 from django.db import transaction
-from .models import Ticket, TicketMessage, TicketCategory
-from apps.subscriptions.services import get_active_subscription
+from .models import Ticket, TicketMessage, TicketType, TicketStatus
+from apps.subscriptions.services import user_has_all_access
 
 
 class TicketMessageSerializer(serializers.ModelSerializer):
+    sender_name = serializers.SerializerMethodField()
+    is_admin = serializers.BooleanField(source='sender.is_staff', read_only=True)
 
-    secure_attachment_url = serializers.SerializerMethodField()
     class Meta:
         model = TicketMessage
-        fields = '__all__'
+        fields = ['id', 'sender', 'sender_name', 'is_admin', 'message', 'created_at']
+        read_only_fields = ['sender']
 
-    def get_secure_attachment_url(self, obj):
-        if obj.attachment:
-            request = self.context.get('request')
-            path = reverse('secure-ticket-attachment', kwargs={'message_id': obj.id})
-            return request.build_absolute_uri(path) if request else path
-        return None
+    def get_sender_name(self, obj):
+        if not obj.sender:
+            return "سیستم"
+        full_name = obj.sender.get_full_name().strip()
+        return full_name if full_name else obj.sender.username
 
 
 class TicketListSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    type_display = serializers.CharField(source='get_ticket_type_display', read_only=True)
+
     class Meta:
         model = Ticket
-        fields = ['id', 'subject', 'category', 'status', 'created_at', 'updated_at']
+        fields = ['id', 'subject', 'ticket_type', 'type_display', 'status', 'status_display', 'updated_at', 'created_at']
 
 
 class TicketDetailSerializer(serializers.ModelSerializer):
     messages = TicketMessageSerializer(many=True, read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    type_display = serializers.CharField(source='get_ticket_type_display', read_only=True)
 
     class Meta:
         model = Ticket
-        fields = ['id', 'subject', 'category', 'status', 'created_at', 'updated_at', 'messages']
+        fields = ['id', 'subject', 'ticket_type', 'type_display', 'status', 'status_display', 'created_at', 'updated_at', 'messages']
 
 
 class TicketCreateSerializer(serializers.ModelSerializer):
-    message_body = serializers.CharField(write_only=True, required=True, help_text="متن پیام تیکت")
-    attachment = serializers.FileField(write_only=True, required=False)
+    message = serializers.CharField(write_only=True, required=True, label="متن پیام اولیه")
 
     class Meta:
         model = Ticket
-        fields = ['category', 'subject', 'message_body', 'attachment']
+        fields = ['id', 'ticket_type', 'subject', 'message']
 
     def validate(self, attrs):
-        request = self.context.get('request')
-        category = attrs.get('category')
+        ticket_type = attrs.get('ticket_type')
+        user = self.context['request'].user
 
-        if category == TicketCategory.ARTWORK:
-            sub_history = get_active_subscription(request.user)
-            if not sub_history or sub_history.subscription.subscription_type not in ['both', 'all']:
-                raise serializers.ValidationError({
-                    "category": "برای درخواست آثار دلخواه، باید اشتراک طلایی تهیه کنید."
-                })
-
+        if ticket_type == TicketType.TRACK_REQUEST:
+            if not user_has_all_access(user):
+                raise serializers.ValidationError(
+                    {"ticket_type": "ثبت «درخواست اثر» تنها برای کاربران دارای اشتراک طلایی امکان‌پذیر است."}
+                )
         return attrs
 
     def create(self, validated_data):
-        message_body = validated_data.pop('message_body')
-        attachment = validated_data.pop('attachment', None)
-        request = self.context.get('request')
-        user = request.user
+        message_text = validated_data.pop('message')
+        user = self.context['request'].user
 
         with transaction.atomic():
-            ticket = Ticket.objects.create(user=user, **validated_data)
+            ticket = Ticket.objects.create(user=user, status=TicketStatus.OPEN, **validated_data)
             TicketMessage.objects.create(
                 ticket=ticket,
                 sender=user,
-                body=message_body,
-                attachment=attachment
+                message=message_text
             )
         return ticket
 
 
-class TicketReplySerializer(serializers.ModelSerializer):
-    class Meta:
-        model = TicketMessage
-        fields = ['body', 'attachment']
+class TicketReplySerializer(serializers.Serializer):
+    message = serializers.CharField(required=True)
