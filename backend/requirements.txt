@@ -16,7 +16,7 @@ django-nested-admin==4.1.6
 django-admin-inline-paginator==0.3.0
 django-admin-extra-buttons==2.0.0
 django-admin-sortable2==2.2.3
-django-unfold
+django-jazzmin
 
 # Utilities
 django-jalali==6.0.1

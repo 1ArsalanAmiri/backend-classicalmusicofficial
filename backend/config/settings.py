@@ -57,9 +57,7 @@ DATABASES = {
 INSTALLED_APPS = [
     'daphne',
 
-    'unfold',
-    'unfold.contrib.filters',
-    'unfold.contrib.inlines',
+    'jazzmin',
 
     'django.contrib.admin',
     'django.contrib.auth',
@@ -329,13 +327,26 @@ SESSION_COOKIE_SECURE = True
 
 
 
-#-------UNFOLD-------------------
-UNFOLD = {
-    "SITE_TITLE": "پنل مدیریت کلود موزیک",
-    "SITE_HEADER": "Clmusic Admin",
-    "SITE_URL": "/",
-    "SIDEBAR": {
-        "show_search": True,
-        "show_all_applications": True,
+#-------jazzmin-------------------
+JAZZMIN_SETTINGS = {
+    "site_title": "مدیریت سایت ClMusic",
+    "site_header": "Clmusic Admin",
+    "site_brand": "ClMusic",
+    "welcome_sign": "Welcome to ClMusic Admin Panel",
+    "search_model": ["music.Album", "music.Artist", "music.Track"],
+
+    "usermenu_links": [
+        {"name": "سایت اصلی", "url": "/", "new_window": True},
+    ],
+
+    "icons": {
+        "auth": "fas fa-users-cog",
+        "music.Artist": "fas fa-user-tie",
+        "music.Album": "fas fa-compact-disc",
+        "music.Track": "fas fa-music",
+        "music.Label": "fas fa-tag",
     },
+
+    "theme": "darkly",
+    # "theme": "default",
 }

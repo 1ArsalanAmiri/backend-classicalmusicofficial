@@ -37,14 +37,14 @@ class TicketAdmin(admin.ModelAdmin):
     @admin.display(description=_('وضعیت'))
     def status_badge(self, obj):
         colors = {
-            TicketStatus.OPEN: '#e67e22',        # نارنجی
-            TicketStatus.USER_REPLIED: '#3498db', # آبی
-            TicketStatus.ANSWERED: '#2ecc71',     # سبز
-            TicketStatus.CLOSED: '#7f8c8d',       # خاکستری
+            TicketStatus.OPEN: '#e67e22',  # نارنجی
+            TicketStatus.USER_REPLIED: '#3498db',  # آبی
+            TicketStatus.ANSWERED: '#2ecc71',  # سبز
+            TicketStatus.CLOSED: '#7f8c8d',  # خاکستری
         }
         color = colors.get(obj.status, '#000')
         return format_html(
-            '<span style="background-color: {}; color: #fff; padding: 3px 8px; border-radius: 4px; font-weight: bold;">{}</span>',
+            '<span style="background-color: {}; color: #fff; padding: 3px 8px; border-radius: 4px; font-weight: bold; white-space: nowrap; display: inline-block;">{}</span>',
             color,
             obj.get_status_display()
         )
