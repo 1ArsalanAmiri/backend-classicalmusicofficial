@@ -226,7 +226,8 @@ class SubscriptionHistoryAdmin(admin.ModelAdmin):
     form = SubscriptionHistoryAdminForm
 
     list_display = (
-        "user_profile__user__phone_number",
+        "user_phone_display",  # <--- اصلاح شد (جایگزین فیلد رشته‌ای)
+        "user_display",        # (اختیاری: برای نمایش نام کامل کاربر)
         "subscription",
         "subscription_type_display",
         "start_date",
@@ -240,6 +241,7 @@ class SubscriptionHistoryAdmin(admin.ModelAdmin):
         "end_date",
     )
     search_fields = (
+        "user_profile__user__phone_number", # جستجو بر اساس شماره تلفن همچنان کاملاً کار می‌کند
         "user_profile__user__username",
         "user_profile__user__first_name",
         "user_profile__user__last_name",
@@ -259,6 +261,12 @@ class SubscriptionHistoryAdmin(admin.ModelAdmin):
             "user_profile__user",
             "subscription",
         )
+
+    @admin.display(description="شماره موبایل", ordering="user_profile__user__phone_number")
+    def user_phone_display(self, obj):
+        if obj.user_profile and obj.user_profile.user:
+            return obj.user_profile.user.phone_number
+        return "-"
 
     @admin.display(description="کاربر")
     def user_display(self, obj):
@@ -284,28 +292,23 @@ class SubscriptionHistoryAdmin(admin.ModelAdmin):
         end_date = obj.end_date
 
         if start_date and start_date > today:
-            # [اصلاح شد]
             return format_html(
                 '<span style="color: #fd7e14; font-weight: bold;">{}</span>', 'هنوز شروع نشده'
             )
         elif end_date is None:
             if start_date and start_date <= today:
-                # [اصلاح شد]
                 return format_html(
                     '<span style="color: #0d6efd; font-weight: bold;">{}</span>', 'فعال بدون تاریخ پایان'
                 )
             else:
-                # [اصلاح شد]
                 return format_html(
                     '<span style="color: #fd7e14; font-weight: bold;">{}</span>', 'هنوز شروع نشده'
                 )
         elif start_date and start_date <= today <= end_date:
-            # [اصلاح شد]
             return format_html(
                 '<span style="color: #198754; font-weight: bold;">{}</span>', 'فعال'
             )
         elif end_date < today:
-            # [اصلاح شد]
             return format_html(
                 '<span style="color: #dc3545; font-weight: bold;">{}</span>', 'منقضی‌شده'
             )
