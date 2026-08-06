@@ -30,7 +30,7 @@ pillow==10.4.0
 mutagen==1.47.0
 rarfile==4.1
 lz4==4.3.3
-mimetype==0.0.1
+mimetype==0.1.5
 
 # Async & Workers
 celery==5.4.0
