@@ -252,7 +252,9 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         response = HttpResponse()
         response['X-Accel-Redirect'] = f"/protected-media/{track.audio_file.name}"
         response['Content-Disposition'] = f'inline; filename="{safe_filename}"'
+
         return response
+
 
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated], url_path='download')
     def download(self, request, slug=None):
@@ -550,11 +552,5 @@ def download_album_zip_api(request, album_slug):
     safe_filename = quote(os.path.basename(export_record.zip_file.name))
     response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
     response['Content-Type'] = 'application/zip'
-
-    origin = request.headers.get('Origin')
-    if origin:
-        response['Access-Control-Allow-Origin'] = origin
-        response['Access-Control-Allow-Credentials'] = 'true'
-        response['Access-Control-Expose-Headers'] = 'Content-Disposition'
 
     return response
