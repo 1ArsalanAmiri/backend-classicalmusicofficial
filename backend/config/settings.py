@@ -56,6 +56,11 @@ DATABASES = {
 
 INSTALLED_APPS = [
     'daphne',
+
+    'unfold',
+    'unfold.contrib.filters',
+    'unfold.contrib.inlines',
+
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -321,3 +326,16 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 CSRF_COOKIE_SECURE = True
 SESSION_COOKIE_SECURE = True
+
+
+
+#-------UNFOLD-------------------
+UNFOLD = {
+    "SITE_TITLE": "پنل مدیریت کلود موزیک",
+    "SITE_HEADER": "Clmusic Admin",
+    "SITE_URL": "/",
+    "SIDEBAR": {
+        "show_search": True,
+        "show_all_applications": True,
+    },
+}
