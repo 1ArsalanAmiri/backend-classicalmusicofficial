@@ -19,11 +19,11 @@ class Subscription(models.Model):
 
         constraints = [
             models.CheckConstraint(
-                condition=models.Q(price__gte=0),
+                check=models.Q(price__gte=0),
                 name='subscription_price_gte_0'
             ),
             models.CheckConstraint(
-                condition=models.Q(duration_days__gt=0),
+                check=models.Q(duration_days__gt=0),
                 name='subscription_duration_gt_0'
             ),
         ]
