@@ -3,6 +3,8 @@ from .models import Artist, Album, Track, Genre, Instrument, Label
 from drf_spectacular.utils import extend_schema_field
 from rest_framework.reverse import reverse
 
+from ..common.models import PublishStatus
+
 
 class ArtistSerializer(serializers.ModelSerializer):
     artist_type_display = serializers.CharField(source='get_artist_type_display', read_only=True)
@@ -135,8 +137,12 @@ class AlbumDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'title_fa', 'slug', 'cover_image',
             'release_year', 'description', 'main_artists', 'on_this_album', 'label',
-            'total_tracks', 'total_duration_ms', 'likes_count', 'is_liked', 'status', 'album_type', 'tracks' # ✅ اضافه شد
+            'total_tracks', 'total_duration_ms', 'likes_count', 'is_liked', 'status', 'album_type', 'tracks'
         ]
+
+    def get_on_this_album(self, obj):
+        tracks = obj.tracks.filter(status=PublishStatus.PUBLISHED)
+        return TrackSerializer(tracks, many=True, context=self.context).data
 
 
 class GenreSerializer(serializers.ModelSerializer):
