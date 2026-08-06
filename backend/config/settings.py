@@ -349,5 +349,8 @@ JAZZMIN_SETTINGS = {
 }
 
 JAZZMIN_UI_TWEAKS = {
-    "theme": "zephyr",
+    "theme": "darkly",
+    "sidebar_classes": "sidebar-dark-primary",
+    "navbar_classes": "navbar-dark",
+    "brand_colour": "navbar-dark",
 }
