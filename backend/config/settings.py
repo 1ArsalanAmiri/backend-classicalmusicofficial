@@ -347,6 +347,6 @@ JAZZMIN_SETTINGS = {
         "music.Label": "fas fa-tag",
     },
 
-    "theme": "darkly",
+    "theme": "zephyr",
     # "theme": "default",
 }
