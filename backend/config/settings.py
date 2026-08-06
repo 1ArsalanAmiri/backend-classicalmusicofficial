@@ -57,8 +57,6 @@ DATABASES = {
 INSTALLED_APPS = [
     'daphne',
 
-    'jazzmin',
-
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -324,33 +322,3 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 CSRF_COOKIE_SECURE = True
 SESSION_COOKIE_SECURE = True
-
-
-
-#-------jazzmin-------------------
-JAZZMIN_SETTINGS = {
-    "site_title": "مدیریت سایت ClMusic",
-    "site_header": "Clmusic Admin",
-    "site_brand": "ClMusic",
-    "welcome_sign": "Welcome to ClMusic Admin Panel",
-    "search_model": ["music.Album", "music.Artist", "music.Track"],
-
-    "usermenu_links": [
-        {"name": "سایت اصلی", "url": "/", "new_window": True},
-    ],
-
-    "icons": {
-        "auth": "fas fa-users-cog",
-        "music.Artist": "fas fa-user-tie",
-        "music.Album": "fas fa-compact-disc",
-        "music.Track": "fas fa-music",
-        "music.Label": "fas fa-tag",
-    },
-}
-
-JAZZMIN_UI_TWEAKS = {
-    "theme": "darkly",
-    "sidebar_classes": "sidebar-dark-primary",
-    "navbar_classes": "navbar-dark",
-    "brand_colour": "navbar-dark",
-}
