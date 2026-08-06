@@ -30,7 +30,10 @@ class Migration(migrations.Migration):
             options={
                 'verbose_name': 'اشتراک',
                 'verbose_name_plural': 'اشتراک\u200cها',
-                'constraints': [models.CheckConstraint(condition=models.Q(('price__gte', 0)), name='subscription_price_gte_0'), models.CheckConstraint(condition=models.Q(('duration_days__gt', 0)), name='subscription_duration_gt_0')],
+                'constraints': [
+                    models.CheckConstraint(check=models.Q(('price__gte', 0)), name='subscription_price_gte_0'),
+                    models.CheckConstraint(check=models.Q(('duration_days__gt', 0)), name='subscription_duration_gt_0')
+                ],
             },
         ),
         migrations.CreateModel(
