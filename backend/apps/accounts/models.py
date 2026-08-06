@@ -32,11 +32,11 @@ class CustomUser(AbstractUser):
         verbose_name_plural = 'احراز هویت کاربران'
 
 
-    phone_number = PhoneNumberField(unique=True,region="IR",verbose_name="شماره موبایل")
+    phone_number = PhoneNumberField(unique=True, region="IR", verbose_name="شماره موبایل")
 
     email = models.EmailField(blank=True, null=True, verbose_name="ایمیل")
 
-    username = models.CharField(max_length=20, unique=True, verbose_name="نام کاربری" , blank=True, null=True)
+    username = models.CharField(max_length=20, unique=True, verbose_name="نام کاربری", blank=True, null=True)
 
     first_name = models.CharField(max_length=20, blank=True, verbose_name="نام")
 
@@ -69,3 +69,11 @@ class CustomUser(AbstractUser):
 
     def PhoneNumber(self):
         return self.phone_number
+
+    def get_username(self):
+        return str(self.phone_number) if self.phone_number else ""
+
+    def get_full_name(self):
+        if self.first_name or self.last_name:
+            return f"{self.first_name} {self.last_name}".strip()
+        return str(self.phone_number) if self.phone_number else ""
