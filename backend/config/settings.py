@@ -306,7 +306,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://www.clmusic.ir",
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 CORS_EXPOSE_HEADERS = ['Content-Disposition']
 
