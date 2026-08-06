@@ -346,7 +346,8 @@ JAZZMIN_SETTINGS = {
         "music.Track": "fas fa-music",
         "music.Label": "fas fa-tag",
     },
+}
 
+JAZZMIN_UI_TWEAKS = {
     "theme": "zephyr",
-    # "theme": "default",
 }
