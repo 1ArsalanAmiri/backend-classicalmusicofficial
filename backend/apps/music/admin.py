@@ -157,7 +157,6 @@ class AlbumAdmin(admin.ModelAdmin):
 
     @admin.display(description=_('نوع انتشار'), ordering='album_type')
     def display_album_type(self, obj):
-        # [اصلاح شد: اضافه شدن white-space: nowrap و display: inline-block برای جلوگیری از شکستن متن]
         if obj.album_type == AlbumType.OFFICIAL:
             return format_html(
                 '<span style="white-space: nowrap; display: inline-block; background-color: #28a745; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;">{}</span>',
@@ -199,7 +198,7 @@ class AlbumAdmin(admin.ModelAdmin):
         url = reverse('admin:album_batch_upload', args=[obj.pk])
         # [اصلاح شد: اضافه شدن white-space: nowrap و display: inline-block برای اینکه دکمه در یک خط بماند]
         return format_html(
-            '<a class="button" href="{}" style="white-space: nowrap; display: inline-block; background:#79aec8; color:white; padding:5px 10px; border-radius:4px; text-decoration:none;">آپلود فایل زیپ</a>',
+            '<a class="button" href="{}" style="white-space: nowrap; display: inline-block; background:#389dcf; color:white; padding:5px 10px; border-radius:4px; text-decoration:none;">آپلود فایل زیپ</a>',
             url
         )
 
