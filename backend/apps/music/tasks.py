@@ -18,6 +18,7 @@ from django.utils.text import get_valid_filename
 from .models import AlbumArchiveUpload, Track, Artist, AlbumZipExport, Genre, AlbumType , Album
 from .utils import MockStorageConnector
 from django.conf import settings
+from apps.common.models import PublishStatus
 
 
 logger = logging.getLogger(__name__)
@@ -356,7 +357,7 @@ def generate_album_zip_task(self, album_id: int):
         file_path = os.path.join(export_dir, file_name)
 
         with zipfile.ZipFile(file_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            for track in album.tracks.filter(status='PUBLISHED'):
+            for track in album.tracks.filter(status=PublishStatus.PUBLISHED):
                 if track.audio_file and os.path.exists(track.audio_file.path):
                     ext = os.path.splitext(track.audio_file.path)[1]
                     arcname = f"{track.track_number:02d} - {track.title}{ext}"
