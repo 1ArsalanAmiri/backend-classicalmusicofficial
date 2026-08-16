@@ -114,12 +114,13 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
         if self.action in ['list', 'retrieve']:
             return [AllowAny()]
         # در بخش کامنت، فقط دیدن کامنت‌ها آزاده اما ارسالش توکن می‌خواد
-        elif self.action == 'comments':
+        # نکته: اکشن کامنت از CommentableMixin میاد و اسمش manage_comments هست، نه comments
+        elif self.action == 'manage_comments':
             if self.request.method == 'POST':
                 return [IsAuthenticated()]
             return [AllowAny()]
-        # لایک و آن‌لایک کردن
-        elif self.action in ['like', 'unlike']:
+        # لایک کردن / برداشتن لایک - اکشن واقعی از LikableMixin با اسم like_toggle میاد
+        elif self.action == 'like_toggle':
             return [IsAuthenticated()]
         # عملیات‌های write مثل ساخت، آپدیت و حذف آلبوم
         return [IsAuthenticated()]
@@ -153,44 +154,6 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
 
         return qs
 
-    @extend_schema(methods=['POST'], request=CommentSerializer, responses={201: CommentSerializer})
-    @action(detail=True, methods=["get", "post"], url_path="comments")
-    def comments(self, request, slug=None):
-        album = self.get_object()
-
-        if request.method == "GET":
-            comments = Comment.objects.filter(
-                album=album,
-                is_approved=True,
-            ).select_related("user").order_by("-created_at")
-
-            page = self.paginate_queryset(comments)
-
-            if page is not None:
-                serializer = CommentSerializer(page, many=True, context={"request": request})
-                return self.get_paginated_response(serializer.data)
-
-            serializer = CommentSerializer(comments, many=True, context={"request": request})
-            return Response(serializer.data, status=status.HTTP_200_OK)
-
-        serializer = CommentCreateSerializer(data=request.data, context={"request": request})
-
-        if serializer.is_valid():
-            serializer.save(user=request.user, album=album)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
-    def like(self, request, slug=None):
-        album = self.get_object()
-        like_obj = album.likes.filter(user=request.user).first()
-
-        if like_obj:
-            like_obj.delete()
-            return Response({'is_liked': False, 'message': 'Unliked'}, status=status.HTTP_200_OK)
-        album.likes.create(user=request.user)
-        return Response({'is_liked': True, 'message': 'Liked'}, status=status.HTTP_201_CREATED)
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
