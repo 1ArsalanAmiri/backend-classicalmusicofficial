@@ -267,6 +267,9 @@ class AlbumZipExport(models.Model):
     album = models.ForeignKey('Album', on_delete=models.CASCADE, related_name='zip_exports')
     zip_file = models.FileField(upload_to='album_zips/', blank=True, null=True)
     status = models.CharField(max_length=20, choices=StatusChoices.choices, default=StatusChoices.PENDING)
+    # برای اینکه بشه به تسک سلری در حال اجرا وصل شد (AsyncResult) و منتظر
+    # نتیجه‌ش موند، بدون اینکه دوباره یک تسک تکراری صف بشه.
+    task_id = models.CharField(max_length=255, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
 
@@ -364,5 +367,3 @@ class PlayHistory(TimeStampedModel):
 
     def __str__(self):
         return f"{self.user} listened to {self.track}"
-
-

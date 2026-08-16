@@ -1,5 +1,6 @@
 from django.http import HttpResponse
 import mimetypes
+import logging
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -38,10 +39,15 @@ from urllib.parse import quote
 from django.core.files.storage import default_storage
 from django.contrib.contenttypes.models import ContentType
 from .tasks import generate_album_zip_task
+from celery.result import AsyncResult
+from celery.exceptions import TimeoutError as CeleryTimeoutError
 from rest_framework import status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.http import FileResponse
+
+
+logger = logging.getLogger(__name__)
 
 
 class AlbumBatchUploadAPIView(APIView):
@@ -154,6 +160,14 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
 
         return qs
 
+    # نکته: اکشن‌های «comments» و «like» که قبلاً اینجا با پیاده‌سازی دستی
+    # (و باگ‌دار) تعریف شده بودن حذف شدن. AlbumViewSet از CommentableMixin و
+    # LikableMixin ارث‌بری می‌کنه که خودشون همین مسیرها (comments/ و like/)
+    # رو با روش صحیح (بر اساس content_type + object_id) پیاده‌سازی می‌کنن.
+    # نسخه‌ی قبلی مستقیم روی Comment.objects.filter(album=...) و album.likes
+    # کوئری می‌زد که چون این فیلد/رابطه‌ها اصلاً روی مدل وجود ندارن باعث
+    # AttributeError/FieldError و ارور 500 می‌شد (و چون هر دو روی همون
+    # url_path ثبت می‌شدن، عملاً نسخه‌ی درستِ ارث‌بری‌شده رو هم شادو می‌کردن).
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -180,6 +194,23 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
 
+    # حداکثر مدتی که این اندپوینت حاضره توی همون درخواست اول منتظر بمونه
+    # تا فایل زیپ آماده بشه. اگه بیشتر از این طول کشید (آلبوم خیلی بزرگ،
+    # یا سرور شلوغ)، به‌جای قفل نگه‌داشتن کانکشن، برمی‌گرده به همون رفتار
+    # قبلی (PENDING/PROCESSING) تا فرانت با poll دوباره چک کنه.
+    # نکته: این عدد باید کوچیک‌تر از proxy_read_timeout توی Nginx و
+    # timeout توی gunicorn باشه، وگرنه قبل از این‌که Django جواب بده،
+    # Nginx خودش 504 برمی‌گردونه. (مثلاً روی این‌ها 40-45 ثانیه بذار.)
+    ZIP_WAIT_TIMEOUT = 30  # ثانیه
+
+    def _serve_zip_file(self, album, zip_export):
+        response = HttpResponse()
+        response['X-Accel-Redirect'] = f"/protected-media/{zip_export.zip_file.name}"
+        response['Content-Type'] = 'application/zip'
+        safe_filename = quote(f"{album.slug}.zip")
+        response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
+        return response
+
     @action(detail=True, methods=['get'], url_path='download-zip', permission_classes=[IsAuthenticated])
     def download_zip(self, request, slug=None):
         album = self.get_object()
@@ -193,27 +224,43 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
 
         zip_export = album.zip_exports.order_by('created_at').last()
 
-        # وضعیت ۱: فایل کاملاً آماده است
+        # وضعیت ۱: فایل از قبل کاملاً آماده است -> فوری سرو کن
         if zip_export and zip_export.status == AlbumZipExport.StatusChoices.COMPLETED and zip_export.zip_file:
-            # استفاده از Nginx برای تحویل فایل (Zero RAM Usage / Highly Optimized)
-            response = HttpResponse()
-            response['X-Accel-Redirect'] = f"/protected-media/{zip_export.zip_file.name}"
-            response['Content-Type'] = 'application/zip'
-            safe_filename = quote(f"{album.slug}.zip")
-            response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
-            return response
+            return self._serve_zip_file(album, zip_export)
 
-        # وضعیت ۲: فایل توسط یک تسک دیگر در حال ساخت است
-        if zip_export and zip_export.status == AlbumZipExport.StatusChoices.PROCESSING:
+        # وضعیت ۲: یک تسک دیگه از قبل در حال ساخت همین زیپه -> به همون وصل شو
+        # (به‌جای صف کردن یک تسک تکراری برای درخواست‌های همزمان چند کاربر)
+        if zip_export and zip_export.status == AlbumZipExport.StatusChoices.PROCESSING and zip_export.task_id:
+            async_result = AsyncResult(zip_export.task_id)
+        else:
+            async_result = generate_album_zip_task.delay(album.id)
+
+        # وضعیت ۳: منتظر می‌مونیم (بلاک می‌کنیم) تا حداکثر ZIP_WAIT_TIMEOUT
+        # ثانیه که تسک تموم بشه، و در همون درخواست اول جواب رو برمی‌گردونیم.
+        try:
+            async_result.get(timeout=self.ZIP_WAIT_TIMEOUT, propagate=True)
+        except CeleryTimeoutError:
             return Response(
-                {"detail": "فایل ZIP در حال پردازش است. لطفاً چند لحظه دیگر تلاش کنید.", "status": "PROCESSING"},
+                {
+                    "detail": "ساخت فایل ZIP بیشتر از حد معمول طول کشید. لطفاً چند لحظه دیگر مجدداً تلاش کنید.",
+                    "status": "PROCESSING",
+                },
                 status=status.HTTP_202_ACCEPTED
             )
+        except Exception:
+            logger.exception("generate_album_zip_task failed for album_id=%s", album.id)
+            return Response(
+                {"detail": "در ساخت فایل ZIP خطایی رخ داد. لطفاً دوباره تلاش کنید.", "status": "FAILED"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
-        # وضعیت ۳: هنوز درخواستی برای ساخت فایل وجود ندارد یا قبلاً Failed شده
-        generate_album_zip_task.delay(album.id)
+        # تسک تموم شد؛ رکورد رو دوباره از دیتابیس بخون و فایل رو سرو کن
+        zip_export = album.zip_exports.order_by('created_at').last()
+        if zip_export and zip_export.status == AlbumZipExport.StatusChoices.COMPLETED and zip_export.zip_file:
+            return self._serve_zip_file(album, zip_export)
+
         return Response(
-            {"detail": "دستور ساخت فایل ZIP به صف اضافه شد. لطفاً کمی بعد مجدداً تلاش کنید.", "status": "PENDING"},
+            {"detail": "فایل آماده نشد، لطفاً دوباره تلاش کنید.", "status": "PROCESSING"},
             status=status.HTTP_202_ACCEPTED
         )
 

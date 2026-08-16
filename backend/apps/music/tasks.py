@@ -357,6 +357,11 @@ def generate_album_zip_task(self, album_id: int):
         file_path = os.path.join(export_dir, file_name)
 
         with zipfile.ZipFile(file_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            # FIX: قبلاً status='PUBLISHED' (حروف بزرگ) بود که با مقدار واقعی
+            # ذخیره‌شده روی ترک‌ها ('published' - حروف کوچک، همون‌طور که موقع
+            # ساخت ترک از آرشیو ست می‌شه) مچ نمی‌شد. در نتیجه هیچ ترکی پیدا
+            # نمی‌شد، حلقه صفر بار اجرا می‌شد و یک زیپ کاملاً خالی (بدون خطا)
+            # با status=COMPLETED ساخته می‌شد.
             for track in album.tracks.filter(status=PublishStatus.PUBLISHED):
                 if track.audio_file and os.path.exists(track.audio_file.path):
                     ext = os.path.splitext(track.audio_file.path)[1]
