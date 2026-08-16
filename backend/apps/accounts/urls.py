@@ -4,10 +4,15 @@ from .views import (
     RequestDeleteAccountOTPView, VerifyDeleteAccountView,
     CustomTokenObtainPairView, CustomTokenRefreshView
 )
+from apps.common.views import SendOTPView , VerifyOTPView
 
 app_name = "accounts"
 
 urlpatterns = [
+
+    path('send-otp/', SendOTPView.as_view(), name='send-otp'),
+    path('verify-otp/',VerifyOTPView.as_view(), name='verify-otp'),
+
     path("reset-password/", ResetPasswordView.as_view(), name="change_password"),
     path("logout/", LogoutView.as_view(), name="logout"),
     path("delete-account/request/", RequestDeleteAccountOTPView.as_view(), name="request_delete_account"),
