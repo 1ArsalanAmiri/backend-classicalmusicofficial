@@ -11,6 +11,8 @@ from uuid import uuid4
 from logging import getLogger
 from django.conf import settings
 from django.utils import timezone
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 
 logger = getLogger(__name__)
 
@@ -185,6 +187,12 @@ class Album(TimeStampedModel):
     def on_this_album(self):
         return Artist.objects.filter(album_credits__album=self).distinct()
 
+    def get_tracks_for_zip(self):
+        return [track for track in self.tracks.all() if track.audio_file]
+
+    def get_zip_filename(self):
+        return f"album_{self.slug}.zip"
+
     def __str__(self):
         return self.title if self.title else _("بدون عنوان")
 
@@ -252,16 +260,16 @@ class AlbumArchiveUpload(TimeStampedModel):
 
 
 class AlbumZipExport(models.Model):
+    class StatusChoices(models.TextChoices):
+        PENDING = 'PENDING', 'Pending'
+        PROCESSING = 'PROCESSING', 'Processing'
+        COMPLETED = 'COMPLETED', 'Completed'
+        FAILED = 'FAILED', 'Failed'
+
     album = models.ForeignKey('Album', on_delete=models.CASCADE, related_name='zip_exports')
     zip_file = models.FileField(upload_to='album_zips/', blank=True, null=True)
-    status = models.CharField(max_length=20, default='pending')
+    status = models.CharField(max_length=20, choices=StatusChoices.choices, default=StatusChoices.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        try:
-            return f"{self.album.slug} - {self.status}"
-        except Album.DoesNotExist:
-            return f"(آلبوم حذف شده) - {self.status}"
 
 
 class Track(TimeStampedModel):
@@ -285,14 +293,22 @@ class Track(TimeStampedModel):
 
     class Meta:
         verbose_name = _("ترک")
-        verbose_name_plural = _("ترک‌ها")
-        ordering = ["album", "track_number"]
+        verbose_name_plural = _("ترک ها")
+        ordering = ['track_number']
         constraints = [
             models.UniqueConstraint(
                 fields=['album', 'track_number'],
-                name='uniq_track_position_in_album',
-                condition=models.Q(album__isnull=False) & models.Q(track_number__isnull=False)
+                name='unique_track_number_per_album',
+                condition=models.Q(album__isnull=False)
             )
+        ]
+        indexes = [
+            # بهینه‌سازی کوئری‌های لود ترک‌های آلبوم به ترتیب شماره
+            models.Index(fields=['album', 'track_number'], name='idx_track_album_num'),
+            # بهینه‌سازی فیلتر ترک‌های فعال بر اساس تاریخ انتشار
+            models.Index(fields=['status', 'created_at'], name='idx_track_status_created'),
+            # بهینه‌سازی فیلتر بر اساس ژانر و وضعیت
+            models.Index(fields=['genre', 'status'], name='idx_track_genre_status'),
         ]
 
     @property
@@ -350,3 +366,5 @@ class PlayHistory(TimeStampedModel):
 
     def __str__(self):
         return f"{self.user} listened to {self.track}"
+
+

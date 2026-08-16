@@ -44,7 +44,8 @@ class Ticket(TimeStampedModel):
         ordering = ['-updated_at']
 
     def __str__(self):
-        return f"[{self.get_ticket_type_display()}] {self.subject} - {self.user.username}"
+        user_identifier = getattr(self.user, 'username', None) or getattr(self.user, 'phone_number', str(self.user_id))
+        return f"[{self.get_ticket_type_display()}] {self.subject} - {user_identifier}"
 
 
 class TicketMessage(TimeStampedModel):
@@ -67,4 +68,5 @@ class TicketMessage(TimeStampedModel):
         ordering = ['created_at']
 
     def __str__(self):
-        return f"پیام از {self.sender.username} برای تیکت {self.ticket_id}"
+        sender_identifier = getattr(self.sender, 'username', None) or getattr(self.sender, 'phone_number', str(self.sender_id))
+        return f"پیام از {sender_identifier} برای تیکت {self.ticket_id}"

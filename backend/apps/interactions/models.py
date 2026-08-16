@@ -3,6 +3,7 @@ from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 
+
 class Comment(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='comments')
     body = models.TextField()
@@ -18,7 +19,7 @@ class Comment(models.Model):
 
     class Meta:
         verbose_name = 'کامنت'
-        verbose_name_plural = 'کامنت ها'
+        verbose_name_plural = 'کامنت‌ها'
         ordering = ['-created_at']
 
     def __str__(self):
@@ -34,7 +35,7 @@ class Like(models.Model):
 
     class Meta:
         verbose_name = 'لایک'
-        verbose_name_plural = 'لایک ها'
+        verbose_name_plural = 'لایک‌ها'
         constraints = [
             models.UniqueConstraint(fields=['user', 'content_type', 'object_id'], name='unique_user_like')
         ]
@@ -49,13 +50,12 @@ class Follow(models.Model):
 
     class Meta:
         verbose_name = 'فالو'
-        verbose_name_plural = 'فالویینگ ها'
+        verbose_name_plural = 'فالویینگ‌ها'
         constraints = [
             models.UniqueConstraint(fields=['user', 'content_type', 'object_id'], name='unique_user_follow')
         ]
 
 
-# For bookmarking the Blogs
 class Bookmark(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='bookmarks')
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
@@ -64,7 +64,11 @@ class Bookmark(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ('user', 'content_type', 'object_id')
+        verbose_name = 'بوک‌مارک'
+        verbose_name_plural = 'بوک‌مارک‌ها'
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'content_type', 'object_id'], name='unique_user_bookmark')
+        ]
         indexes = [
             models.Index(fields=['content_type', 'object_id']),
         ]

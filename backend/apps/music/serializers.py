@@ -9,13 +9,20 @@ from ..common.models import PublishStatus
 class ArtistSerializer(serializers.ModelSerializer):
     artist_type_display = serializers.CharField(source='get_artist_type_display', read_only=True)
     era_display = serializers.CharField(source='get_era_display', read_only=True)
+    is_followed = serializers.SerializerMethodField()
 
     class Meta:
         model = Artist
         fields = [
             'name', 'slug', 'nickname', 'country', 'birth_year', 'death_year', 'artist_type', 'artist_type_display',
-            'era', 'era_display', 'image', 'biography', 'likes_count', 'followers_count'
+            'era', 'era_display', 'image', 'biography', 'likes_count', 'followers_count', 'is_followed'
         ]
+
+    def get_is_followed(self, obj):
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.followers.filter(user=request.user).exists()
+        return False
 
 
 class ArtistBasicSerializer(serializers.ModelSerializer):

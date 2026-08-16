@@ -73,6 +73,13 @@ class TicketViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='close')
     def close(self, request, pk=None):
         ticket = self.get_object()
+
+        if ticket.status == TicketStatus.CLOSED:
+            return Response(
+                {"detail": "این تیکت از قبل بسته شده است."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         ticket.status = TicketStatus.CLOSED
         ticket.save(update_fields=['status', 'updated_at'])
 

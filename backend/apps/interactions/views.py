@@ -1,18 +1,15 @@
 from django.contrib.contenttypes.models import ContentType
 from django.db.models import OuterRef, Exists
-from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
-from rest_framework.response import Response
 
 from apps.interactions.mixins import LikableMixin, FollowableMixin, CommentableMixin
 from apps.music.models import Album, Track, Artist, Label
 from apps.music.serializers import AlbumListSerializer, TrackSerializer, ArtistSerializer, LabelListSerializer
-from .models import Like, Comment
-from .serializers import CommentSerializer
+from apps.interactions.models import Like
 
 
-class AlbumViewSet(CommentableMixin, viewsets.ReadOnlyModelViewSet):
+class AlbumViewSet(LikableMixin, CommentableMixin, viewsets.ReadOnlyModelViewSet):
     queryset = Album.objects.all()
     serializer_class = AlbumListSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
@@ -31,31 +28,8 @@ class AlbumViewSet(CommentableMixin, viewsets.ReadOnlyModelViewSet):
             qs = qs.annotate(is_liked=Exists(liked_subquery))
         return qs
 
-    @action(detail=True, methods=['get', 'post'], url_path='comment')
-    def comments(self, request, slug=None):
-        album = self.get_object()
-        album_ct = ContentType.objects.get_for_model(Album)
-        if request.method == 'GET':
-            comments = Comment.objects.filter(
-                content_type=album_ct,
-                object_id=album.pk,
-                is_approved=True)
-            serializer = CommentSerializer(comments, many=True)
-            return Response(serializer.data)
-        elif request.method == 'POST':
-            if not request.user.is_authenticated:
-                return Response({"detail": "لطفا ابتدا ثبت نام/لاگین کنید."}, status=401)
-            serializer = CommentSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            serializer.save(
-                user=request.user,
-                content_type=album_ct,
-                object_id=album.pk)
-            return Response({"message": "کامنت شما ثبت شد و پس از تایید نمایش داده خواهد شد.", "data": serializer.data},status=201)
-        return Response({"detail": "Method not allowed."}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
-
-class TrackViewSet(LikableMixin, viewsets.ReadOnlyModelViewSet):
+class TrackViewSet(LikableMixin, CommentableMixin, viewsets.ReadOnlyModelViewSet):
     queryset = Track.objects.all()
     serializer_class = TrackSerializer
     lookup_field = 'slug'

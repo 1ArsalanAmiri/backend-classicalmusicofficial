@@ -139,14 +139,3 @@ class VerifyDeleteAccountSerializer(serializers.Serializer):
         required=True,
         help_text=_("کد تایید ارسال شده به شماره موبایل")
     )
-    refresh = serializers.CharField(
-        required=True,
-        help_text=_("توکن Refresh برای باطل کردن نشست فعلی")
-    )
-
-    def validate_refresh(self, value):
-        try:
-            RefreshToken(value)
-        except TokenError:
-            raise serializers.ValidationError(_("توکن نامعتبر است یا قبلاً منقضی شده است."))
-        return value

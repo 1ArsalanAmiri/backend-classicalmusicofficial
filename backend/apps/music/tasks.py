@@ -15,19 +15,22 @@ from django.db import transaction
 from celery import shared_task
 from mutagen import File as MutagenFile
 from django.utils.text import get_valid_filename
-from .models import AlbumArchiveUpload, Track, Artist, AlbumZipExport, Genre, AlbumType
+from .models import AlbumArchiveUpload, Track, Artist, AlbumZipExport, Genre, AlbumType , Album
 from .utils import MockStorageConnector
+from django.conf import settings
+
 
 logger = logging.getLogger(__name__)
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, default_retry_delay=10)
 def process_album_archive_task(self, upload_record_id: int):
     temp_dir = None
     upload_record = None
 
     try:
-        upload_record = AlbumArchiveUpload.objects.select_related("album").prefetch_related("album__main_artists").get(id=upload_record_id)
+        upload_record = AlbumArchiveUpload.objects.select_related("album").prefetch_related("album__main_artists").get(
+            id=upload_record_id)
         album = upload_record.album
 
         upload_record.status = "extracting"
@@ -66,11 +69,12 @@ def process_album_archive_task(self, upload_record_id: int):
 
         total_files = len(audio_files)
         cover_extracted = bool(album.cover_image)
-        storage_connector = MockStorageConnector()
-        tracks_to_update = []
         task_warnings = []
 
         used_track_numbers = set(album.tracks.values_list('track_number', flat=True))
+
+        # آرایه نگهداشت اطلاعات ترک‌ها و هنرمندان جهت ذخیره دسته‌جمعی
+        tracks_data_list = []
 
         for index, file_path in enumerate(audio_files):
             raw_filename = os.path.basename(file_path)
@@ -79,6 +83,7 @@ def process_album_archive_task(self, upload_record_id: int):
                 os.chmod(file_path, 0o644)
             except Exception as e:
                 logger.warning(f"Could not change permissions for {file_path}: {e}")
+
             try:
                 try:
                     audio_raw = MutagenFile(file_path)
@@ -128,9 +133,6 @@ def process_album_archive_task(self, upload_record_id: int):
                 unique_suffix = uuid.uuid4().hex[:8]
                 safe_slug = f"{base_slug}-{unique_suffix}" if base_slug else f"track-{unique_suffix}"
 
-                if not safe_slug:
-                    safe_slug = f"track-{uuid.uuid4().hex[:10]}"
-
                 raw_track_number_list = audio_meta.get("tracknumber", [str(index + 1)])
                 raw_track_number = raw_track_number_list[0] if raw_track_number_list else str(index + 1)
                 try:
@@ -138,6 +140,7 @@ def process_album_archive_task(self, upload_record_id: int):
                     track_number = int(clean_track_str) if clean_track_str.isdigit() else (index + 1)
                 except (ValueError, TypeError, AttributeError):
                     track_number = index + 1
+
                 while track_number in used_track_numbers:
                     track_number += 1
                 used_track_numbers.add(track_number)
@@ -186,17 +189,20 @@ def process_album_archive_task(self, upload_record_id: int):
                     task_warnings.append(f"خطا در ذخیره‌سازی فایل {filename}")
                     continue
 
-                tracks_to_update.append({
-                    "album": album,
-                    "track_number": track_number,
-                    "defaults": {
-                        "title": safe_title,
-                        "slug": safe_slug,
-                        "genre": genre_obj,
-                        "duration_ms": duration_ms,
-                        "audio_file": saved_path,
-                        "status": "published",
-                    },
+                # ساخت نمونه ترک در حافظه RAM
+                track_instance = Track(
+                    album=album,
+                    track_number=track_number,
+                    title=safe_title,
+                    slug=safe_slug,
+                    genre=genre_obj,
+                    duration_ms=duration_ms,
+                    audio_file=saved_path,
+                    status="published"
+                )
+
+                tracks_data_list.append({
+                    "track_instance": track_instance,
                     "artist_objs": track_artists
                 })
 
@@ -209,24 +215,48 @@ def process_album_archive_task(self, upload_record_id: int):
                 task_warnings.append(f"خطا در پردازش کامل فایل {filename}")
                 continue
 
-        # -------- Database Save --------
-        saved_tracks_count = 0
-        for data in tracks_to_update:
-            track_title = data["defaults"].get("title", "Unknown")
+        # -------- Database Save (Optimized Bulk Insert/Update) --------
+        if tracks_data_list:
             try:
                 with transaction.atomic():
-                    track, created = Track.objects.update_or_create(
-                        album=data["album"],
-                        track_number=data["track_number"],
-                        defaults=data["defaults"],
-                    )
-                    if data["artist_objs"]:
-                        track.artists.add(*data["artist_objs"])
+                    tracks_to_create = [item["track_instance"] for item in tracks_data_list]
 
-                saved_tracks_count += 1
+                    # ۱. ایجاد یا آپدیت یکجای تمام ترک‌ها با یک کوئری
+                    Track.objects.bulk_create(
+                        tracks_to_create,
+                        update_conflicts=True,
+                        unique_fields=['album', 'track_number'],
+                        update_fields=['title', 'slug', 'genre', 'duration_ms', 'audio_file', 'status']
+                    )
+
+                    # ۲. بازیابی ID ترک‌های ایجادشده جهت اتصال Many-to-Many هنرمندان
+                    track_map = {
+                        t.track_number: t
+                        for t in Track.objects.filter(
+                            album=album,
+                            track_number__in=[item["track_instance"].track_number for item in tracks_data_list]
+                        )
+                    }
+
+                    # ۳. ساخت دسته‌جمعی روابط هنرمندان (Track.artists)
+                    TrackArtistThrough = Track.artists.through
+                    m2m_relations = []
+
+                    for item in tracks_data_list:
+                        num = item["track_instance"].track_number
+                        saved_track = track_map.get(num)
+                        if saved_track:
+                            for artist in item["artist_objs"]:
+                                m2m_relations.append(
+                                    TrackArtistThrough(track_id=saved_track.id, artist_id=artist.id)
+                                )
+
+                    if m2m_relations:
+                        TrackArtistThrough.objects.bulk_create(m2m_relations, ignore_conflicts=True)
+
             except Exception as db_err:
-                logger.error(f"DB Update failed for track {track_title}: {db_err}")
-                task_warnings.append(f"خطای دیتابیس در ذخیره ترک {track_title}")
+                logger.error(f"DB Bulk save failed for album {album.id}: {db_err}")
+                task_warnings.append(f"خطای دیتابیس در ذخیره دسته‌جمعی ترک‌ها: {db_err}")
 
         # -------- Auto-Sync پلی‌لیست‌های ادیتوریال --------
         if album.album_type == AlbumType.EDITORIAL_PLAYLIST:
@@ -309,3 +339,36 @@ def cleanup_old_album_zips():
     except Exception as e:
         logger.error(f"Error in cleanup_old_album_zips: {e}")
         return "Failed during cleanup."
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=10)
+def generate_album_zip_task(self, album_id: int):
+    try:
+        album = Album.objects.prefetch_related('tracks').get(pk=album_id)
+        zip_export, _ = AlbumZipExport.objects.get_or_create(album=album)
+
+        zip_export.status = AlbumZipExport.StatusChoices.PROCESSING
+        zip_export.save(update_fields=['status'])
+
+        export_dir = os.path.join(settings.MEDIA_ROOT, 'exports', 'albums')
+        os.makedirs(export_dir, exist_ok=True)
+        file_name = f"album_{album.id}_{int(timezone.now().timestamp())}.zip"
+        file_path = os.path.join(export_dir, file_name)
+
+        with zipfile.ZipFile(file_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for track in album.tracks.filter(status='PUBLISHED'):
+                if track.audio_file and os.path.exists(track.audio_file.path):
+                    ext = os.path.splitext(track.audio_file.path)[1]
+                    arcname = f"{track.track_number:02d} - {track.title}{ext}"
+                    zip_file.write(track.audio_file.path, arcname=arcname)
+
+        zip_export.zip_file = f"exports/albums/{file_name}"
+        zip_export.status = AlbumZipExport.StatusChoices.COMPLETED
+        zip_export.created_at = timezone.now()
+        zip_export.save()
+
+    except Exception as exc:
+        if 'zip_export' in locals():
+            zip_export.status = AlbumZipExport.StatusChoices.FAILED
+            zip_export.save(update_fields=['status'])
+        raise self.retry(exc=exc)

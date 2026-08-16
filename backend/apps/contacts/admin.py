@@ -1,3 +1,5 @@
+from datetime import timezone
+
 from django.contrib import admin
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
@@ -7,7 +9,7 @@ from .models import Ticket, TicketMessage, TicketStatus
 class TicketMessageInline(admin.TabularInline):
     model = TicketMessage
     extra = 1
-    fields = ['sender', 'message', 'created_at']
+    fields = ['message', 'created_at']
     readonly_fields = ['created_at']
 
     def get_extra(self, request, obj=None):
@@ -20,7 +22,7 @@ class TicketMessageInline(admin.TabularInline):
 class TicketAdmin(admin.ModelAdmin):
     list_display = ['id', 'subject', 'user', 'ticket_type', 'status_badge', 'updated_at', 'created_at']
     list_filter = ['status', 'ticket_type', 'created_at']
-    search_fields = ['subject', 'user__username', 'user__email', 'messages__message']
+    search_fields = ['subject', 'user__username', 'messages__message']
     readonly_fields = ['status', 'created_at', 'updated_at']
     inlines = [TicketMessageInline]
     actions = ['mark_as_closed', 'mark_as_open']
@@ -37,10 +39,10 @@ class TicketAdmin(admin.ModelAdmin):
     @admin.display(description=_('وضعیت'))
     def status_badge(self, obj):
         colors = {
-            TicketStatus.OPEN: '#e67e22',  # نارنجی
-            TicketStatus.USER_REPLIED: '#3498db',  # آبی
-            TicketStatus.ANSWERED: '#2ecc71',  # سبز
-            TicketStatus.CLOSED: '#7f8c8d',  # خاکستری
+            TicketStatus.OPEN: '#e67e22',
+            TicketStatus.USER_REPLIED: '#3498db',
+            TicketStatus.ANSWERED: '#2ecc71',
+            TicketStatus.CLOSED: '#7f8c8d',
         }
         color = colors.get(obj.status, '#000')
         return format_html(
@@ -55,10 +57,9 @@ class TicketAdmin(admin.ModelAdmin):
 
         for instance in instances:
             if isinstance(instance, TicketMessage):
-                is_new = instance.pk is None
-                if is_new and not instance.sender_id:
+                if not instance.pk and not hasattr(instance, 'sender_id'):
                     instance.sender = request.user
-                if is_new and instance.sender.is_staff:
+                if instance.sender and instance.sender.is_staff:
                     has_new_admin_reply = True
                 instance.save()
         formset.save_m2m()
@@ -69,10 +70,10 @@ class TicketAdmin(admin.ModelAdmin):
 
     @admin.action(description=_("بستن تیکت‌های انتخاب شده"))
     def mark_as_closed(self, request, queryset):
-        updated = queryset.update(status=TicketStatus.CLOSED)
+        updated = queryset.update(status=TicketStatus.CLOSED, updated_at=timezone.now())
         self.message_user(request, f"{updated} تیکت با موفقیت بسته شدند.")
 
     @admin.action(description=_("تغییر وضعیت به منتظر پاسخ"))
     def mark_as_open(self, request, queryset):
-        updated = queryset.update(status=TicketStatus.OPEN)
+        updated = queryset.update(status=TicketStatus.OPEN, updated_at=timezone.now())
         self.message_user(request, f"{updated} تیکت به وضعیت منتظر پاسخ تغییر کردند.")

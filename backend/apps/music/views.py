@@ -37,10 +37,16 @@ from django.utils import timezone
 from urllib.parse import quote
 from django.core.files.storage import default_storage
 from django.contrib.contenttypes.models import ContentType
+from .tasks import generate_album_zip_task
+from rest_framework import status, permissions
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from django.http import FileResponse
 
 
 class AlbumBatchUploadAPIView(APIView):
     parser_classes = (MultiPartParser, FormParser)
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, album_id):
         album = get_object_or_404(Album, id=album_id)
@@ -72,7 +78,6 @@ class AlbumBatchUploadAPIView(APIView):
 
 
 class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
-    permission_classes = [AllowAny]
     queryset = Artist.objects.all()
     serializer_class = ArtistSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
@@ -80,26 +85,47 @@ class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
     search_fields = ['name', 'nickname']
     lookup_field = 'slug'
 
+    def get_permissions(self):
+        # مسیرهای عمومی (لیست آلبوم‌ها و جزئیات)
+        if self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        # در بخش کامنت، فقط دیدن کامنت‌ها آزاده اما ارسالش توکن می‌خواد
+        elif self.action == 'comments':
+            if self.request.method == 'POST':
+                return [IsAuthenticated()]
+            return [AllowAny()]
+        # لایک و آن‌لایک کردن
+        elif self.action in ['like', 'unlike']:
+            return [IsAuthenticated()]
+        # عملیات‌های write مثل ساخت، آپدیت و حذف آلبوم
+        return [IsAuthenticated()]
+
 
 class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
-    permission_classes = [AllowAny]
     pagination_class = ClassicalMusicPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = AlbumFilter
-    search_fields = ['title', 'main_artists__name', 'main_artists__nickname', 'credits__artist__name',
-                     'credits__artist__nickname']
+    search_fields = ['title', 'main_artists__name', 'main_artists__nickname', 'credits__artist__name','credits__artist__nickname']
     ordering_fields = ['release_year', 'title']
     lookup_field = 'slug'
-    # نوع آلبومی که این ViewSet برمی‌گرداند. کلاس‌های فرزند (مثل EditorialPlaylistViewSet)
-    # فقط همین یک مقدار را override می‌کنند تا بقیه‌ی منطق عیناً بین آلبوم رسمی و
-    # پلی‌لیست ادیتوریال به اشتراک گذاشته شود و از drift بین دو پیاده‌سازی جلوگیری شود.
     album_type = AlbumType.OFFICIAL
 
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        # در بخش کامنت، فقط دیدن کامنت‌ها آزاده اما ارسالش توکن می‌خواد
+        elif self.action == 'comments':
+            if self.request.method == 'POST':
+                return [IsAuthenticated()]
+            return [AllowAny()]
+        # لایک و آن‌لایک کردن
+        elif self.action in ['like', 'unlike']:
+            return [IsAuthenticated()]
+        # عملیات‌های write مثل ساخت، آپدیت و حذف آلبوم
+        return [IsAuthenticated()]
+
     def get_queryset(self):
-        qs = Album.objects.filter(
-            status=PublishStatus.PUBLISHED,
-            album_type=self.album_type
-        ).select_related('label').prefetch_related(
+        qs = Album.objects.filter(status=PublishStatus.PUBLISHED).select_related('label').prefetch_related(
             'main_artists',
             Prefetch(
                 'tracks',
@@ -119,10 +145,16 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
                 object_id=OuterRef('pk')
             )
             qs = qs.annotate(is_liked=Exists(liked_subquery))
+
+        # 🟢 تغییر هوشمندانه: اگر در اکشن download_zip هستیم، فیلتر نوع آلبوم
+        # برداشته می‌شود تا پلی‌لیست‌های ادیتوریال هم توسط اسلاگ پیدا شوند.
+        if getattr(self, 'action', None) != 'download_zip':
+            qs = qs.filter(album_type=self.album_type)
+
         return qs
 
     @extend_schema(methods=['POST'], request=CommentSerializer, responses={201: CommentSerializer})
-    @action(detail=True, methods=["get", "post"], url_path="comments", permission_classes=[IsAuthenticatedOrReadOnly])
+    @action(detail=True, methods=["get", "post"], url_path="comments")
     def comments(self, request, slug=None):
         album = self.get_object()
 
@@ -149,6 +181,17 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def like(self, request, slug=None):
+        album = self.get_object()
+        like_obj = album.likes.filter(user=request.user).first()
+
+        if like_obj:
+            like_obj.delete()
+            return Response({'is_liked': False, 'message': 'Unliked'}, status=status.HTTP_200_OK)
+        album.likes.create(user=request.user)
+        return Response({'is_liked': True, 'message': 'Liked'}, status=status.HTTP_201_CREATED)
+
     def get_serializer_context(self):
         context = super().get_serializer_context()
         request = self.request
@@ -174,9 +217,45 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
 
+    @action(detail=True, methods=['get'], url_path='download-zip', permission_classes=[IsAuthenticated])
+    def download_zip(self, request, slug=None):
+        album = self.get_object()
+
+        # بررسی اشتراک و دسترسی کاربر
+        if not user_has_all_access(request.user):
+            return Response(
+                {"detail": "شما اشتراک فعال برای دانلود این آلبوم را ندارید."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        zip_export = album.zip_exports.last()
+
+        # وضعیت ۱: فایل کاملاً آماده است
+        if zip_export and zip_export.status == AlbumZipExport.StatusChoices.COMPLETED and zip_export.zip_file:
+            # استفاده از Nginx برای تحویل فایل (Zero RAM Usage / Highly Optimized)
+            response = HttpResponse()
+            response['X-Accel-Redirect'] = f"/protected-media/{zip_export.zip_file.name}"
+            response['Content-Type'] = 'application/zip'
+            safe_filename = quote(f"{album.slug}.zip")
+            response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
+            return response
+
+        # وضعیت ۲: فایل توسط یک تسک دیگر در حال ساخت است
+        if zip_export and zip_export.status == AlbumZipExport.StatusChoices.PROCESSING:
+            return Response(
+                {"detail": "فایل ZIP در حال پردازش است. لطفاً چند لحظه دیگر تلاش کنید.", "status": "PROCESSING"},
+                status=status.HTTP_202_ACCEPTED
+            )
+
+        # وضعیت ۳: هنوز درخواستی برای ساخت فایل وجود ندارد یا قبلاً Failed شده
+        generate_album_zip_task.delay(album.id)
+        return Response(
+            {"detail": "دستور ساخت فایل ZIP به صف اضافه شد. لطفاً کمی بعد مجدداً تلاش کنید.", "status": "PENDING"},
+            status=status.HTTP_202_ACCEPTED
+        )
+
 
 class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
-    permission_classes = [AllowAny]
     pagination_class = ClassicalMusicPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = TrackFilter
@@ -189,6 +268,15 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
     search_fields = ['title', 'artists__name', 'artists__nickname']
     ordering_fields = ['track_number', 'release_date']
     lookup_field = 'slug'
+
+
+    def get_permissions(self):
+        # اندپوینت‌های خواندنی و عمومی ترک‌ها
+        if self.action in ['list', 'retrieve', 'singles', 'chosen']:
+            return [AllowAny()]
+        # اکشن like از LikableMixin نیازمند توکن خواهد بود
+        return [IsAuthenticated()]
+
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -365,6 +453,11 @@ class EraListView(APIView):
 class LabelViewSet(FollowableMixin, LikableMixin, viewsets.ReadOnlyModelViewSet):
     lookup_field = 'slug'
 
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
     def get_queryset(self):
         queryset = Label.objects.all()
         if self.action == 'retrieve':
@@ -486,71 +579,3 @@ def get_album_and_tracks(album_slug):
     album = get_object_or_404(Album, slug=album_slug)
     tracks = list(album.tracks.select_related())
     return album, tracks
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def download_album_zip_api(request, album_slug):
-    if not user_has_all_access(request.user):
-        return Response(
-            {"detail": "شما اشتراک فعال برای دانلود آلبوم را ندارید."},
-            status=status.HTTP_403_FORBIDDEN
-        )
-    album = get_object_or_404(Album, slug=album_slug)
-    tracks = list(album.tracks.all())
-
-    if not tracks:
-        return Response({"error": "آهنگی توی این آلبوم پیدا نشد. دوباره بررسی کنید یا به پشتیبانی پیام بدید."},
-                        status=status.HTTP_404_NOT_FOUND)
-
-    with transaction.atomic():
-        existing_export = AlbumZipExport.objects.select_for_update().filter(
-            album=album,
-            status='completed',
-            zip_file__isnull=False
-        ).exclude(zip_file='').first()
-
-    file_exists_physically = False
-    if existing_export and existing_export.zip_file:
-        if os.path.exists(existing_export.zip_file.path):
-            file_exists_physically = True
-
-    if file_exists_physically:
-        export_record = existing_export
-    else:
-        export_record = AlbumZipExport(album=album, status='pending')
-        temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
-
-        try:
-            with zipfile.ZipFile(temp_zip.name, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for track in tracks:
-                    audio = getattr(track, "audio_file", None)
-                    if audio and audio.name and default_storage.exists(audio.name):
-                        file_path = audio.path
-                        file_name = os.path.basename(file_path)
-                        zipf.write(file_path, arcname=file_name)
-
-            with open(temp_zip.name, 'rb') as f:
-                export_record.zip_file.save(f"{album.slug}.zip", File(f), save=False)
-
-            export_record.status = 'completed'
-            export_record.save()
-
-        except Exception:
-            if os.path.exists(temp_zip.name):
-                os.unlink(temp_zip.name)
-            return Response({"error": "ساخت فایل زیپ به مشکل خورد، به پشتیبانی پیام بدید."},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        finally:
-            if os.path.exists(temp_zip.name):
-                os.unlink(temp_zip.name)
-
-    nginx_internal_path = f"/protected-media/{export_record.zip_file.name}"
-
-    response = HttpResponse()
-    response['X-Accel-Redirect'] = nginx_internal_path
-    safe_filename = quote(os.path.basename(export_record.zip_file.name))
-    response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
-    response['Content-Type'] = 'application/zip'
-
-    return response

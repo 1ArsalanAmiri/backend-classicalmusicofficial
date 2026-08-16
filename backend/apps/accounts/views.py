@@ -1,41 +1,49 @@
+import uuid
+import random
 from django.contrib.auth import authenticate
+from django.core.cache import cache
 from rest_framework import status, serializers
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
-from rest_framework_simplejwt.views import TokenObtainPairView ,TokenRefreshView
-from .serializers import LogoutSerializer, ResetPasswordSerializer, \
-    DeleteAccountSerializer, LoginSerializer, VerifyDeleteAccountSerializer
-import uuid
-import time
-from django.core.cache import cache
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-
+from .serializers import (
+    ResetPasswordSerializer,
+    LoginSerializer,
+    VerifyDeleteAccountSerializer
+)
 
 OTP_EXPIRY_SECONDS = 300
 MAX_OTP_ATTEMPTS = 3
 
 
-
 class LoginView(APIView):
     serializer_class = LoginSerializer
+    permission_classes = [AllowAny]
 
     def post(self, request):
-        phone_number = request.data.get('phone_number')
-        password = request.data.get('password')
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        phone_number = serializer.validated_data.get('phone_number')
+        password = serializer.validated_data.get('password')
 
         user = authenticate(request, phone_number=phone_number, password=password)
         if not user:
-            raise serializers.ValidationError("Username or password is incorrect.")
+            return Response(
+                {"error": "شماره تلفن یا رمز عبور اشتباه است."},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
 
         refresh = RefreshToken.for_user(user)
 
         response = Response({
             "access": str(refresh.access_token),
-            "message": "Authenticated successfully"
-        })
+            "message": "ورود با موفقیت انجام شد."
+        }, status=status.HTTP_200_OK)
 
         response.set_cookie(
             key='refresh_token',
@@ -49,7 +57,6 @@ class LoginView(APIView):
         return response
 
 
-
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -58,7 +65,7 @@ class LogoutView(APIView):
 
         if not refresh_token_string:
             return Response(
-                {"error": "Refresh Token is Required (Not found in cookies)"},
+                {"error": "توکن رفرش در کوکی یافت نشد."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -67,15 +74,15 @@ class LogoutView(APIView):
 
             if str(token['user_id']) != str(request.user.id):
                 return Response(
-                    {"error": "You Dont Have Permission For This Operation."},
+                    {"error": "شما اجازه انجام این عملیات را ندارید."},
                     status=status.HTTP_403_FORBIDDEN
                 )
 
             token.blacklist()
 
             response = Response(
-                {"message": "Logout Success, Blacklisted Token."},
-                status=status.HTTP_205_RESET_CONTENT
+                {"message": "خروج با موفقیت انجام شد."},
+                status=status.HTTP_200_OK
             )
 
             response.delete_cookie(
@@ -87,91 +94,71 @@ class LogoutView(APIView):
 
         except TokenError:
             return Response(
-                {"error": "Refresh Token Invalid Or Used."},
+                {"error": "توکن رفرش نامعتبر است یا قبلاً استفاده شده است."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        except Exception as e:
+        except Exception:
             return Response(
-                {"error": "Internal Server Error While Logging out. Please Try Again..."},
+                {"error": "خطای داخلی سرور در هنگام خروج. لطفاً دوباره تلاش کنید."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
 
-
 class ResetPasswordView(APIView):
-
     serializer_class = ResetPasswordSerializer
     permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = ResetPasswordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
         serializer.save()
-        return Response({"message": "Password has been reset successfully."},status=status.HTTP_200_OK)
 
-
-
-class DeleteAccountView(APIView):
-
-    serializer_class = DeleteAccountSerializer
-    permission_classes = [IsAuthenticated]
-
-    def delete(self, request):
-        serializer = DeleteAccountSerializer(data=request.data, context={'request': request})
-        serializer.is_valid(raise_exception=True)
-
-        user = request.user
-        refresh_token_string = request.COOKIES.get('refresh_token')
-
-        try:
-            token = RefreshToken(refresh_token_string)
-            token.blacklist()
-        except TokenError:
-            pass
-
-        user.is_active = False
-
-        fake_identifier = str(uuid.uuid4())[:8]
-        user.phone_number = f"+98000{fake_identifier}"
-        user.first_name = "Deleted"
-        user.last_name = "User"
-        user.email = ""
-        user.username = None
-
-        user.save()
-
-        response = Response(
-            {"message": "حساب کاربری شما با موفقیت غیرفعال و حذف شد."},
-            status=status.HTTP_204_NO_CONTENT
+        return Response(
+            {"message": "رمز عبور با موفقیت تغییر یافت."},
+            status=status.HTTP_200_OK
         )
 
-        response.delete_cookie('refresh_token', samesite='Lax')
 
-        return response
+class RequestDeleteAccountOTPView(APIView):
+    permission_classes = [IsAuthenticated]
 
+    def post(self, request):
+        phone_number = str(request.user.phone_number)
+        otp = str(random.randint(100000, 999999))
+
+        cache_key_otp = f"otp:{phone_number}"
+        cache_key_attempts = f"otp_attempts:{phone_number}"
+
+        cache.set(cache_key_otp, otp, timeout=OTP_EXPIRY_SECONDS)
+        cache.delete(cache_key_attempts)
+
+        # TODO: فراخوانی وب‌سرویس پیامک برای ارسال otp به کاربر
+
+        return Response(
+            {"message": "کد تایید برای حذف حساب ارسال شد."},
+            status=status.HTTP_200_OK
+        )
 
 
 class VerifyDeleteAccountView(APIView):
-
     serializer_class = VerifyDeleteAccountSerializer
     permission_classes = [IsAuthenticated]
 
     def delete(self, request):
-        otp_input = request.data.get("otp")
+        serializer = VerifyDeleteAccountSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        otp_input = str(serializer.validated_data.get("otp")).strip()
         refresh_token = request.COOKIES.get('refresh_token')
 
-        if not otp_input or not refresh_token:
+        if not refresh_token:
             return Response(
-                {"error": "فیلدهای otp و refresh الزامی هستند."},
+                {"error": "توکن رفرش در کوکی یافت نشد."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        otp_input = str(otp_input).strip()
-
         phone_number = str(request.user.phone_number)
-
         cache_key_otp = f"otp:{phone_number}"
         cache_key_attempts = f"otp_attempts:{phone_number}"
 
@@ -181,7 +168,7 @@ class VerifyDeleteAccountView(APIView):
 
             if not cached_otp:
                 return Response(
-                    {"error": "OTP not found or expired."},
+                    {"error": "کد تایید یافت نشد یا منقضی شده است."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -189,7 +176,7 @@ class VerifyDeleteAccountView(APIView):
                 cache.delete(cache_key_otp)
                 cache.delete(cache_key_attempts)
                 return Response(
-                    {"error": "Max attempts reached. Request a new OTP."},
+                    {"error": "تعداد تلاش‌های ناموفق بیش از حد مجاز است. مجدداً کد جدید دریافت کنید."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -199,49 +186,50 @@ class VerifyDeleteAccountView(APIView):
                 except ValueError:
                     cache.set(cache_key_attempts, attempts + 1, timeout=OTP_EXPIRY_SECONDS)
 
-                return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": "کد تایید اشتباه است."}, status=status.HTTP_400_BAD_REQUEST)
 
-
+            # بلاک‌لیست کردن Refresh Token
             try:
                 token = RefreshToken(refresh_token)
                 token.blacklist()
             except TokenError:
-                return Response(
-                    {"error": "توکن نامعتبر است یا قبلاً منقضی شده است."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                pass
 
+            # آنونیمایز و غیرفعال‌سازی حساب
             user = request.user
             user.is_active = False
-            fake_identifier = str(int(time.time()))[-7:]
+
+            # استفاده از UUID برای جلوگیری از خطای Uniqueness دیتابیس
+            fake_identifier = str(uuid.uuid4())[:8]
             user.phone_number = f"+98000{fake_identifier}"
-            user.first_name = ""
-            user.last_name = ""
+            user.first_name = "Deleted"
+            user.last_name = "User"
+            user.email = ""
+            user.username = None
             user.save()
 
             cache.delete(cache_key_otp)
             cache.delete(cache_key_attempts)
 
             response = Response(
-                {"notice": "حساب کاربری شما با موفقیت حذف شد."},
-                status=status.HTTP_204_NO_CONTENT
+                {"message": "حساب کاربری شما با موفقیت غیرفعال و حذف شد."},
+                status=status.HTTP_200_OK
             )
             response.delete_cookie('refresh_token', samesite='Lax')
             return response
 
-        except Exception as e:
+        except Exception:
             return Response(
-                {"error": "An unexpected error occurred.", "details": str(e)},
+                {"error": "خطایی در پردازش درخواست رخ داد. لطفاً دوباره تلاش کنید."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     def post(self, request, *args, **kwargs):
         response = super().post(request, *args, **kwargs)
 
-        if response.status_code == 200:
+        if response.status_code == status.HTTP_200_OK:
             refresh_token = response.data.get('refresh')
 
             if 'refresh' in response.data:
@@ -256,7 +244,6 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 secure=True,
             )
         return response
-
 
 
 class CustomTokenRefreshView(TokenRefreshView):
