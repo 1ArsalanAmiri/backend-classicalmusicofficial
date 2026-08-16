@@ -29,13 +29,29 @@ class LikableMixin:
     def like_toggle(self, request, *args, **kwargs):
         obj = self.get_object()
         content_type = ContentType.objects.get_for_model(obj)
+
         if request.method == 'POST':
             _, created = Like.objects.get_or_create(user=request.user, content_type=content_type, object_id=obj.pk)
+
+            # هندل کردن آپدیت کانتر لایک در صورت وجود در مدل
+            if created and hasattr(obj, 'likes_count'):
+                obj.likes_count += 1
+                obj.save(update_fields=['likes_count'])
+
             return Response({"message": "لایک شد."}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
-        deleted, _ = Like.objects.filter(user=request.user, content_type=content_type, object_id=obj.pk).delete()
-        return Response({"message": "لایک برداشته شد."} if deleted else {"error": "لایک یافت نشد."},
-                        status=status.HTTP_204_NO_CONTENT if deleted else status.HTTP_404_NOT_FOUND)
+        elif request.method == 'DELETE':
+            deleted, _ = Like.objects.filter(user=request.user, content_type=content_type, object_id=obj.pk).delete()
+
+            # کسر کردن کانتر
+            if deleted and hasattr(obj, 'likes_count') and obj.likes_count > 0:
+                obj.likes_count -= 1
+                obj.save(update_fields=['likes_count'])
+
+            return Response({"message": "لایک برداشته شد."} if deleted else {"error": "لایک یافت نشد."},
+                            status=status.HTTP_204_NO_CONTENT if deleted else status.HTTP_404_NOT_FOUND)
+
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
 class FollowableMixin:
@@ -52,6 +68,9 @@ class FollowableMixin:
                     object_id=obj.pk
                 )
                 if created:
+                    if hasattr(obj, 'followers_count'):
+                        obj.followers_count += 1
+                        obj.save(update_fields=['followers_count'])
                     return Response({"message": "فالو شد."}, status=status.HTTP_201_CREATED)
                 return Response({"message": "شما قبلا این مورد را فالو کرده‌اید."}, status=status.HTTP_200_OK)
             except IntegrityError:
@@ -63,10 +82,15 @@ class FollowableMixin:
                 content_type=content_type,
                 object_id=obj.pk
             ).delete()
+
             if deleted:
+                if hasattr(obj, 'followers_count') and obj.followers_count > 0:
+                    obj.followers_count -= 1
+                    obj.save(update_fields=['followers_count'])
                 return Response({"message": "آنفالو شد."}, status=status.HTTP_204_NO_CONTENT)
             return Response({"error": "فالویی یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
-        return Response({"error": "خطا ، لطفا به پشتیبانی پیام بدهید."} , status=status.HTTP_403_FORBIDDEN)
+
+        return Response({"error": "خطا ، لطفا به پشتیبانی پیام بدهید."}, status=status.HTTP_403_FORBIDDEN)
 
 
 class BookmarkableMixin:

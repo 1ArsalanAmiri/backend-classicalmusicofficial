@@ -17,8 +17,6 @@ from django.contrib.contenttypes.models import ContentType
 logger = getLogger(__name__)
 
 
-# Choices
-
 class ArtistRole(models.TextChoices):
     COMPOSER = "composer", _("آهنگساز")
     CONDUCTOR = "conductor", _("رهبر ارکستر")

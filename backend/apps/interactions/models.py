@@ -3,7 +3,6 @@ from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 
-
 class Comment(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='comments')
     body = models.TextField()
@@ -25,7 +24,6 @@ class Comment(models.Model):
     def __str__(self):
         return f"Comment by {self.user} on {self.content_object}"
 
-
 class Like(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='likes')
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
@@ -40,7 +38,6 @@ class Like(models.Model):
             models.UniqueConstraint(fields=['user', 'content_type', 'object_id'], name='unique_user_like')
         ]
 
-
 class Follow(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='follows')
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
@@ -54,7 +51,6 @@ class Follow(models.Model):
         constraints = [
             models.UniqueConstraint(fields=['user', 'content_type', 'object_id'], name='unique_user_follow')
         ]
-
 
 class Bookmark(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='bookmarks')
