@@ -371,4 +371,4 @@ def generate_album_zip_task(self, album_id: int):
         if 'zip_export' in locals():
             zip_export.status = AlbumZipExport.StatusChoices.FAILED
             zip_export.save(update_fields=['status'])
-        raise self.retry(exc=exc)
+        raise self.retry(exc=exc, countdown=10)

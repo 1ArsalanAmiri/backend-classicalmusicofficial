@@ -9,7 +9,12 @@ from ..common.models import PublishStatus
 class ArtistSerializer(serializers.ModelSerializer):
     artist_type_display = serializers.CharField(source='get_artist_type_display', read_only=True)
     era_display = serializers.CharField(source='get_era_display', read_only=True)
-    is_followed = serializers.SerializerMethodField()
+    # FIX: Artist has no `followers` reverse relation (Follow uses a GenericForeignKey,
+    # not a direct FK to Artist), so obj.followers crashed with AttributeError.
+    # ArtistViewSet.get_queryset() already annotates `is_followed` via an Exists()
+    # subquery on Follow (matching content_type + object_id), so we just read that
+    # annotation here instead of querying a non-existent relation.
+    is_followed = serializers.BooleanField(read_only=True, default=False)
 
     class Meta:
         model = Artist
@@ -17,12 +22,6 @@ class ArtistSerializer(serializers.ModelSerializer):
             'name', 'slug', 'nickname', 'country', 'birth_year', 'death_year', 'artist_type', 'artist_type_display',
             'era', 'era_display', 'image', 'biography', 'likes_count', 'followers_count', 'is_followed'
         ]
-
-    def get_is_followed(self, obj):
-        request = self.context.get('request')
-        if request and request.user.is_authenticated:
-            return obj.followers.filter(user=request.user).exists()
-        return False
 
 
 class ArtistBasicSerializer(serializers.ModelSerializer):
@@ -143,7 +142,7 @@ class AlbumDetailSerializer(serializers.ModelSerializer):
         model = Album
         fields = [
             'id', 'title', 'title_fa', 'slug', 'cover_image',
-            'release_year', 'description','is_liked', 'main_artists', 'on_this_album', 'label',
+            'release_year', 'description', 'is_liked', 'main_artists', 'on_this_album', 'label',
             'total_tracks', 'total_duration_ms', 'likes_count', 'status', 'album_type', 'tracks'
         ]
 
@@ -180,10 +179,12 @@ class LabelDetailSerializer(serializers.ModelSerializer):
     albums = serializers.SerializerMethodField()
     singles = serializers.SerializerMethodField()
 
+    is_followed = serializers.BooleanField(read_only=True, default=False)
+
     class Meta:
         model = Label
         fields = [
-            'name', 'slug', 'logo', 'country', 'website', 'description',
+            'name', 'slug', 'logo', 'country', 'website', 'description', 'is_followed',
             'albums_count', 'tracks_count', 'albums', 'singles'
         ]
 

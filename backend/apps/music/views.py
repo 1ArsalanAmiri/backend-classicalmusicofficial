@@ -228,7 +228,7 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        zip_export = album.zip_exports.last()
+        zip_export = album.zip_exports.order_by('created_at').last()
 
         # وضعیت ۱: فایل کاملاً آماده است
         if zip_export and zip_export.status == AlbumZipExport.StatusChoices.COMPLETED and zip_export.zip_file:
@@ -335,14 +335,13 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         if not user_has_stream_access(request.user):
             return Response({"detail": "شما اشتراک فعال برای پخش این آهنگ را ندارید."},
                             status=status.HTTP_403_FORBIDDEN)
-
         safe_filename = os.path.basename(track.audio_file.name)
+        content_type, _ = mimetypes.guess_type(track.audio_file.name)
         response = HttpResponse()
         response['X-Accel-Redirect'] = f"/protected-media/{track.audio_file.name}"
+        response['Content-Type'] = content_type or 'audio/mpeg'
         response['Content-Disposition'] = f'inline; filename="{safe_filename}"'
-
         return response
-
 
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated], url_path='download')
     def download(self, request, slug=None):
@@ -353,10 +352,12 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
             return Response({"detail": "شما اشتراک فعال برای دانلود این آهنگ را ندارید."},
                             status=status.HTTP_403_FORBIDDEN)
 
+        content_type, _ = mimetypes.guess_type(track.audio_file.name)
         accel_path = f"/protected-media/{track.audio_file.name}"
+
         response = HttpResponse()
         response['X-Accel-Redirect'] = accel_path
-        response['Content-Type'] = ''
+        response['Content-Type'] = content_type or 'application/octet-stream'
         safe_filename = quote(track.audio_file.name.split("/")[-1])
         response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
         return response
