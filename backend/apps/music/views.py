@@ -45,6 +45,7 @@ from rest_framework import status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.http import FileResponse
+from django.views.decorators.cache import never_cache
 
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,7 @@ class AlbumBatchUploadAPIView(APIView):
             "task_id": task.id
         }, status=status.HTTP_202_ACCEPTED)
 
-
+@method_decorator(never_cache, name='dispatch')
 class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
     queryset = Artist.objects.all()
     serializer_class = ArtistSerializer
@@ -106,7 +107,7 @@ class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
         # عملیات‌های write مثل ساخت، آپدیت و حذف آلبوم
         return [IsAuthenticated()]
 
-
+@method_decorator(never_cache, name='dispatch')
 class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     pagination_class = ClassicalMusicPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -264,7 +265,7 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
             status=status.HTTP_202_ACCEPTED
         )
 
-
+@method_decorator(never_cache, name='dispatch')
 class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
     pagination_class = ClassicalMusicPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -279,14 +280,17 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
     ordering_fields = ['track_number', 'release_date']
     lookup_field = 'slug'
 
-
     def get_permissions(self):
-        # اندپوینت‌های خواندنی و عمومی ترک‌ها
+        # ۱. اندپوینت‌های کاملاً عمومی که نیاز به توکن ندارند
         if self.action in ['list', 'retrieve', 'singles', 'chosen']:
             return [AllowAny()]
-        # اکشن like از LikableMixin نیازمند توکن خواهد بود
-        return [IsAuthenticated()]
 
+        # ۲. اکشن‌هایی که حتماً نیاز به توکن (احراز هویت) دارند (شامل استریم و دانلود)
+        if self.action in ['stream', 'download', 'record_play', 'like_toggle']:
+            return [IsAuthenticated()]
+
+        # پیش‌فرض برای هر اکشن دیگری
+        return [IsAuthenticated()]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -460,7 +464,7 @@ class EraListView(APIView):
         ]
         return Response(eras)
 
-
+@method_decorator(never_cache, name='dispatch')
 class LabelViewSet(FollowableMixin, LikableMixin, viewsets.ReadOnlyModelViewSet):
     lookup_field = 'slug'
 

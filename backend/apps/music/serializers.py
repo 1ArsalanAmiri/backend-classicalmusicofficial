@@ -168,9 +168,14 @@ class InstrumentSerializer(serializers.ModelSerializer):
 
 
 class LabelListSerializer(serializers.ModelSerializer):
+    # FIX: LabelViewSet.get_queryset() annotates `is_followed` via an Exists() subquery
+    # on Follow, but this serializer never exposed the field, so the list endpoint
+    # always silently dropped it. Added it exactly like LabelDetailSerializer already does.
+    is_followed = serializers.BooleanField(read_only=True, default=False)
+
     class Meta:
         model = Label
-        fields = ['name', 'slug', 'logo', 'likes_count', 'followers_count']
+        fields = ['name', 'slug', 'logo', 'likes_count', 'followers_count', 'is_followed']
 
 
 class LabelDetailSerializer(serializers.ModelSerializer):

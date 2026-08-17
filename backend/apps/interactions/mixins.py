@@ -33,20 +33,18 @@ class LikableMixin:
         if request.method == 'POST':
             _, created = Like.objects.get_or_create(user=request.user, content_type=content_type, object_id=obj.pk)
 
-            # هندل کردن آپدیت کانتر لایک در صورت وجود در مدل
-            if created and hasattr(obj, 'likes_count'):
-                obj.likes_count += 1
-                obj.save(update_fields=['likes_count'])
+            # نکته: دیگر شمارنده را دستی افزایش نمی‌دهیم.
+            # سیگنال update_likes_count در signals.py با هر post_save/post_delete روی Like
+            # به‌صورت خودکار count واقعی را از دیتابیس می‌شمارد و ذخیره می‌کند.
+            # افزایش دستی obj.likes_count اینجا باعث می‌شد نسخه‌ی stale شیء (obj)،
+            # مقدار درستِ ذخیره‌شده توسط سیگنال را بلافاصله overwrite کند.
 
             return Response({"message": "لایک شد."}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
         elif request.method == 'DELETE':
             deleted, _ = Like.objects.filter(user=request.user, content_type=content_type, object_id=obj.pk).delete()
 
-            # کسر کردن کانتر
-            if deleted and hasattr(obj, 'likes_count') and obj.likes_count > 0:
-                obj.likes_count -= 1
-                obj.save(update_fields=['likes_count'])
+            # همانند بالا: کسر کردن دستی کانتر حذف شد، سیگنال خودش count واقعی را می‌نویسد.
 
             return Response({"message": "لایک برداشته شد."} if deleted else {"error": "لایک یافت نشد."},
                             status=status.HTTP_204_NO_CONTENT if deleted else status.HTTP_404_NOT_FOUND)
@@ -68,9 +66,11 @@ class FollowableMixin:
                     object_id=obj.pk
                 )
                 if created:
-                    if hasattr(obj, 'followers_count'):
-                        obj.followers_count += 1
-                        obj.save(update_fields=['followers_count'])
+                    # نکته: افزایش دستی followers_count حذف شد.
+                    # سیگنال update_followers_count در signals.py مسئول محاسبه‌ی
+                    # count واقعی و ذخیره‌ی آن روی شیء تازه‌خوانده‌شده از دیتابیس است.
+                    # چون get_or_create پیش از این خط، سیگنال post_save را trigger کرده،
+                    # save دستی روی obj قدیمی، مقدار درستِ سیگنال را خراب می‌کرد.
                     return Response({"message": "فالو شد."}, status=status.HTTP_201_CREATED)
                 return Response({"message": "شما قبلا این مورد را فالو کرده‌اید."}, status=status.HTTP_200_OK)
             except IntegrityError:
@@ -84,9 +84,8 @@ class FollowableMixin:
             ).delete()
 
             if deleted:
-                if hasattr(obj, 'followers_count') and obj.followers_count > 0:
-                    obj.followers_count -= 1
-                    obj.save(update_fields=['followers_count'])
+                # کاهش دستی followers_count حذف شد؛ سیگنال post_delete خودش
+                # count واقعی را از دیتابیس می‌شمارد و می‌نویسد.
                 return Response({"message": "آنفالو شد."}, status=status.HTTP_204_NO_CONTENT)
             return Response({"error": "فالویی یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
 
