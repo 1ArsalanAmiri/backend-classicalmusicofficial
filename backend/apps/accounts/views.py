@@ -45,12 +45,17 @@ class LoginView(APIView):
             "message": "ورود با موفقیت انجام شد."
         }, status=status.HTTP_200_OK)
 
+        # FIX: SameSite='Lax' -> 'None'
+        # چون فرانت روی یک origin دیگر (cross-site) اجرا می‌شود و این کوکی باید
+        # روی درخواست‌های fetch/axios با withCredentials=true ارسال شود، نه فقط
+        # روی navigation مستقیم top-level. SameSite=None اجباراً باید با Secure=True
+        # همراه باشد که از قبل تنظیم بود.
         response.set_cookie(
             key='refresh_token',
             value=str(refresh),
             max_age=30 * 24 * 60 * 60,
             httponly=True,
-            samesite='Lax',
+            samesite='None',
             secure=True,
         )
 
@@ -87,7 +92,7 @@ class LogoutView(APIView):
 
             response.delete_cookie(
                 key='refresh_token',
-                samesite='Lax',
+                samesite='None',
             )
 
             return response
@@ -188,18 +193,15 @@ class VerifyDeleteAccountView(APIView):
 
                 return Response({"error": "کد تایید اشتباه است."}, status=status.HTTP_400_BAD_REQUEST)
 
-            # بلاک‌لیست کردن Refresh Token
             try:
                 token = RefreshToken(refresh_token)
                 token.blacklist()
             except TokenError:
                 pass
 
-            # آنونیمایز و غیرفعال‌سازی حساب
             user = request.user
             user.is_active = False
 
-            # استفاده از UUID برای جلوگیری از خطای Uniqueness دیتابیس
             fake_identifier = str(uuid.uuid4())[:8]
             user.phone_number = f"+98000{fake_identifier}"
             user.first_name = "Deleted"
@@ -215,7 +217,7 @@ class VerifyDeleteAccountView(APIView):
                 {"message": "حساب کاربری شما با موفقیت غیرفعال و حذف شد."},
                 status=status.HTTP_200_OK
             )
-            response.delete_cookie('refresh_token', samesite='Lax')
+            response.delete_cookie('refresh_token', samesite='None')
             return response
 
         except Exception:
@@ -240,7 +242,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 value=refresh_token,
                 max_age=30 * 24 * 60 * 60,
                 httponly=True,
-                samesite='Lax',
+                samesite='None',
                 secure=True,
             )
         return response
@@ -278,7 +280,7 @@ class CustomTokenRefreshView(TokenRefreshView):
                 value=new_refresh,
                 max_age=30 * 24 * 60 * 60,
                 httponly=True,
-                samesite='Lax',
+                samesite='None',
                 secure=True,
             )
         return response

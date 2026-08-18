@@ -24,7 +24,7 @@ from apps.interactions.mixins import LikableMixin, FollowableMixin, CommentableM
 from django.db.models import F, Count, Sum, Prefetch, OuterRef, Exists
 from django.db.models.functions import Coalesce
 from django.views.decorators.vary import vary_on_headers
-from ..interactions.models import Comment, Like
+from ..interactions.models import Comment, Like, Follow
 from ..interactions.serializers import CommentSerializer, CommentCreateSerializer
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
@@ -91,6 +91,19 @@ class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
     filterset_fields = ['artist_type', 'era', 'country']
     search_fields = ['name', 'nickname']
     lookup_field = 'slug'
+
+    def get_queryset(self):
+        qs = Artist.objects.all()
+        user = self.request.user
+        if user.is_authenticated:
+            artist_ct = ContentType.objects.get_for_model(Artist)
+            followed_subquery = Follow.objects.filter(
+                user=user,
+                content_type=artist_ct,
+                object_id=OuterRef('pk')
+            )
+            qs = qs.annotate(is_followed=Exists(followed_subquery))
+        return qs
 
     def get_permissions(self):
         # مسیرهای عمومی (لیست آلبوم‌ها و جزئیات)
@@ -475,6 +488,17 @@ class LabelViewSet(FollowableMixin, LikableMixin, viewsets.ReadOnlyModelViewSet)
 
     def get_queryset(self):
         queryset = Label.objects.all()
+
+        user = self.request.user
+        if user.is_authenticated:
+            label_ct = ContentType.objects.get_for_model(Label)
+            followed_subquery = Follow.objects.filter(
+                user=user,
+                content_type=label_ct,
+                object_id=OuterRef('pk')
+            )
+            queryset = queryset.annotate(is_followed=Exists(followed_subquery))
+
         if self.action == 'retrieve':
             queryset = queryset.annotate(
                 albums_count=Count('albums_by_label', distinct=True),
@@ -584,7 +608,7 @@ class InstrumentDetailWithContentAPIView(APIView):
             "single_tracks": TrackSerializer(single_tracks, many=True, context=context).data
         }, status=status.HTTP_200_OK)
 
-
+@method_decorator(never_cache, name='dispatch')
 class EditorialPlaylistViewSet(AlbumViewSet):
     album_type = AlbumType.EDITORIAL_PLAYLIST
 
