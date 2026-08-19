@@ -11,8 +11,9 @@ from uuid import uuid4
 from logging import getLogger
 from django.conf import settings
 from django.utils import timezone
-from django.contrib.contenttypes.fields import GenericForeignKey
-from django.contrib.contenttypes.models import ContentType
+from django.contrib.postgres.search import SearchVectorField
+from django.contrib.postgres.indexes import GinIndex
+
 
 logger = getLogger(__name__)
 
@@ -129,6 +130,9 @@ class Label(TimeStampedModel):
         verbose_name = _("لیبل (ناشر)")
         verbose_name_plural = _("لیبل‌ها")
         ordering = ["name"]
+        indexes = [
+            GinIndex(fields=['name'], name='idx_label_name_trgm', opclasses=['gin_trgm_ops']),
+        ]
 
     def save(self, *args, **kwargs):
         if not self.slug:
@@ -158,6 +162,7 @@ class Album(TimeStampedModel):
     likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
     comments_count = models.PositiveIntegerField(_("تعداد کامنت"), default=0)
     album_type = models.CharField(_("نوع انتشار"), max_length=20, choices=AlbumType.choices, default=AlbumType.OFFICIAL, db_index=True)
+    search_vector = SearchVectorField(null=True, blank=True, editable=False)   # << اضافه شد
     objects = AlbumManager()
 
     class Meta:
@@ -167,6 +172,8 @@ class Album(TimeStampedModel):
         indexes = [
             models.Index(fields=["release_year"]),
             models.Index(fields=["status"]),
+            GinIndex(fields=['search_vector'], name='idx_album_search_vector'),
+            GinIndex(fields=['title'], name='idx_album_title_trgm', opclasses=['gin_trgm_ops']),
         ]
 
     @property
@@ -216,6 +223,10 @@ class Artist(TimeStampedModel):
         verbose_name = _("آرتیست")
         verbose_name_plural = _("آرتیست‌ها")
         ordering = ["name"]
+        indexes = [
+            GinIndex(fields=['name'], name='idx_artist_name_trgm', opclasses=['gin_trgm_ops']),
+            GinIndex(fields=['nickname'], name='idx_artist_nick_trgm', opclasses=['gin_trgm_ops']),
+        ]
 
     @property
     def all_related_tracks(self):
@@ -291,6 +302,7 @@ class Track(TimeStampedModel):
     label = models.ForeignKey(Label, on_delete=models.SET_NULL, null=True, blank=True, related_name="tracks", verbose_name=_("لیبل ناشر"))
     likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
     play_count = models.PositiveBigIntegerField(_("تعداد کل پخش"), default=0)
+    search_vector = SearchVectorField(null=True, blank=True, editable=False)   # << اضافه شد
 
     class Meta:
         verbose_name = _("ترک")
@@ -304,12 +316,11 @@ class Track(TimeStampedModel):
             )
         ]
         indexes = [
-            # بهینه‌سازی کوئری‌های لود ترک‌های آلبوم به ترتیب شماره
             models.Index(fields=['album', 'track_number'], name='idx_track_album_num'),
-            # بهینه‌سازی فیلتر ترک‌های فعال بر اساس تاریخ انتشار
             models.Index(fields=['status', 'created_at'], name='idx_track_status_created'),
-            # بهینه‌سازی فیلتر بر اساس ژانر و وضعیت
             models.Index(fields=['genre', 'status'], name='idx_track_genre_status'),
+            GinIndex(fields=['search_vector'], name='idx_track_search_vector'),
+            GinIndex(fields=['title'], name='idx_track_title_trgm', opclasses=['gin_trgm_ops']),
         ]
 
     @property
