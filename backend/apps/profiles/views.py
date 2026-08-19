@@ -1,10 +1,10 @@
 from django.contrib.auth import update_session_auth_hash
 from rest_framework import status, serializers
 from rest_framework.generics import UpdateAPIView
-from django.db.models import Prefetch
+from django.db.models import Prefetch, OuterRef, Exists, Value, BooleanField
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
-from .serializers import ChangePasswordSerializer, ArtistListSerializer, ArtistDetailSerializer, PlayHistorySerializer
+from .serializers import ChangePasswordSerializer, ArtistListSerializer, ArtistDetailSerializer, PlayHistorySerializer, MyCommentSerializer
 from apps.profiles.models import UserProfile
 from apps.profiles.serializers import UserProfileSerializer, UserProfileUpdateSerializer
 from django.shortcuts import get_object_or_404
@@ -14,7 +14,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from apps.music.models import Album, Artist, Track, PlayHistory
 from apps.music.serializers import ArtistSerializer, AlbumListSerializer, TrackSerializer
-from apps.interactions.models import Like, Follow, Bookmark
+from apps.interactions.models import Like, Follow, Bookmark, Comment
 from ..content.models import Post
 from ..content.serializers import PostSerializer
 from ..playlists.models import Playlist
@@ -67,18 +67,32 @@ class ArtistViewSet(viewsets.ReadOnlyModelViewSet):
         if self.action == 'list':
             return ArtistListSerializer
         return ArtistDetailSerializer
+
     def get_queryset(self):
         if self.action == 'list':
-            return Artist.objects.only('slug', 'name', 'image')
-        if self.action == 'retrieve':
+            qs = Artist.objects.only('slug', 'name', 'image')
+        elif self.action == 'retrieve':
             albums_queryset = Album.objects.select_related('label')
             tracks_queryset = Track.objects.select_related('album').prefetch_related('artists')
-            return Artist.objects.prefetch_related(
+            qs = Artist.objects.prefetch_related(
                 Prefetch('main_albums', queryset=albums_queryset),
                 Prefetch('participated_tracks', queryset=tracks_queryset),
                 'related_artists'
             )
-        return Artist.objects.all()
+        else:
+            qs = Artist.objects.all()
+
+        user = self.request.user
+        if user.is_authenticated:
+            artist_ct = ContentType.objects.get_for_model(Artist)
+            followed_subquery = Follow.objects.filter(
+                user=user,
+                content_type=artist_ct,
+                object_id=OuterRef('pk')
+            )
+            qs = qs.annotate(is_followed=Exists(followed_subquery))
+
+        return qs
 
 
 @extend_schema(methods=['GET'], responses={200: UserProfileSerializer})
@@ -105,7 +119,9 @@ class UserDashboardViewSet(viewsets.GenericViewSet):
         artist_ct = ContentType.objects.get_for_model(Artist)
         followed_artist_ids = Follow.objects.filter(user=user, content_type=artist_ct).values_list('object_id',
                                                                                                    flat=True)
-        artists = Artist.objects.filter(id__in=followed_artist_ids)
+        artists = Artist.objects.filter(id__in=followed_artist_ids).annotate(
+            is_followed=Value(True, output_field=BooleanField())
+        )
 
         serializer = ArtistSerializer(artists, many=True, context={'request': request})
         return Response(serializer.data)
@@ -160,6 +176,22 @@ class UserDashboardViewSet(viewsets.GenericViewSet):
         serializer = TrackSerializer(tracks, many=True, context={'request': request})
         return Response(serializer.data)
 
+
+    @extend_schema(responses={200: MyCommentSerializer(many=True)})
+    @action(detail=False, methods=['get'], url_path='my-comments')
+    def my_comments(self, request):
+        comments = Comment.objects.filter(
+            user=request.user,
+            is_deleted=False
+        ).select_related('content_type').order_by('-created_at')
+
+        page = self.paginate_queryset(comments)
+        if page is not None:
+            serializer = MyCommentSerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(serializer.data)
+
+        serializer = MyCommentSerializer(comments, many=True, context={'request': request})
+        return Response(serializer.data)
 
     @extend_schema(responses={200: PostSerializer(many=True)})
     @action(detail=False, methods=['get'], url_path='saved-posts')

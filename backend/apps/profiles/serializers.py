@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
-from apps.interactions.models import Like, Follow
+from apps.interactions.models import Like, Follow, Comment
 from django.contrib.contenttypes.models import ContentType
 from apps.music.models import Artist, Album, Track, PlayHistory , ArtistRole
 from apps.profiles.models import UserProfile
@@ -174,13 +174,11 @@ class ChangePasswordSerializer(serializers.Serializer):
         new_password_confirm = attrs.get('new_password_confirm')
         old_password = attrs.get('old_password')
 
-        # بررسی تطابق رمز جدید و تکرار آن
         if new_password != new_password_confirm:
             raise serializers.ValidationError(
                 {"new_password_confirm": _("رمز عبور جدید و تکرار آن مطابقت ندارند.")}
             )
 
-        # بررسی رمز قبلی اگر کاربر رمز دارد
         if user.has_usable_password():
             if not old_password:
                 raise serializers.ValidationError(
@@ -192,7 +190,6 @@ class ChangePasswordSerializer(serializers.Serializer):
                     {"old_password": _("رمز عبور فعلی اشتباه است.")}
                 )
 
-        # جلوگیری از ثبت رمز جدید دقیقاً مشابه رمز قدیم
         if old_password and old_password == new_password:
             raise serializers.ValidationError(
                 {"new_password": _("رمز عبور جدید نمی‌تواند با رمز فعلی یکسان باشد.")}
@@ -202,20 +199,25 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 
 class ArtistListSerializer(serializers.ModelSerializer):
+    is_followed = serializers.BooleanField(read_only=True, default=False)
+
     class Meta:
         model = Artist
-        fields = ['slug', 'name', 'image']
+        fields = ['slug', 'name', 'image', 'is_followed']
 
 
 class ArtistDetailSerializer(serializers.ModelSerializer):
     albums = serializers.SerializerMethodField()
     related_artists = ArtistListSerializer(many=True, read_only=True)
+    # FIX: فیلد is_followed اضافه شد (قبلاً اصلاً در fields نبود، به همین
+    # دلیل هیچ‌وقت در پاسخ /profile/artists/{slug}/ نمایش داده نمی‌شد).
+    is_followed = serializers.BooleanField(read_only=True, default=False)
 
     class Meta:
         model = Artist
         fields = [
             'slug', 'name', 'biography', 'image', 'birth_year', 'death_year',
-            'albums','related_artists'
+            'albums', 'related_artists', 'is_followed'
         ]
 
     def get_albums(self, obj):
@@ -229,3 +231,29 @@ class PlayHistorySerializer(serializers.ModelSerializer):
     class Meta:
         model = PlayHistory
         fields = ['id', 'track', 'last_played_at', 'play_count']
+
+
+class MyCommentSerializer(serializers.ModelSerializer):
+    content_type = serializers.CharField(source='content_type.model', read_only=True)
+    target = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Comment
+        fields = [
+            'id',
+            'body',
+            'parent',
+            'is_approved',
+            'created_at',
+            'content_type',
+            'target',
+        ]
+
+    def get_target(self, obj):
+        target = obj.content_object
+        if target is None:
+            return None
+        return {
+            'slug': getattr(target, 'slug', None),
+            'title': getattr(target, 'title', None) or getattr(target, 'name', None) or str(target),
+        }

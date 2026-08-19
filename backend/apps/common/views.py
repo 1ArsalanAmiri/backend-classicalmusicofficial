@@ -126,12 +126,21 @@ class VerifyOTPView(APIView):
                 status=status_code
             )
 
+            # FIX: SameSite='Lax' -> 'None'
+            # این ویو (ورود/ثبت‌نام با OTP - همون چیزی که فرانت الان واقعاً
+            # ازش استفاده می‌کنه) تا الان بررسی نشده بود و کوکی رو همچنان با
+            # Lax ست می‌کرد، که روی درخواست‌های cross-site از فرانت (fetch/axios
+            # با withCredentials=true) توسط مرورگر ارسال نمی‌شد. دقیقاً همون
+            # فیکسی که قبلاً در apps/accounts/views.py (LoginView,
+            # CustomTokenObtainPairView, CustomTokenRefreshView) اعمال شده
+            # بود، اینجا هم اعمال شد. secure=True از قبل درست بود و دست
+            # نخورده.
             response.set_cookie(
                 key='refresh_token',
                 value=str(refresh),
                 max_age=30 * 24 * 60 * 60,
                 httponly=True,
-                samesite='Lax',
+                samesite='None',
                 secure=True,
             )
 
