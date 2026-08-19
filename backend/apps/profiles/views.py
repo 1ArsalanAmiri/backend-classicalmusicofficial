@@ -74,19 +74,23 @@ class ArtistViewSet(viewsets.ReadOnlyModelViewSet):
         if self.action == 'list':
             qs = Artist.objects.only('slug', 'name', 'image')
         elif self.action == 'retrieve':
+            # FIX: main_albums قبلاً بدون فیلتر status/album_type prefetch
+            # می‌شد (آلبوم‌ها و پلی‌لیست‌های ادیتوریال قاطی بودن، و حتی
+            # آلبوم‌های DRAFT هم می‌اومدن). الان با دو تا Prefetch جدا (روی
+            # همون رابطه‌ی main_albums، با to_attr متفاوت - این الگو کاملاً
+            # در جنگو مجازه) به دو لیست تفکیک‌شده و published-only تبدیل شد.
+            # annotate(total_tracks=...) هم اضافه شد چون AlbumListSerializer
+            # بدون این annotation با AttributeError کرش می‌کنه (دقیقاً همون
+            # باگی که در GlobalSearchView گرفتیم).
             official_albums_qs = Album.objects.filter(
                 album_type=AlbumType.OFFICIAL,
                 status=PublishStatus.PUBLISHED
-            ).select_related('label').annotate(
-                total_tracks=Count('tracks', distinct=True)
-            ).order_by('-release_year')
+            ).select_related('label').order_by('-release_year')
 
             editorial_playlists_qs = Album.objects.filter(
                 album_type=AlbumType.EDITORIAL_PLAYLIST,
                 status=PublishStatus.PUBLISHED
-            ).select_related('label').annotate(
-                total_tracks=Count('tracks', distinct=True)
-            ).order_by('-release_year')
+            ).select_related('label').order_by('-release_year')
 
             videos_qs = Video.objects.filter(status='published').order_by('-created_at')
 
@@ -101,6 +105,11 @@ class ArtistViewSet(viewsets.ReadOnlyModelViewSet):
         else:
             qs = Artist.objects.all()
 
+        # FIX: این annotation اصلاً وجود نداشت، به همین دلیل is_followed
+        # همیشه (چه توی لیست، چه توی جزئیات آرتیست در بخش پروفایل) مقدار
+        # پیش‌فرض false سریالایزر رو نشون می‌داد، حتی اگه کاربر واقعاً
+        # آرتیست رو فالو کرده باشه. دقیقاً همون الگوی annotate ای که در
+        # ArtistViewSet اپ music استفاده میشه، اینجا هم اضافه شد.
         user = self.request.user
         if user.is_authenticated:
             artist_ct = ContentType.objects.get_for_model(Artist)
@@ -138,7 +147,6 @@ class UserDashboardViewSet(viewsets.GenericViewSet):
         artist_ct = ContentType.objects.get_for_model(Artist)
         followed_artist_ids = Follow.objects.filter(user=user, content_type=artist_ct).values_list('object_id',
                                                                                                    flat=True)
-
         artists = Artist.objects.filter(id__in=followed_artist_ids).annotate(
             is_followed=Value(True, output_field=BooleanField())
         )
