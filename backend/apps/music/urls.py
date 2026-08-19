@@ -2,7 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import ArtistViewSet, AlbumViewSet, TrackViewSet, GenreViewSet, InstrumentViewSet, EraListView, \
     AlbumBatchUploadAPIView, LabelViewSet, GenreDetailWithContentAPIView, \
-    InstrumentDetailWithContentAPIView, EditorialPlaylistViewSet
+    InstrumentDetailWithContentAPIView, EditorialPlaylistViewSet, LandingPageView
 from apps.common.search_views import GlobalSearchView
 
 router = DefaultRouter()
@@ -22,4 +22,6 @@ urlpatterns = [
     path('search/', GlobalSearchView.as_view(), name='global-search'),
     path('api/v1/genres/<slug:slug>/content/', GenreDetailWithContentAPIView.as_view(), name='genre-content'),
     path('api/v1/instruments/<slug:slug>/content/', InstrumentDetailWithContentAPIView.as_view(), name='instrument-content'),
+    path('api/v1/landing/', LandingPageView.as_view(), name='landing-page'),
+
 ]

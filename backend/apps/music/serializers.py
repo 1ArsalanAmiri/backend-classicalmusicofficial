@@ -168,9 +168,6 @@ class InstrumentSerializer(serializers.ModelSerializer):
 
 
 class LabelListSerializer(serializers.ModelSerializer):
-    # FIX: LabelViewSet.get_queryset() annotates `is_followed` via an Exists() subquery
-    # on Follow, but this serializer never exposed the field, so the list endpoint
-    # always silently dropped it. Added it exactly like LabelDetailSerializer already does.
     is_followed = serializers.BooleanField(read_only=True, default=False)
 
     class Meta:
@@ -202,3 +199,11 @@ class LabelDetailSerializer(serializers.ModelSerializer):
     def get_singles(self, obj):
         singles = getattr(obj, 'prefetched_singles', [])
         return TrackSerializer(singles, many=True, context=self.context).data
+
+
+class LandingAlbumSerializer(serializers.ModelSerializer):
+    main_artists = ArtistBasicSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Album
+        fields = ['title', 'slug', 'cover_image', 'main_artists']

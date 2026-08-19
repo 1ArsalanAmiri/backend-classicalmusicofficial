@@ -45,3 +45,7 @@ class CustomMetaDataPagination(PageNumberPagination):
             },
             "results": data
         })
+
+
+class LandingPagination(ClassicalMusicPagination):
+    page_size = 18

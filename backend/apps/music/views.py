@@ -46,6 +46,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.http import FileResponse
 from django.views.decorators.cache import never_cache
+from rest_framework import generics
+from apps.common.pagination import ClassicalMusicPagination, LandingPagination
 
 
 logger = logging.getLogger(__name__)
@@ -611,6 +613,17 @@ class InstrumentDetailWithContentAPIView(APIView):
 @method_decorator(never_cache, name='dispatch')
 class EditorialPlaylistViewSet(AlbumViewSet):
     album_type = AlbumType.EDITORIAL_PLAYLIST
+
+
+class LandingPageView(generics.ListAPIView):
+    permission_classes = [AllowAny]
+    serializer_class = LandingAlbumSerializer
+    pagination_class = LandingPagination
+
+    def get_queryset(self):
+        return Album.objects.filter(
+            status=PublishStatus.PUBLISHED
+        ).prefetch_related('main_artists').order_by('-created_at')
 
 
 @sync_to_async
