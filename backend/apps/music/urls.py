@@ -22,6 +22,6 @@ urlpatterns = [
     path('search/', GlobalSearchView.as_view(), name='global-search'),
     path('api/v1/genres/<slug:slug>/content/', GenreDetailWithContentAPIView.as_view(), name='genre-content'),
     path('api/v1/instruments/<slug:slug>/content/', InstrumentDetailWithContentAPIView.as_view(), name='instrument-content'),
-    path('api/v1/landing/', LandingPageView.as_view(), name='landing-page'),
+    path('api/v1/latest-albums/', LandingPageView.as_view(), name='landing-page'),
 
 ]
