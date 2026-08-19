@@ -1,4 +1,5 @@
 import os
+from django.contrib.postgres.search import SearchVector
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.core.cache import cache
@@ -36,3 +37,17 @@ def invalidate_album_zip_on_track_change(sender, instance, **kwargs):
             delete_album_zip_cache(instance.album)
     except Album.DoesNotExist:
         pass
+
+
+@receiver(post_save, sender=Track)
+def update_track_search_vector(sender, instance, **kwargs):
+    Track.objects.filter(pk=instance.pk).update(
+        search_vector=SearchVector('title', config='simple')
+    )
+
+
+@receiver(post_save, sender=Album)
+def update_album_search_vector(sender, instance, **kwargs):
+    Album.objects.filter(pk=instance.pk).update(
+        search_vector=SearchVector('title', config='simple') + SearchVector('title_fa', config='simple')
+    )
