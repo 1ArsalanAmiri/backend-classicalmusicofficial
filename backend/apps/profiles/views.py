@@ -1,7 +1,7 @@
 from django.contrib.auth import update_session_auth_hash
 from rest_framework import status, serializers
 from rest_framework.generics import UpdateAPIView
-from django.db.models import Prefetch, OuterRef, Exists, Value, BooleanField
+from django.db.models import Prefetch, OuterRef, Exists, Value, BooleanField, Count
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 from .serializers import ChangePasswordSerializer, ArtistListSerializer, ArtistDetailSerializer, PlayHistorySerializer, MyCommentSerializer
@@ -12,7 +12,9 @@ from django.contrib.contenttypes.models import ContentType
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from apps.music.models import Album, Artist, Track, PlayHistory
+from apps.music.models import Album, Artist, Track, PlayHistory, AlbumType
+from apps.common.models import PublishStatus
+from apps.videos.models import Video
 from apps.music.serializers import ArtistSerializer, AlbumListSerializer, TrackSerializer
 from apps.interactions.models import Like, Follow, Bookmark, Comment
 from ..content.models import Post
@@ -72,10 +74,27 @@ class ArtistViewSet(viewsets.ReadOnlyModelViewSet):
         if self.action == 'list':
             qs = Artist.objects.only('slug', 'name', 'image')
         elif self.action == 'retrieve':
-            albums_queryset = Album.objects.select_related('label')
+            official_albums_qs = Album.objects.filter(
+                album_type=AlbumType.OFFICIAL,
+                status=PublishStatus.PUBLISHED
+            ).select_related('label').annotate(
+                total_tracks=Count('tracks', distinct=True)
+            ).order_by('-release_year')
+
+            editorial_playlists_qs = Album.objects.filter(
+                album_type=AlbumType.EDITORIAL_PLAYLIST,
+                status=PublishStatus.PUBLISHED
+            ).select_related('label').annotate(
+                total_tracks=Count('tracks', distinct=True)
+            ).order_by('-release_year')
+
+            videos_qs = Video.objects.filter(status='published').order_by('-created_at')
+
             tracks_queryset = Track.objects.select_related('album').prefetch_related('artists')
             qs = Artist.objects.prefetch_related(
-                Prefetch('main_albums', queryset=albums_queryset),
+                Prefetch('main_albums', queryset=official_albums_qs, to_attr='published_albums'),
+                Prefetch('main_albums', queryset=editorial_playlists_qs, to_attr='published_playlists'),
+                Prefetch('videos', queryset=videos_qs, to_attr='published_videos'),
                 Prefetch('participated_tracks', queryset=tracks_queryset),
                 'related_artists'
             )
@@ -119,6 +138,7 @@ class UserDashboardViewSet(viewsets.GenericViewSet):
         artist_ct = ContentType.objects.get_for_model(Artist)
         followed_artist_ids = Follow.objects.filter(user=user, content_type=artist_ct).values_list('object_id',
                                                                                                    flat=True)
+
         artists = Artist.objects.filter(id__in=followed_artist_ids).annotate(
             is_followed=Value(True, output_field=BooleanField())
         )

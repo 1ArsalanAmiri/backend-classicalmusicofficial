@@ -5,7 +5,9 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 from apps.interactions.models import Like, Follow, Comment
 from django.contrib.contenttypes.models import ContentType
-from apps.music.models import Artist, Album, Track, PlayHistory , ArtistRole
+from apps.music.models import Artist, Album, Track, PlayHistory, ArtistRole, AlbumType
+from apps.common.models import PublishStatus
+from apps.videos.models import Video
 from apps.profiles.models import UserProfile
 from django.db.models import Q
 import jdatetime
@@ -174,11 +176,13 @@ class ChangePasswordSerializer(serializers.Serializer):
         new_password_confirm = attrs.get('new_password_confirm')
         old_password = attrs.get('old_password')
 
+        # بررسی تطابق رمز جدید و تکرار آن
         if new_password != new_password_confirm:
             raise serializers.ValidationError(
                 {"new_password_confirm": _("رمز عبور جدید و تکرار آن مطابقت ندارند.")}
             )
 
+        # بررسی رمز قبلی اگر کاربر رمز دارد
         if user.has_usable_password():
             if not old_password:
                 raise serializers.ValidationError(
@@ -190,6 +194,7 @@ class ChangePasswordSerializer(serializers.Serializer):
                     {"old_password": _("رمز عبور فعلی اشتباه است.")}
                 )
 
+        # جلوگیری از ثبت رمز جدید دقیقاً مشابه رمز قدیم
         if old_password and old_password == new_password:
             raise serializers.ValidationError(
                 {"new_password": _("رمز عبور جدید نمی‌تواند با رمز فعلی یکسان باشد.")}
@@ -199,6 +204,7 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 
 class ArtistListSerializer(serializers.ModelSerializer):
+
     is_followed = serializers.BooleanField(read_only=True, default=False)
 
     class Meta:
@@ -206,23 +212,51 @@ class ArtistListSerializer(serializers.ModelSerializer):
         fields = ['slug', 'name', 'image', 'is_followed']
 
 
+class ArtistVideoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Video
+        fields = ['title', 'slug', 'cover_image', 'duration_seconds', 'recording_year', 'view_count']
+
+
 class ArtistDetailSerializer(serializers.ModelSerializer):
     albums = serializers.SerializerMethodField()
+
+    playlists = serializers.SerializerMethodField()
+    videos = serializers.SerializerMethodField()
     related_artists = ArtistListSerializer(many=True, read_only=True)
-    # FIX: فیلد is_followed اضافه شد (قبلاً اصلاً در fields نبود، به همین
-    # دلیل هیچ‌وقت در پاسخ /profile/artists/{slug}/ نمایش داده نمی‌شد).
     is_followed = serializers.BooleanField(read_only=True, default=False)
 
     class Meta:
         model = Artist
         fields = [
             'slug', 'name', 'biography', 'image', 'birth_year', 'death_year',
-            'albums', 'related_artists', 'is_followed'
+            'albums', 'playlists', 'videos', 'related_artists', 'is_followed'
         ]
 
     def get_albums(self, obj):
-        albums = obj.main_albums.all()
+
+        albums = getattr(obj, 'published_albums', None)
+        if albums is None:
+            albums = obj.main_albums.filter(
+                album_type=AlbumType.OFFICIAL,
+                status=PublishStatus.PUBLISHED
+            )
         return AlbumListSerializer(albums, many=True, context=self.context).data
+
+    def get_playlists(self, obj):
+        playlists = getattr(obj, 'published_playlists', None)
+        if playlists is None:
+            playlists = obj.main_albums.filter(
+                album_type=AlbumType.EDITORIAL_PLAYLIST,
+                status=PublishStatus.PUBLISHED
+            )
+        return AlbumListSerializer(playlists, many=True, context=self.context).data
+
+    def get_videos(self, obj):
+        videos = getattr(obj, 'published_videos', None)
+        if videos is None:
+            videos = obj.videos.filter(status='published')
+        return ArtistVideoSerializer(videos, many=True, context=self.context).data
 
 
 class PlayHistorySerializer(serializers.ModelSerializer):
