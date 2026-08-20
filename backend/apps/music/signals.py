@@ -40,14 +40,18 @@ def invalidate_album_zip_on_track_change(sender, instance, **kwargs):
 
 
 @receiver(post_save, sender=Track)
-def update_track_search_vector(sender, instance, **kwargs):
+def update_track_search_vector(sender, instance, update_fields=None, **kwargs):
+    if update_fields is not None and 'title' not in update_fields:
+        return
     Track.objects.filter(pk=instance.pk).update(
         search_vector=SearchVector('title', config='simple')
     )
 
 
 @receiver(post_save, sender=Album)
-def update_album_search_vector(sender, instance, **kwargs):
+def update_album_search_vector(sender, instance, update_fields=None, **kwargs):
+    if update_fields is not None and not ({'title', 'title_fa'} & set(update_fields)):
+        return
     Album.objects.filter(pk=instance.pk).update(
         search_vector=SearchVector('title', config='simple') + SearchVector('title_fa', config='simple')
     )

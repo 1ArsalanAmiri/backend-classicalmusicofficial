@@ -1,9 +1,9 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
-from django.contrib.postgres.search import SearchQuery, SearchRank, TrigramSimilarity
+from django.contrib.postgres.search import SearchQuery, SearchRank, TrigramWordSimilarity
 from django.db.models.functions import Greatest, Coalesce
-from django.db.models import Q, Count
+from django.db.models import Q, Count, Case, When, Value, IntegerField
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 
@@ -17,12 +17,30 @@ from drf_spectacular.types import OpenApiTypes
 DEFAULT_LIMIT = 5
 MAX_LIMIT = 20
 RANK_THRESHOLD = 0.1
-SIMILARITY_THRESHOLD = 0.2
 ARTIST_FANOUT_CAP = 50
 
 
-def _merge_unique(primary, secondary, limit):
+def get_similarity_threshold(query: str) -> float:
 
+    length = len(query)
+    if length <= 3:
+        return 0.15
+    if length <= 6:
+        return 0.25
+    return 0.3
+
+
+def _starts_with_boost(field: str, query: str):
+
+    return Case(
+        When(**{f'{field}__istartswith': query}, then=Value(2)),
+        When(**{f'{field}__icontains': query}, then=Value(1)),
+        default=Value(0),
+        output_field=IntegerField(),
+    )
+
+
+def _merge_unique(primary, secondary, limit):
     seen_ids = set()
     result = []
     for obj in list(primary):
@@ -43,7 +61,7 @@ class GlobalSearchView(APIView):
 
     @extend_schema(
         summary="Global Search",
-        description="Search across tracks, albums, artists and labels using full-text search with trigram fallback.",
+        description="Search across tracks, albums, artists and labels using full-text search with trigram + prefix fallback.",
         parameters=[
             OpenApiParameter(
                 name='q',
@@ -86,33 +104,53 @@ class GlobalSearchView(APIView):
         if len(query) < 2:
             return Response({"tracks": [], "albums": [], "artists": [], "labels": []})
 
+        similarity_threshold = get_similarity_threshold(query)
         search_query = SearchQuery(query, config='simple', search_type='websearch')
 
-        # --- ۱. آرتیست‌ها (trigram روی name + nickname) ---
+
         artist_qs = Artist.objects.annotate(
             similarity=Greatest(
-                TrigramSimilarity('name', query),
-                Coalesce(TrigramSimilarity('nickname', query), 0.0),
-            )
-        ).filter(similarity__gt=SIMILARITY_THRESHOLD).order_by('-similarity', '-id')
+                TrigramWordSimilarity(query, 'name'),
+                Coalesce(TrigramWordSimilarity(query, 'nickname'), 0.0),
+            ),
+            starts_with_boost=Greatest(
+                _starts_with_boost('name', query),
+                _starts_with_boost('nickname', query),
+            ),
+        ).filter(
+            Q(name__icontains=query) |
+            Q(nickname__icontains=query) |
+            Q(similarity__gte=similarity_threshold)
+        ).order_by('-starts_with_boost', '-similarity', '-id')
 
         artists = list(artist_qs[:limit])
-        # ست جدا و بزرگ‌تر، فقط برای فیلتر کردن ترک/آلبوم بر اساس آرتیست match‌شده
         matched_artist_ids = list(artist_qs.values_list('id', flat=True)[:ARTIST_FANOUT_CAP])
 
-        # --- ۲. لیبل‌ها (trigram روی name) ---
+        # --- ۲. لیبل‌ها ---
         labels = Label.objects.annotate(
-            similarity=TrigramSimilarity('name', query)
-        ).filter(similarity__gt=SIMILARITY_THRESHOLD).order_by('-similarity', '-id')[:limit]
+            similarity=TrigramWordSimilarity(query, 'name'),
+            starts_with_boost=_starts_with_boost('name', query),
+        ).filter(
+            Q(name__icontains=query) | Q(similarity__gte=similarity_threshold)
+        ).order_by('-starts_with_boost', '-similarity', '-id')[:limit]
 
-        # --- ۳. آلبوم‌ها: تطبیق عنوان (FTS + trigram) یا تطبیق آرتیست اصلی ---
         album_title_matches = Album.objects.filter(status=PublishStatus.PUBLISHED).annotate(
             rank=SearchRank('search_vector', search_query),
-            similarity=TrigramSimilarity('title', query),
+            similarity=Greatest(
+                TrigramWordSimilarity(query, 'title'),
+                Coalesce(TrigramWordSimilarity(query, 'title_fa'), 0.0),
+            ),
+            starts_with_boost=Greatest(
+                _starts_with_boost('title', query),
+                _starts_with_boost('title_fa', query),
+            ),
             annotated_total_tracks=Count('tracks', distinct=True),
         ).filter(
-            Q(rank__gte=RANK_THRESHOLD) | Q(similarity__gt=SIMILARITY_THRESHOLD)
-        ).order_by('-rank', '-similarity', '-id')[:limit]
+            Q(rank__gte=RANK_THRESHOLD) |
+            Q(similarity__gte=similarity_threshold) |
+            Q(title__icontains=query) |
+            Q(title_fa__icontains=query)
+        ).order_by('-starts_with_boost', '-rank', '-similarity', '-id')[:limit]
 
         albums_by_artist = []
         if matched_artist_ids:
@@ -127,15 +165,17 @@ class GlobalSearchView(APIView):
 
         albums = _merge_unique(album_title_matches, albums_by_artist, limit)
 
-        # --- ۴. ترک‌ها: تطبیق عنوان (FTS + trigram) یا تطبیق آرتیست ---
         track_title_matches = Track.objects.filter(status=PublishStatus.PUBLISHED).select_related(
             'album'
         ).prefetch_related('artists', 'album__main_artists').annotate(
             rank=SearchRank('search_vector', search_query),
-            similarity=TrigramSimilarity('title', query),
+            similarity=TrigramWordSimilarity(query, 'title'),
+            starts_with_boost=_starts_with_boost('title', query),
         ).filter(
-            Q(rank__gte=RANK_THRESHOLD) | Q(similarity__gt=SIMILARITY_THRESHOLD)
-        ).order_by('-rank', '-similarity', '-id')[:limit]
+            Q(rank__gte=RANK_THRESHOLD) |
+            Q(similarity__gte=similarity_threshold) |
+            Q(title__icontains=query)
+        ).order_by('-starts_with_boost', '-rank', '-similarity', '-id')[:limit]
 
         tracks_by_artist = []
         if matched_artist_ids:
