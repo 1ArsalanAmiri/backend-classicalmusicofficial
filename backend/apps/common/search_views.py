@@ -8,8 +8,9 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 
 from apps.music.models import Track, Album, Artist, Label
-from apps.music.serializers import TrackSerializer, AlbumListSerializer, ArtistSerializer, LabelListSerializer
+from apps.music.serializers import AlbumListSerializer
 from apps.common.models import PublishStatus
+from rest_framework import serializers
 
 from drf_spectacular.utils import extend_schema, OpenApiParameter, inline_serializer
 from drf_spectacular.types import OpenApiTypes
@@ -20,8 +21,85 @@ RANK_THRESHOLD = 0.1
 ARTIST_FANOUT_CAP = 50
 
 
-def get_similarity_threshold(query: str) -> float:
+# ---------------------------------------------------------------------------
+# سریالایزرهای مخصوص و سبکِ سرچ - عمداً از TrackSerializer/ArtistSerializer/
+# LabelListSerializer اصلی (apps.music.serializers) استفاده نمی‌کنیم چون
+# اون‌ها جاهای دیگه (صفحه‌ی دیتیل، لیست کامل) به فیلدهای کامل‌تری مثل
+# is_followed/is_liked/likes_count/audio_url نیاز دارن. اینجا فقط همون
+# فیلدهایی که برای پیش‌نمایش سرچ لازمه رو نگه می‌داریم.
+# ---------------------------------------------------------------------------
 
+class SearchArtistNameSerializer(serializers.ModelSerializer):
+    """فقط 'name' - برای نمایش داخل لیست artists هر ترک توی نتیجه‌ی سرچ."""
+    class Meta:
+        model = Artist
+        fields = ['name']
+
+
+class LabelSearchSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Label
+        fields = ['name', 'slug', 'logo']
+
+
+class ArtistSearchSerializer(serializers.ModelSerializer):
+    artist_type_display = serializers.CharField(source='get_artist_type_display', read_only=True)
+    era_display = serializers.CharField(source='get_era_display', read_only=True)
+
+    class Meta:
+        model = Artist
+        fields = [
+            'name', 'slug', 'nickname', 'country', 'birth_year', 'death_year',
+            'artist_type', 'artist_type_display', 'era', 'era_display',
+            'image', 'biography',
+        ]
+
+
+class TrackSearchSerializer(serializers.ModelSerializer):
+    artists = serializers.SerializerMethodField()
+    cover_image = serializers.SerializerMethodField()
+    duration_seconds = serializers.SerializerMethodField()
+    album = serializers.SlugRelatedField(slug_field='slug', read_only=True)
+
+    class Meta:
+        model = Track
+        fields = ['id', 'title', 'album', 'artists', 'slug', 'cover_image', 'duration_seconds', 'status']
+
+    def get_artists(self, obj):
+        # همون منطق TrackSerializer.get_artists اصلی (آهنگساز/آرتیست اصلی
+        # آلبوم رو هم اگه توی artists خودِ ترک نبود اضافه کن)، فقط خروجی
+        # نهایی فقط 'name' داره.
+        track_artists = list(obj.artists.all())
+        track_artist_ids = {artist.id for artist in track_artists}
+
+        if obj.album:
+            for main_artist in reversed(list(obj.album.main_artists.all())):
+                if main_artist.id not in track_artist_ids:
+                    track_artists.insert(0, main_artist)
+                    track_artist_ids.add(main_artist.id)
+        return SearchArtistNameSerializer(track_artists, many=True).data
+
+    def get_cover_image(self, obj):
+        request = self.context.get('request')
+        if obj.cover_image:
+            return request.build_absolute_uri(obj.cover_image.url) if request else obj.cover_image.url
+        elif obj.album and obj.album.cover_image:
+            return request.build_absolute_uri(obj.album.cover_image.url) if request else obj.album.cover_image.url
+        return None
+
+    def get_duration_seconds(self, obj):
+        if not obj.duration_ms:
+            return 0
+        return obj.duration_ms // 1000
+
+
+def get_similarity_threshold(query: str) -> float:
+    """
+    FIX: threshold ثابت 0.2 برای همه‌ی طول query ها باعث می‌شد query های
+    کوتاه (2-3 حرفی، دقیقاً همون چیزی که کاربر هنگام تایپ‌کردن اول می‌بینه)
+    رد بشن، چون trigram-overlap طبیعی رشته‌های کوتاه کمتره. threshold رو
+    بر اساس طول query پویا می‌کنیم.
+    """
     length = len(query)
     if length <= 3:
         return 0.15
@@ -31,7 +109,11 @@ def get_similarity_threshold(query: str) -> float:
 
 
 def _starts_with_boost(field: str, query: str):
-
+    """
+    برای رتبه‌بندی: تطبیق‌های ابتدای کلمه (prefix) باید بالاتر از
+    تطبیق‌های وسط کلمه یا فازی/تایپی نمایش داده بشن - این همون رفتاریه که
+    کاربر از یک سرچ‌باکس معمولی انتظار داره.
+    """
     return Case(
         When(**{f'{field}__istartswith': query}, then=Value(2)),
         When(**{f'{field}__icontains': query}, then=Value(1)),
@@ -82,10 +164,10 @@ class GlobalSearchView(APIView):
             200: inline_serializer(
                 name='GlobalSearchResponse',
                 fields={
-                    'tracks': TrackSerializer(many=True),
+                    'tracks': TrackSearchSerializer(many=True),
                     'albums': AlbumListSerializer(many=True),
-                    'artists': ArtistSerializer(many=True),
-                    'labels': LabelListSerializer(many=True),
+                    'artists': ArtistSearchSerializer(many=True),
+                    'labels': LabelSearchSerializer(many=True),
                 }
             ),
         },
@@ -107,7 +189,11 @@ class GlobalSearchView(APIView):
         similarity_threshold = get_similarity_threshold(query)
         search_query = SearchQuery(query, config='simple', search_type='websearch')
 
-
+        # --- ۱. آرتیست‌ها ---
+        # FIX: TrigramSimilarity -> TrigramWordSimilarity (بهترین کلمه‌ی
+        # داخل name/nickname رو می‌سنجه، نه کل رشته رو - برای اسم‌های
+        # چندکلمه‌ای حیاتیه). + fallback icontains تضمینی برای هر substring
+        # دقیق، صرف‌نظر از امتیاز trigram. + starts_with_boost برای رتبه‌بندی بهتر.
         artist_qs = Artist.objects.annotate(
             similarity=Greatest(
                 TrigramWordSimilarity(query, 'name'),
@@ -134,6 +220,7 @@ class GlobalSearchView(APIView):
             Q(name__icontains=query) | Q(similarity__gte=similarity_threshold)
         ).order_by('-starts_with_boost', '-similarity', '-id')[:limit]
 
+        # --- ۳. آلبوم‌ها: تطبیق عنوان (FTS + trigram-word + prefix، هم title هم title_fa) یا تطبیق آرتیست اصلی ---
         album_title_matches = Album.objects.filter(status=PublishStatus.PUBLISHED).annotate(
             rank=SearchRank('search_vector', search_query),
             similarity=Greatest(
@@ -165,6 +252,7 @@ class GlobalSearchView(APIView):
 
         albums = _merge_unique(album_title_matches, albums_by_artist, limit)
 
+        # --- ۴. ترک‌ها: تطبیق عنوان (FTS + trigram-word + prefix) یا تطبیق آرتیست ---
         track_title_matches = Track.objects.filter(status=PublishStatus.PUBLISHED).select_related(
             'album'
         ).prefetch_related('artists', 'album__main_artists').annotate(
@@ -191,8 +279,8 @@ class GlobalSearchView(APIView):
         tracks = _merge_unique(track_title_matches, tracks_by_artist, limit)
 
         return Response({
-            "tracks": TrackSerializer(tracks, many=True, context={'request': request}).data,
+            "tracks": TrackSearchSerializer(tracks, many=True, context={'request': request}).data,
             "albums": AlbumListSerializer(albums, many=True, context={'request': request}).data,
-            "artists": ArtistSerializer(artists, many=True, context={'request': request}).data,
-            "labels": LabelListSerializer(labels, many=True, context={'request': request}).data,
+            "artists": ArtistSearchSerializer(artists, many=True, context={'request': request}).data,
+            "labels": LabelSearchSerializer(labels, many=True, context={'request': request}).data,
         })
