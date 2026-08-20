@@ -206,4 +206,4 @@ class LandingAlbumSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Album
-        fields = ['title', 'slug', 'cover_image', 'main_artists']
+        fields = ['title', 'slug','album_type' ,'cover_image', 'main_artists']
