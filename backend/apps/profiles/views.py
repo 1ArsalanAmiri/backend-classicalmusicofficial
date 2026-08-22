@@ -74,14 +74,6 @@ class ArtistViewSet(viewsets.ReadOnlyModelViewSet):
         if self.action == 'list':
             qs = Artist.objects.only('slug', 'name', 'image')
         elif self.action == 'retrieve':
-            # FIX: main_albums قبلاً بدون فیلتر status/album_type prefetch
-            # می‌شد (آلبوم‌ها و پلی‌لیست‌های ادیتوریال قاطی بودن، و حتی
-            # آلبوم‌های DRAFT هم می‌اومدن). الان با دو تا Prefetch جدا (روی
-            # همون رابطه‌ی main_albums، با to_attr متفاوت - این الگو کاملاً
-            # در جنگو مجازه) به دو لیست تفکیک‌شده و published-only تبدیل شد.
-            # annotate(total_tracks=...) هم اضافه شد چون AlbumListSerializer
-            # بدون این annotation با AttributeError کرش می‌کنه (دقیقاً همون
-            # باگی که در GlobalSearchView گرفتیم).
             official_albums_qs = Album.objects.filter(
                 album_type=AlbumType.OFFICIAL,
                 status=PublishStatus.PUBLISHED
@@ -105,11 +97,6 @@ class ArtistViewSet(viewsets.ReadOnlyModelViewSet):
         else:
             qs = Artist.objects.all()
 
-        # FIX: این annotation اصلاً وجود نداشت، به همین دلیل is_followed
-        # همیشه (چه توی لیست، چه توی جزئیات آرتیست در بخش پروفایل) مقدار
-        # پیش‌فرض false سریالایزر رو نشون می‌داد، حتی اگه کاربر واقعاً
-        # آرتیست رو فالو کرده باشه. دقیقاً همون الگوی annotate ای که در
-        # ArtistViewSet اپ music استفاده میشه، اینجا هم اضافه شد.
         user = self.request.user
         if user.is_authenticated:
             artist_ct = ContentType.objects.get_for_model(Artist)
@@ -152,21 +139,6 @@ class UserDashboardViewSet(viewsets.GenericViewSet):
         )
 
         serializer = ArtistSerializer(artists, many=True, context={'request': request})
-        return Response(serializer.data)
-
-    @action(detail=False, methods=['get'], url_path='saved-playlists')
-    def saved_playlists(self, request):
-        playlist_ct = ContentType.objects.get_for_model(Playlist)
-        saved_playlist_ids = Like.objects.filter(
-            user=request.user,
-            content_type=playlist_ct
-        ).values_list('object_id', flat=True)
-        playlists = Playlist.objects.filter(id__in=saved_playlist_ids).order_by('-id')
-        page = self.paginate_queryset(playlists)
-        if page is not None:
-            serializer = PlaylistListSerializer(page, many=True, context={'request': request})
-            return self.get_paginated_response(serializer.data)
-        serializer = PlaylistListSerializer(playlists, many=True, context={'request': request})
         return Response(serializer.data)
 
 
@@ -222,8 +194,32 @@ class UserDashboardViewSet(viewsets.GenericViewSet):
         return Response(serializer.data)
 
     @extend_schema(responses={200: PostSerializer(many=True)})
+    @action(detail=False, methods=['get'], url_path='liked-posts')
+    def liked_posts(self, request):
+        user = request.user
+        post_ct = ContentType.objects.get_for_model(Post)
+
+        liked_post_ids = Like.objects.filter(
+            user=user,
+            content_type=post_ct
+        ).values_list('object_id', flat=True)
+
+        posts = Post.objects.filter(
+            id__in=liked_post_ids,
+            is_published=True
+        ).order_by('-created_at')
+
+        page = self.paginate_queryset(posts)
+        if page is not None:
+            serializer = PostSerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(serializer.data)
+
+        serializer = PostSerializer(posts, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    @extend_schema(responses={200: PostSerializer(many=True)})
     @action(detail=False, methods=['get'], url_path='saved-posts')
-    def saved_posts(self, request):
+    def saved_(self, request):
         user = request.user
         post_ct = ContentType.objects.get_for_model(Post)
 

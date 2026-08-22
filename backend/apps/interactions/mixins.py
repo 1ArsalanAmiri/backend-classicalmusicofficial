@@ -33,18 +33,10 @@ class LikableMixin:
         if request.method == 'POST':
             _, created = Like.objects.get_or_create(user=request.user, content_type=content_type, object_id=obj.pk)
 
-            # نکته: دیگر شمارنده را دستی افزایش نمی‌دهیم.
-            # سیگنال update_likes_count در signals.py با هر post_save/post_delete روی Like
-            # به‌صورت خودکار count واقعی را از دیتابیس می‌شمارد و ذخیره می‌کند.
-            # افزایش دستی obj.likes_count اینجا باعث می‌شد نسخه‌ی stale شیء (obj)،
-            # مقدار درستِ ذخیره‌شده توسط سیگنال را بلافاصله overwrite کند.
-
             return Response({"message": "لایک شد."}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
         elif request.method == 'DELETE':
             deleted, _ = Like.objects.filter(user=request.user, content_type=content_type, object_id=obj.pk).delete()
-
-            # همانند بالا: کسر کردن دستی کانتر حذف شد، سیگنال خودش count واقعی را می‌نویسد.
 
             return Response({"message": "لایک برداشته شد."} if deleted else {"error": "لایک یافت نشد."},
                             status=status.HTTP_204_NO_CONTENT if deleted else status.HTTP_404_NOT_FOUND)
@@ -93,16 +85,26 @@ class FollowableMixin:
 
 
 class BookmarkableMixin:
-    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated], url_path='bookmark')
+    @action(detail=True, methods=['post', 'delete'], permission_classes=[IsAuthenticated], url_path='bookmark')
     def toggle_save(self, request, *args, **kwargs):
         obj = self.get_object()
         content_type = ContentType.objects.get_for_model(obj)
-        bookmark, created = Bookmark.objects.get_or_create(user=request.user, content_type=content_type,
-                                                           object_id=obj.pk)
-        if not created:
-            bookmark.delete()
-            return Response({"message": "از لیست ذخیره‌ها حذف شد."}, status=status.HTTP_200_OK)
-        return Response({"message": "ذخیره شد."}, status=status.HTTP_201_CREATED)
+
+        if request.method == 'POST':
+            _, created = Bookmark.objects.get_or_create(
+                user=request.user, content_type=content_type, object_id=obj.pk
+            )
+            return Response({"message": "ذخیره شد."},
+                            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+        elif request.method == 'DELETE':
+            deleted, _ = Bookmark.objects.filter(
+                user=request.user, content_type=content_type, object_id=obj.pk
+            ).delete()
+            return Response({"message": "از لیست ذخیره‌ها حذف شد."} if deleted else {"error": "بوکمارکی یافت نشد."},
+                            status=status.HTTP_204_NO_CONTENT if deleted else status.HTTP_404_NOT_FOUND)
+
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
 class CommentableMixin:

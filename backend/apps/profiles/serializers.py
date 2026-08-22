@@ -52,10 +52,16 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     def get_latest_active_subscription_history(self, obj):
         today = jdatetime.date.today()
-        # Fetch history entries that are either active or will start soon
+
+        active = obj.subscriptionhistory_set.filter(
+            start_date__lte=today, end_date__gte=today
+        ).select_related('subscription').order_by('-start_date').first()
+        if active:
+            return active
+
         return obj.subscriptionhistory_set.filter(
-            Q(end_date__gte=today) | Q(start_date__gte=today)
-        ).order_by('-start_date').select_related('subscription').first()
+            start_date__gt=today
+        ).select_related('subscription').order_by('start_date').first()
 
     def get_current_subscription_name(self, obj):
         history = self.get_latest_active_subscription_history(obj)
@@ -121,9 +127,6 @@ class UserProfileSerializer(serializers.ModelSerializer):
         track_ct = ContentType.objects.get_for_model(Track)
         return Like.objects.filter(user=obj.user, content_type=track_ct).count()
 
-    def get_saved_playlists_count(self, obj):
-        playlist_ct = ContentType.objects.get_for_model(Playlist)
-        return Like.objects.filter(user=obj.user, content_type=playlist_ct).count()
 
 
 class UserProfileUpdateSerializer(serializers.ModelSerializer):
