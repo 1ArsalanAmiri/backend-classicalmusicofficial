@@ -1,4 +1,5 @@
 from django.db import models
+from django.contrib.contenttypes.models import ContentType
 from apps.common.models import unique_slugify
 from apps.interactions.models import Like, Bookmark
 
@@ -21,11 +22,11 @@ class Post(models.Model):
 
     @property
     def likes(self):
-        return Like.objects.filter(content_type__model='post', object_id=self.id)
+        return Like.objects.filter(content_type=ContentType.objects.get_for_model(Post), object_id=self.id)
 
     @property
     def bookmarks(self):
-        return Bookmark.objects.filter(content_type__model='post', object_id=self.id)
+        return Bookmark.objects.filter(content_type=ContentType.objects.get_for_model(Post), object_id=self.id)
 
     def save(self, *args, **kwargs):
         if not self.slug:
