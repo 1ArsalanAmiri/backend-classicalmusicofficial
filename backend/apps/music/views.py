@@ -44,13 +44,20 @@ from celery.exceptions import TimeoutError as CeleryTimeoutError
 from rest_framework import status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.http import FileResponse
 from django.views.decorators.cache import never_cache
-from rest_framework import generics
 from apps.common.pagination import ClassicalMusicPagination, LandingPagination
+from apps.content.models import Post
+from apps.content.serializers import LandingPostSerializer
+from apps.videos.models import Video
+from apps.videos.serializers import LandingVideoSerializer
+from apps.common.permissions import HasStreamSubscription , HasAllSubscription
 
 
 logger = logging.getLogger(__name__)
+
+
+DEFAULT_LANDING_LIMIT = 10
+MAX_LANDING_LIMIT = 20
 
 
 class AlbumBatchUploadAPIView(APIView):
@@ -296,11 +303,9 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
     lookup_field = 'slug'
 
     def get_permissions(self):
-        # ۱. اندپوینت‌های کاملاً عمومی که نیاز به توکن ندارند
         if self.action in ['list', 'retrieve', 'singles', 'chosen']:
             return [AllowAny()]
 
-        # ۲. اکشن‌هایی که حتماً نیاز به توکن (احراز هویت) دارند (شامل استریم و دانلود)
         if self.action in ['stream', 'download', 'record_play', 'like_toggle']:
             return [IsAuthenticated()]
 
@@ -615,15 +620,62 @@ class EditorialPlaylistViewSet(AlbumViewSet):
     album_type = AlbumType.EDITORIAL_PLAYLIST
 
 
-class LandingPageView(generics.ListAPIView):
-    permission_classes = [AllowAny]
-    serializer_class = LandingAlbumSerializer
-    pagination_class = LandingPagination
+class LandingPageView(APIView):
 
-    def get_queryset(self):
-        return Album.objects.filter(
-            status=PublishStatus.PUBLISHED
-        ).prefetch_related('main_artists').order_by('-created_at')
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        summary="Landing Page — Latest Content",
+        parameters=[
+            OpenApiParameter(
+                name='limit',
+                description=f'هر بخش چند آیتم برگردونه (پیش‌فرض {DEFAULT_LANDING_LIMIT}، حداکثر {MAX_LANDING_LIMIT})',
+                required=False,
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+            ),
+        ],
+        tags=['Landing'],
+    )
+    def get(self, request):
+        try:
+            limit = int(request.query_params.get('limit', DEFAULT_LANDING_LIMIT))
+            limit = max(1, min(limit, MAX_LANDING_LIMIT))
+        except ValueError:
+            limit = DEFAULT_LANDING_LIMIT
+
+        context = {'request': request}
+
+        albums = Album.objects.filter(
+            status=PublishStatus.PUBLISHED,
+            album_type=AlbumType.OFFICIAL,
+        ).prefetch_related('main_artists').order_by('-created_at')[:limit]
+
+        editorial_playlists = Album.objects.filter(
+            status=PublishStatus.PUBLISHED,
+            album_type=AlbumType.EDITORIAL_PLAYLIST,
+        ).prefetch_related('main_artists').order_by('-created_at')[:limit]
+
+        articles = Post.objects.filter(
+            is_published=True,
+        ).order_by('-created_at')[:limit]
+
+        can_watch_videos = HasAllSubscription().has_permission(request, self)
+        if can_watch_videos:
+            videos = Video.objects.filter(
+                status=PublishStatus.PUBLISHED,
+            ).prefetch_related('artists').order_by('-created_at')[:limit]
+            video_context = {**context, 'has_all_access': True}
+            videos_data = LandingVideoSerializer(videos, many=True, context=video_context).data
+        else:
+            videos_data = []
+
+        return Response({
+            "albums": LandingAlbumSerializer(albums, many=True, context=context).data,
+            "editorial_playlists": LandingAlbumSerializer(editorial_playlists, many=True, context=context).data,
+            "videos": videos_data,
+            "articles": LandingPostSerializer(articles, many=True, context=context).data,
+        })
 
 
 @sync_to_async

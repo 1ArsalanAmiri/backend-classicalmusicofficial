@@ -1,5 +1,5 @@
 from __future__ import annotations
-from django.db import models
+from django.db import models, transaction, IntegrityError
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 from uuid import uuid4
@@ -71,6 +71,27 @@ def unique_slugify(instance, slug_field_name: str, value: str):
     return slug
 
 
+def save_with_unique_slug(instance, slug_field_name: str, slug_source: str, save_func, max_retries: int = 5, **save_kwargs):
+    last_error = None
+
+    for attempt in range(max_retries):
+        if not getattr(instance, slug_field_name):
+            setattr(instance, slug_field_name, unique_slugify(instance, slug_field_name, slug_source))
+
+        try:
+            with transaction.atomic():
+                save_func(**save_kwargs)
+            return instance
+        except IntegrityError as exc:
+            last_error = exc
+            if slug_field_name not in str(exc):
+                raise
+            setattr(instance, slug_field_name, "")
+            continue
+
+    raise last_error
+
+
 def upload_path_handler(instance, filename, folder_name):
     ext = filename.split('.')[-1]
     return f"music/{folder_name}/{instance.id or uuid4().hex[:8]}/{uuid4().hex}.{ext}"
@@ -95,6 +116,7 @@ def track_audio_path(instance, filename):
 
     # MEDIA_ROOT/protected/tracks/2026/06/a1b2c3d4e5f6.mp3
     return os.path.join("protected", "tracks", date_path, filename)
+
 
 def video_path(instance, filename):
     ext = filename.split('.')[-1]

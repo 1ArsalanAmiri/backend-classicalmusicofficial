@@ -4,7 +4,7 @@ from django.db.models import Sum
 from django.utils.translation import gettext_lazy as _
 from apps.common.models import (
     TimeStampedModel, ArchiveUploadStatus, PublishStatus,
-    unique_slugify, artist_image_path, album_cover_path,
+    unique_slugify, save_with_unique_slug, artist_image_path, album_cover_path,
     track_cover_path, track_audio_path, AlbumManager
 )
 from uuid import uuid4
@@ -85,7 +85,8 @@ class Genre(TimeStampedModel):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = unique_slugify(self, "slug", self.name)
+            save_with_unique_slug(self, "slug", self.name, lambda **kw: super(Genre, self).save(*args, **kw), **kwargs)
+            return
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -102,7 +103,8 @@ class Instrument(TimeStampedModel):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = unique_slugify(self, "slug", self.name)
+            save_with_unique_slug(self, "slug", self.name, lambda **kw: super(Instrument, self).save(*args, **kw), **kwargs)
+            return
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -136,7 +138,8 @@ class Label(TimeStampedModel):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = unique_slugify(self, "slug", self.name)
+            save_with_unique_slug(self, "slug", self.name, lambda **kw: super(Label, self).save(*args, **kw), **kwargs)
+            return
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -198,6 +201,13 @@ class Album(TimeStampedModel):
     def get_zip_filename(self):
         return f"album_{self.slug}.zip"
 
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            slug_source = self.title if self.title and self.title.strip() else f"album-{uuid4().hex[:8]}"
+            save_with_unique_slug(self, "slug", slug_source, lambda **kw: super(Album, self).save(*args, **kw), **kwargs)
+            return
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return self.title if self.title else _("بدون عنوان")
 
@@ -234,7 +244,8 @@ class Artist(TimeStampedModel):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = unique_slugify(self, "slug", self.name)
+            save_with_unique_slug(self, "slug", self.name, lambda **kw: super(Artist, self).save(*args, **kw), **kwargs)
+            return
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -278,8 +289,6 @@ class AlbumZipExport(models.Model):
     album = models.ForeignKey('Album', on_delete=models.CASCADE, related_name='zip_exports')
     zip_file = models.FileField(upload_to='album_zips/', blank=True, null=True)
     status = models.CharField(max_length=20, choices=StatusChoices.choices, default=StatusChoices.PENDING)
-    # برای اینکه بشه به تسک سلری در حال اجرا وصل شد (AsyncResult) و منتظر
-    # نتیجه‌ش موند، بدون اینکه دوباره یک تسک تکراری صف بشه.
     task_id = models.CharField(max_length=255, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -298,11 +307,11 @@ class Track(TimeStampedModel):
     track_number = models.PositiveIntegerField(_("شماره ترک در آلبوم"), null=True, blank=True)
     status = models.CharField(_("وضعیت انتشار"), max_length=20, choices=PublishStatus.choices, default=PublishStatus.PUBLISHED, db_index=True)
     instrument = models.ForeignKey(Instrument, on_delete=models.SET_NULL, related_name="tracks", verbose_name=_("ساز"), null=True, blank=True)
-    is_chosen = models.BooleanField(default=False)
+    is_chosen = models.BooleanField(default=False , verbose_name="منتخب؟")
     label = models.ForeignKey(Label, on_delete=models.SET_NULL, null=True, blank=True, related_name="tracks", verbose_name=_("لیبل ناشر"))
     likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
     play_count = models.PositiveBigIntegerField(_("تعداد کل پخش"), default=0)
-    search_vector = SearchVectorField(null=True, blank=True, editable=False)   # << اضافه شد
+    search_vector = SearchVectorField(null=True, blank=True, editable=False)
 
     class Meta:
         verbose_name = _("ترک")
@@ -339,7 +348,8 @@ class Track(TimeStampedModel):
     def save(self, *args, **kwargs):
         if not self.slug:
             slug_source = self.title if self.title and self.title.strip() else f"track-{uuid4().hex[:8]}"
-            self.slug = unique_slugify(self, "slug", slug_source)
+            save_with_unique_slug(self, "slug", slug_source, lambda **kw: super(Track, self).save(*args, **kw), **kwargs)
+            return
         super().save(*args, **kwargs)
 
     def __str__(self):

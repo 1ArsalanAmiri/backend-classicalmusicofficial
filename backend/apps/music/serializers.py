@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import Artist, Album, Track, Genre, Instrument, Label
 from drf_spectacular.utils import extend_schema_field
 from rest_framework.reverse import reverse
+import random
 
 from ..common.models import PublishStatus
 
@@ -59,7 +60,7 @@ class TrackSerializer(serializers.ModelSerializer):
     class Meta:
         model = Track
         fields = [
-            'id', 'title', 'album', 'artists', 'slug', 'cover_image',
+            'id', 'title', 'album','artists', 'slug', 'cover_image',
             'duration_seconds', 'status', 'likes_count', 'is_liked', 'audio_url', 'download_url'
         ]
 
@@ -203,7 +204,23 @@ class LabelDetailSerializer(serializers.ModelSerializer):
 
 class LandingAlbumSerializer(serializers.ModelSerializer):
     main_artists = ArtistBasicSerializer(many=True, read_only=True)
+    main_artist_image = serializers.SerializerMethodField()
 
     class Meta:
         model = Album
-        fields = ['title', 'slug','album_type' ,'cover_image', 'main_artists']
+        fields = ['title', 'slug', 'album_type', 'cover_image', 'main_artists', 'main_artist_image']
+
+    def get_main_artist_image(self, obj):
+        candidates = [artist for artist in obj.main_artists.all() if artist.image]
+        if not candidates:
+            return None
+
+        chosen = random.choice(candidates)
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(chosen.image.url)
+        return chosen.image.url
+
+
+
+

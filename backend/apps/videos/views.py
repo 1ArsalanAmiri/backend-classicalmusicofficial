@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ReadOnlyModelViewSet
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, status
+from django.db.models import F
 from .models import Video
 from apps.common.models import PublishStatus
 from .serializers import VideoListSerializer, VideoDetailSerializer
@@ -54,7 +55,7 @@ class VideoViewSet(ReadOnlyModelViewSet):
         return context
 
     def get_queryset(self):
-        qs = Video.objects.filter(status=PublishStatus.PUBLISHED)
+        qs = Video.objects.filter(status=PublishStatus.PUBLISHED).distinct()
         if self.action == 'retrieve':
             qs = qs.prefetch_related('artists')
         return qs
@@ -66,7 +67,6 @@ class VideoViewSet(ReadOnlyModelViewSet):
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
-        instance.view_count += 1
-        instance.save(update_fields=['view_count'])
+        Video.objects.filter(pk=instance.pk).update(view_count=F('view_count') + 1)
+        instance.refresh_from_db(fields=['view_count'])
         return super().retrieve(request, *args, **kwargs)
-

@@ -23,6 +23,17 @@ from apps.common.models import PublishStatus
 
 logger = logging.getLogger(__name__)
 
+TRACK_TITLE_MAX_LENGTH = Track._meta.get_field('title').max_length
+TRACK_SLUG_MAX_LENGTH = Track._meta.get_field('slug').max_length
+
+
+def _build_unique_track_slug(title: str) -> str:
+
+    unique_suffix = uuid.uuid4().hex[:8]
+    max_base_length = max(TRACK_SLUG_MAX_LENGTH - (len(unique_suffix) + 1), 1)
+    base_slug = slugify(title, allow_unicode=True)[:max_base_length]
+    return f"{base_slug}-{unique_suffix}" if base_slug else f"track-{unique_suffix}"
+
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=10)
 def process_album_archive_task(self, upload_record_id: int):
@@ -74,7 +85,6 @@ def process_album_archive_task(self, upload_record_id: int):
 
         used_track_numbers = set(album.tracks.values_list('track_number', flat=True))
 
-        # آرایه نگهداشت اطلاعات ترک‌ها و هنرمندان جهت ذخیره دسته‌جمعی
         tracks_data_list = []
 
         for index, file_path in enumerate(audio_files):
@@ -128,11 +138,10 @@ def process_album_archive_task(self, upload_record_id: int):
                 # -------- Metadata Extraction --------
                 raw_title_list = audio_meta.get("title", [filename])
                 raw_title = raw_title_list[0] if raw_title_list else filename
-                safe_title = (str(raw_title) or "Untitled")[:450]
+                safe_title = (str(raw_title) or "Untitled").strip()[:TRACK_TITLE_MAX_LENGTH]
 
-                base_slug = slugify(safe_title, allow_unicode=True)[:400]
-                unique_suffix = uuid.uuid4().hex[:8]
-                safe_slug = f"{base_slug}-{unique_suffix}" if base_slug else f"track-{unique_suffix}"
+                # FIX: تولید اسلاگ با رعایت دقیق max_length واقعی + جا برای suffix
+                safe_slug = _build_unique_track_slug(safe_title)
 
                 raw_track_number_list = audio_meta.get("tracknumber", [str(index + 1)])
                 raw_track_number = raw_track_number_list[0] if raw_track_number_list else str(index + 1)
@@ -180,17 +189,7 @@ def process_album_archive_task(self, upload_record_id: int):
                     except (ValueError, TypeError):
                         pass
 
-                target_relative_path = f"tracks/{album.slug}/{filename}"
-                saved_path = None
-                try:
-                    with open(file_path, 'rb') as f:
-                        saved_path = default_storage.save(target_relative_path, File(f))
-                except Exception as upload_err:
-                    logger.error(f"Upload failed for {file_path}: {upload_err}")
-                    task_warnings.append(f"خطا در ذخیره‌سازی فایل {filename}")
-                    continue
-
-                # ساخت نمونه ترک در حافظه RAM
+                # ساخت نمونه ترک در حافظه RAM (بدون audio_file هنوز)
                 track_instance = Track(
                     album=album,
                     track_number=track_number,
@@ -198,9 +197,16 @@ def process_album_archive_task(self, upload_record_id: int):
                     slug=safe_slug,
                     genre=genre_obj,
                     duration_ms=duration_ms,
-                    audio_file=saved_path,
-                    status="published"
+                    status=PublishStatus.PUBLISHED,
                 )
+
+                try:
+                    with open(file_path, 'rb') as f:
+                        track_instance.audio_file.save(filename, File(f), save=False)
+                except Exception as upload_err:
+                    logger.error(f"Upload failed for {file_path}: {upload_err}")
+                    task_warnings.append(f"خطا در ذخیره‌سازی فایل {filename}")
+                    continue
 
                 tracks_data_list.append({
                     "track_instance": track_instance,
@@ -309,7 +315,7 @@ def extract_track_metadata_task(track_id):
         ]
 
         if track.title != old_title and not track.slug:
-            track.slug = slugify(track.title, allow_unicode=True)
+            track.slug = _build_unique_track_slug(track.title)
             update_fields_list.append('slug')
 
         track.save(update_fields=update_fields_list)
@@ -357,11 +363,6 @@ def generate_album_zip_task(self, album_id: int):
         file_path = os.path.join(export_dir, file_name)
 
         with zipfile.ZipFile(file_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            # FIX: قبلاً status='PUBLISHED' (حروف بزرگ) بود که با مقدار واقعی
-            # ذخیره‌شده روی ترک‌ها ('published' - حروف کوچک، همون‌طور که موقع
-            # ساخت ترک از آرشیو ست می‌شه) مچ نمی‌شد. در نتیجه هیچ ترکی پیدا
-            # نمی‌شد، حلقه صفر بار اجرا می‌شد و یک زیپ کاملاً خالی (بدون خطا)
-            # با status=COMPLETED ساخته می‌شد.
             for track in album.tracks.filter(status=PublishStatus.PUBLISHED):
                 if track.audio_file and os.path.exists(track.audio_file.path):
                     ext = os.path.splitext(track.audio_file.path)[1]
