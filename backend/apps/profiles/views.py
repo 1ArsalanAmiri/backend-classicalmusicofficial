@@ -219,7 +219,7 @@ class UserDashboardViewSet(viewsets.GenericViewSet):
 
     @extend_schema(responses={200: PostSerializer(many=True)})
     @action(detail=False, methods=['get'], url_path='saved-posts')
-    def saved_(self, request):
+    def saved_posts(self, request):
         user = request.user
         post_ct = ContentType.objects.get_for_model(Post)
 

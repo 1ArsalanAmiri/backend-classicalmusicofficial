@@ -127,6 +127,9 @@ class UserProfileSerializer(serializers.ModelSerializer):
         track_ct = ContentType.objects.get_for_model(Track)
         return Like.objects.filter(user=obj.user, content_type=track_ct).count()
 
+    def get_saved_playlists_count(self, obj):
+        playlist_ct = ContentType.objects.get_for_model(Playlist)
+        return Like.objects.filter(user=obj.user, content_type=playlist_ct).count()
 
 
 class UserProfileUpdateSerializer(serializers.ModelSerializer):

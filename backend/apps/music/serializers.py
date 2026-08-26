@@ -60,7 +60,7 @@ class TrackSerializer(serializers.ModelSerializer):
     class Meta:
         model = Track
         fields = [
-            'id', 'title', 'album','artists', 'slug', 'cover_image',
+            'id', 'title', 'album', 'artists', 'slug', 'cover_image',
             'duration_seconds', 'status', 'likes_count', 'is_liked', 'audio_url', 'download_url'
         ]
 
@@ -202,8 +202,16 @@ class LabelDetailSerializer(serializers.ModelSerializer):
         return TrackSerializer(singles, many=True, context=self.context).data
 
 
+class LandingArtistSerializer(serializers.ModelSerializer):
+    artist_type = serializers.CharField(source='get_artist_type_display', read_only=True)
+
+    class Meta:
+        model = Artist
+        fields = ['name', 'slug', 'artist_type']
+
+
 class LandingAlbumSerializer(serializers.ModelSerializer):
-    main_artists = ArtistBasicSerializer(many=True, read_only=True)
+    main_artists = LandingArtistSerializer(many=True, read_only=True)
     main_artist_image = serializers.SerializerMethodField()
 
     class Meta:
@@ -220,7 +228,3 @@ class LandingAlbumSerializer(serializers.ModelSerializer):
         if request:
             return request.build_absolute_uri(chosen.image.url)
         return chosen.image.url
-
-
-
-
