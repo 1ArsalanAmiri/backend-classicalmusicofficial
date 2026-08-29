@@ -24,7 +24,7 @@ RANK_THRESHOLD = 0.1
 SIMILARITY_THRESHOLD = 0.2
 ARTIST_FANOUT_CAP = 100
 
-SEARCH_CATEGORIES = {'album', 'playlist', 'video', 'article', 'track'}
+SEARCH_CATEGORIES = {'album', 'playlist', 'video', 'article', 'track' , 'all'}
 
 
 def get_similarity_threshold(query: str) -> float:
@@ -153,8 +153,8 @@ class CategorySearchView(generics.ListAPIView):
                 'type': f"مقدار type باید یکی از این‌ها باشه: {', '.join(sorted(SEARCH_CATEGORIES))}"
             })
 
-        if len(query) < 2:
-            raise ValidationError({'q': 'عبارت جستجو باید حداقل ۲ کاراکتر باشد.'})
+        if len(query) < 3:
+            raise ValidationError({'q': 'عبارت جستجو باید حداقل 3 کاراکتر باشد.'})
 
         search_query = SearchQuery(query, config='simple', search_type='websearch')
 
