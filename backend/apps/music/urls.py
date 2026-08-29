@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import ArtistViewSet, AlbumViewSet, TrackViewSet, GenreViewSet, InstrumentViewSet, EraListView, \
     AlbumBatchUploadAPIView, LabelViewSet, GenreDetailWithContentAPIView, \
     InstrumentDetailWithContentAPIView, EditorialPlaylistViewSet, LandingPageView
-from apps.common.search_views import GlobalSearchView
+from apps.common.search_views import CategorySearchView
 
 router = DefaultRouter()
 
