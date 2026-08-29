@@ -1,96 +1,30 @@
-from rest_framework.views import APIView
-from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError, PermissionDenied
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny
-from django.contrib.postgres.search import SearchQuery, SearchRank, TrigramWordSimilarity
+from django.contrib.postgres.search import SearchQuery, SearchRank, TrigramSimilarity
 from django.db.models.functions import Greatest, Coalesce
-from django.db.models import Q, Count, Case, When, Value, IntegerField
-from django.utils.decorators import method_decorator
-from django.views.decorators.cache import cache_page
-
-from apps.music.models import Track, Album, Artist, Label
-from apps.music.serializers import AlbumListSerializer
-from apps.common.models import PublishStatus
-from rest_framework import serializers
-
-from drf_spectacular.utils import extend_schema, OpenApiParameter, inline_serializer
+from django.db.models import Q, Case, When, Value, IntegerField
+from rest_framework import generics
+from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
+from apps.music.models import Track, Album, Artist, AlbumType
+from apps.music.serializers import TrackSerializer, LandingAlbumSerializer
+from apps.videos.models import Video
+from apps.videos.serializers import LandingVideoSerializer
+from apps.content.models import Post
+from apps.content.serializers import LandingPostSerializer
+from apps.common.models import PublishStatus
+from apps.common.permissions import HasAllSubscription
+from apps.subscriptions.services import user_has_stream_access, user_has_all_access
+
 
 DEFAULT_LIMIT = 5
 MAX_LIMIT = 20
 RANK_THRESHOLD = 0.1
-ARTIST_FANOUT_CAP = 50
+SIMILARITY_THRESHOLD = 0.2
+ARTIST_FANOUT_CAP = 100
 
-
-
-class SearchArtistNameSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Artist
-        fields = ['name']
-
-
-class LabelSearchSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Label
-        fields = ['name', 'slug', 'logo']
-
-
-class ArtistSearchSerializer(serializers.ModelSerializer):
-    artist_type_display = serializers.CharField(source='get_artist_type_display', read_only=True)
-    era_display = serializers.CharField(source='get_era_display', read_only=True)
-
-    class Meta:
-        model = Artist
-        fields = [
-            'name', 'slug', 'nickname', 'country', 'birth_year', 'death_year',
-            'artist_type', 'artist_type_display', 'era', 'era_display',
-            'image', 'biography',
-        ]
-
-
-class TrackSearchSerializer(serializers.ModelSerializer):
-    artists = serializers.SerializerMethodField()
-    cover_image = serializers.SerializerMethodField()
-    duration_seconds = serializers.SerializerMethodField()
-    album_slug = serializers.SerializerMethodField()
-    album_type = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Track
-        fields = [
-            'id', 'title', 'album_slug', 'album_type',
-            'artists', 'slug', 'cover_image', 'duration_seconds', 'status',
-        ]
-
-    def get_artists(self, obj):
-        track_artists = list(obj.artists.all())
-        track_artist_ids = {artist.id for artist in track_artists}
-
-        if obj.album:
-            for main_artist in reversed(list(obj.album.main_artists.all())):
-                if main_artist.id not in track_artist_ids:
-                    track_artists.insert(0, main_artist)
-                    track_artist_ids.add(main_artist.id)
-        return SearchArtistNameSerializer(track_artists, many=True).data
-
-    def get_cover_image(self, obj):
-        request = self.context.get('request')
-        if obj.cover_image:
-            return request.build_absolute_uri(obj.cover_image.url) if request else obj.cover_image.url
-        elif obj.album and obj.album.cover_image:
-            return request.build_absolute_uri(obj.album.cover_image.url) if request else obj.album.cover_image.url
-        return None
-
-    def get_duration_seconds(self, obj):
-        if not obj.duration_ms:
-            return 0
-        return obj.duration_ms // 1000
-
-    def get_album_slug(self, obj):
-        return obj.album.slug if obj.album else None
-
-    def get_album_type(self, obj):
-
-        return obj.album.album_type if obj.album else None
+SEARCH_CATEGORIES = {'album', 'playlist', 'video', 'article', 'track'}
 
 
 def get_similarity_threshold(query: str) -> float:
@@ -127,145 +61,139 @@ def _merge_unique(primary, secondary, limit):
     return result[:limit]
 
 
-class GlobalSearchView(APIView):
+class SearchResultsPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
+class CategorySearchView(generics.ListAPIView):
+    pagination_class = SearchResultsPagination
     permission_classes = [AllowAny]
+    filter_backends = []
+
+    def _get_query_and_category(self):
+        query = self.request.query_params.get('q', '').strip().lower()
+        category = self.request.query_params.get('type', '').strip().lower()
+        return query, category
 
     @extend_schema(
-        summary="Global Search",
-        description="Search across tracks, albums, artists and labels using full-text search with trigram + prefix fallback.",
+        summary="Category Search",
         parameters=[
             OpenApiParameter(
-                name='q',
-                description='Search query (2 characters minimum)',
-                required=True,
-                type=OpenApiTypes.STR,
-                location=OpenApiParameter.QUERY,
+                name='q', required=True,
+                type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
             ),
             OpenApiParameter(
-                name='limit',
-                description=f'Results per group (Default {DEFAULT_LIMIT}, Maximum {MAX_LIMIT})',
-                required=False,
-                type=OpenApiTypes.INT,
-                location=OpenApiParameter.QUERY,
+                name='type', description=f"دسته: {' | '.join(sorted(SEARCH_CATEGORIES))}", required=True,
+                type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
+            ),
+            OpenApiParameter(
+                name='page', required=False,
+                type=OpenApiTypes.INT, location=OpenApiParameter.QUERY,
+            ),
+            OpenApiParameter(
+                name='page_size', required=False,
+                type=OpenApiTypes.INT, location=OpenApiParameter.QUERY,
             ),
         ],
-        responses={
-            200: inline_serializer(
-                name='GlobalSearchResponse',
-                fields={
-                    'tracks': TrackSearchSerializer(many=True),
-                    'albums': AlbumListSerializer(many=True),
-                    'artists': ArtistSearchSerializer(many=True),
-                    'labels': LabelSearchSerializer(many=True),
-                }
-            ),
-        },
         tags=['Search'],
     )
-    @method_decorator(cache_page(60 * 2))
-    def get(self, request):
-        query = request.query_params.get('q', '').strip().lower()
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
 
-        try:
-            limit = int(request.query_params.get('limit', DEFAULT_LIMIT))
-            limit = max(1, min(limit, MAX_LIMIT))
-        except ValueError:
-            limit = DEFAULT_LIMIT
+    def get_serializer_class(self):
+        _, category = self._get_query_and_category()
+        return {
+            'track': TrackSerializer,
+            'album': LandingAlbumSerializer,
+            'playlist': LandingAlbumSerializer,
+            'video': LandingVideoSerializer,
+            'article': LandingPostSerializer,
+        }.get(category, TrackSerializer)
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        _, category = self._get_query_and_category()
+        request = self.request
+
+        if category == 'track':
+            if request.user.is_authenticated:
+                context['has_stream_access'] = user_has_stream_access(request.user)
+                context['has_download_access'] = user_has_all_access(request.user)
+            else:
+                context['has_stream_access'] = False
+                context['has_download_access'] = False
+
+        elif category == 'video':
+            if request.user.is_authenticated:
+                context['has_all_access'] = user_has_all_access(request.user)
+            else:
+                context['has_all_access'] = False
+
+        return context
+
+    def _matched_artist_ids(self, query):
+        return list(
+            Artist.objects.annotate(
+                similarity=Greatest(
+                    TrigramSimilarity('name', query),
+                    Coalesce(TrigramSimilarity('nickname', query), 0.0),
+                )
+            ).filter(
+                similarity__gt=SIMILARITY_THRESHOLD
+            ).order_by('-similarity').values_list('id', flat=True)[:ARTIST_FANOUT_CAP]
+        )
+
+    def get_queryset(self):
+        query, category = self._get_query_and_category()
+
+        if category not in SEARCH_CATEGORIES:
+            raise ValidationError({
+                'type': f"مقدار type باید یکی از این‌ها باشه: {', '.join(sorted(SEARCH_CATEGORIES))}"
+            })
 
         if len(query) < 2:
-            return Response({"tracks": [], "albums": [], "artists": [], "labels": []})
+            raise ValidationError({'q': 'عبارت جستجو باید حداقل ۲ کاراکتر باشد.'})
 
-        similarity_threshold = get_similarity_threshold(query)
         search_query = SearchQuery(query, config='simple', search_type='websearch')
 
+        if category in ('album', 'playlist'):
+            album_type = AlbumType.OFFICIAL if category == 'album' else AlbumType.EDITORIAL_PLAYLIST
+            matched_artist_ids = self._matched_artist_ids(query)
+            return Album.objects.filter(
+                status=PublishStatus.PUBLISHED,
+                album_type=album_type,
+            ).prefetch_related('main_artists').annotate(
+                rank=SearchRank('search_vector', search_query),
+                similarity=TrigramSimilarity('title', query),
+            ).filter(
+                Q(rank__gte=RANK_THRESHOLD) | Q(similarity__gt=SIMILARITY_THRESHOLD) |
+                Q(main_artists__id__in=matched_artist_ids)
+            ).distinct().order_by('-rank', '-similarity', '-id')
 
-        artist_qs = Artist.objects.annotate(
-            similarity=Greatest(
-                TrigramWordSimilarity(query, 'name'),
-                Coalesce(TrigramWordSimilarity(query, 'nickname'), 0.0),
-            ),
-            starts_with_boost=Greatest(
-                _starts_with_boost('name', query),
-                _starts_with_boost('nickname', query),
-            ),
-        ).filter(
-            Q(name__icontains=query) |
-            Q(nickname__icontains=query) |
-            Q(similarity__gte=similarity_threshold)
-        ).order_by('-starts_with_boost', '-similarity', '-id')
+        if category == 'track':
+            matched_artist_ids = self._matched_artist_ids(query)
+            return Track.objects.filter(
+                status=PublishStatus.PUBLISHED,
+            ).select_related('album').prefetch_related(
+                'artists', 'album__main_artists'
+            ).annotate(
+                rank=SearchRank('search_vector', search_query),
+                similarity=TrigramSimilarity('title', query),
+            ).filter(
+                Q(rank__gte=RANK_THRESHOLD) | Q(similarity__gt=SIMILARITY_THRESHOLD) |
+                Q(artists__id__in=matched_artist_ids) | Q(album__main_artists__id__in=matched_artist_ids)
+            ).distinct().order_by('-rank', '-similarity', '-id')
 
-        artists = list(artist_qs[:limit])
-        matched_artist_ids = list(artist_qs.values_list('id', flat=True)[:ARTIST_FANOUT_CAP])
+        if category == 'video':
+            return Video.objects.filter(
+                status=PublishStatus.PUBLISHED,
+            ).prefetch_related('artists').annotate(
+                similarity=TrigramSimilarity('title', query),
+            ).filter(similarity__gt=SIMILARITY_THRESHOLD).order_by('-similarity', '-id')
 
-        # --- ۲. لیبل‌ها ---
-        labels = Label.objects.annotate(
-            similarity=TrigramWordSimilarity(query, 'name'),
-            starts_with_boost=_starts_with_boost('name', query),
-        ).filter(
-            Q(name__icontains=query) | Q(similarity__gte=similarity_threshold)
-        ).order_by('-starts_with_boost', '-similarity', '-id')[:limit]
-
-        # --- ۳. آلبوم‌ها: تطبیق عنوان (FTS + trigram-word + prefix، هم title هم title_fa) یا تطبیق آرتیست اصلی ---
-        album_title_matches = Album.objects.filter(status=PublishStatus.PUBLISHED).annotate(
-            rank=SearchRank('search_vector', search_query),
-            similarity=Greatest(
-                TrigramWordSimilarity(query, 'title'),
-                Coalesce(TrigramWordSimilarity(query, 'title_fa'), 0.0),
-            ),
-            starts_with_boost=Greatest(
-                _starts_with_boost('title', query),
-                _starts_with_boost('title_fa', query),
-            ),
-            annotated_total_tracks=Count('tracks', distinct=True),
-        ).filter(
-            Q(rank__gte=RANK_THRESHOLD) |
-            Q(similarity__gte=similarity_threshold) |
-            Q(title__icontains=query) |
-            Q(title_fa__icontains=query)
-        ).order_by('-starts_with_boost', '-rank', '-similarity', '-id')[:limit]
-
-        albums_by_artist = []
-        if matched_artist_ids:
-            albums_by_artist = list(
-                Album.objects.filter(
-                    status=PublishStatus.PUBLISHED,
-                    main_artists__id__in=matched_artist_ids,
-                ).annotate(
-                    annotated_total_tracks=Count('tracks', distinct=True),
-                ).distinct().order_by('-release_year')[:limit]
-            )
-
-        albums = _merge_unique(album_title_matches, albums_by_artist, limit)
-
-        # --- ۴. ترک‌ها: تطبیق عنوان (FTS + trigram-word + prefix) یا تطبیق آرتیست ---
-        track_title_matches = Track.objects.filter(status=PublishStatus.PUBLISHED).select_related(
-            'album'
-        ).prefetch_related('artists', 'album__main_artists').annotate(
-            rank=SearchRank('search_vector', search_query),
-            similarity=TrigramWordSimilarity(query, 'title'),
-            starts_with_boost=_starts_with_boost('title', query),
-        ).filter(
-            Q(rank__gte=RANK_THRESHOLD) |
-            Q(similarity__gte=similarity_threshold) |
-            Q(title__icontains=query)
-        ).order_by('-starts_with_boost', '-rank', '-similarity', '-id')[:limit]
-
-        tracks_by_artist = []
-        if matched_artist_ids:
-            tracks_by_artist = list(
-                Track.objects.filter(
-                    Q(artists__id__in=matched_artist_ids) | Q(album__main_artists__id__in=matched_artist_ids),
-                    status=PublishStatus.PUBLISHED,
-                ).select_related('album').prefetch_related(
-                    'artists', 'album__main_artists'
-                ).distinct().order_by('-created_at')[:limit]
-            )
-
-        tracks = _merge_unique(track_title_matches, tracks_by_artist, limit)
-
-        return Response({
-            "tracks": TrackSearchSerializer(tracks, many=True, context={'request': request}).data,
-            "albums": AlbumListSerializer(albums, many=True, context={'request': request}).data,
-            "artists": ArtistSearchSerializer(artists, many=True, context={'request': request}).data,
-            "labels": LabelSearchSerializer(labels, many=True, context={'request': request}).data,
-        })
+        return Post.objects.filter(
+            is_published=True,
+            title__icontains=query,
+        ).order_by('-created_at')

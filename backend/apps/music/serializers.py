@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Artist, Album, Track, Genre, Instrument, Label
+from .models import Artist, Album, Track, Genre, Instrument, Label, AlbumType
 from drf_spectacular.utils import extend_schema_field
 from rest_framework.reverse import reverse
 import random
@@ -10,11 +10,6 @@ from ..common.models import PublishStatus
 class ArtistSerializer(serializers.ModelSerializer):
     artist_type_display = serializers.CharField(source='get_artist_type_display', read_only=True)
     era_display = serializers.CharField(source='get_era_display', read_only=True)
-    # FIX: Artist has no `followers` reverse relation (Follow uses a GenericForeignKey,
-    # not a direct FK to Artist), so obj.followers crashed with AttributeError.
-    # ArtistViewSet.get_queryset() already annotates `is_followed` via an Exists()
-    # subquery on Follow (matching content_type + object_id), so we just read that
-    # annotation here instead of querying a non-existent relation.
     is_followed = serializers.BooleanField(read_only=True, default=False)
 
     class Meta:
@@ -55,12 +50,13 @@ class TrackSerializer(serializers.ModelSerializer):
     duration_seconds = serializers.SerializerMethodField()
     download_url = serializers.SerializerMethodField()
     album = serializers.SlugRelatedField(slug_field='slug', read_only=True)
+    album_type = serializers.SerializerMethodField()
     is_liked = serializers.BooleanField(read_only=True, default=False)
 
     class Meta:
         model = Track
         fields = [
-            'id', 'title', 'album', 'artists', 'slug', 'cover_image',
+            'id', 'title', 'album', 'album_type', 'artists', 'slug', 'cover_image',
             'duration_seconds', 'status', 'likes_count', 'is_liked', 'audio_url', 'download_url'
         ]
 
@@ -75,6 +71,10 @@ class TrackSerializer(serializers.ModelSerializer):
                     track_artists.insert(0, main_artist)
                     track_artist_ids.add(main_artist.id)
         return ArtistBasicSerializer(track_artists, many=True, context=self.context).data
+
+    @extend_schema_field(serializers.ChoiceField(choices=AlbumType.choices, allow_null=True))
+    def get_album_type(self, obj):
+        return obj.album.album_type if obj.album else None
 
     def get_cover_image(self, obj):
         request = self.context.get('request')
