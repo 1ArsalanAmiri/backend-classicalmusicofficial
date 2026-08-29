@@ -1,5 +1,4 @@
 from datetime import timezone
-
 from django.contrib import admin
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
@@ -36,6 +35,9 @@ class TicketAdmin(admin.ModelAdmin):
         }),
     )
 
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('user')
+
     @admin.display(description=_('وضعیت'))
     def status_badge(self, obj):
         colors = {
@@ -57,9 +59,9 @@ class TicketAdmin(admin.ModelAdmin):
 
         for instance in instances:
             if isinstance(instance, TicketMessage):
-                if not instance.pk and not hasattr(instance, 'sender_id'):
+                if not instance.pk and not instance.sender_id:
                     instance.sender = request.user
-                if instance.sender and instance.sender.is_staff:
+                if instance.sender_id and instance.sender.is_staff:
                     has_new_admin_reply = True
                 instance.save()
         formset.save_m2m()

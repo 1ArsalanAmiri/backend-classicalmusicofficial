@@ -58,11 +58,6 @@ class FollowableMixin:
                     object_id=obj.pk
                 )
                 if created:
-                    # نکته: افزایش دستی followers_count حذف شد.
-                    # سیگنال update_followers_count در signals.py مسئول محاسبه‌ی
-                    # count واقعی و ذخیره‌ی آن روی شیء تازه‌خوانده‌شده از دیتابیس است.
-                    # چون get_or_create پیش از این خط، سیگنال post_save را trigger کرده،
-                    # save دستی روی obj قدیمی، مقدار درستِ سیگنال را خراب می‌کرد.
                     return Response({"message": "فالو شد."}, status=status.HTTP_201_CREATED)
                 return Response({"message": "شما قبلا این مورد را فالو کرده‌اید."}, status=status.HTTP_200_OK)
             except IntegrityError:
@@ -76,8 +71,6 @@ class FollowableMixin:
             ).delete()
 
             if deleted:
-                # کاهش دستی followers_count حذف شد؛ سیگنال post_delete خودش
-                # count واقعی را از دیتابیس می‌شمارد و می‌نویسد.
                 return Response({"message": "آنفالو شد."}, status=status.HTTP_204_NO_CONTENT)
             return Response({"error": "فالویی یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -114,17 +107,19 @@ class CommentableMixin:
         content_type = ContentType.objects.get_for_model(obj)
 
         if request.method == 'GET':
-            replies_qs = Comment.objects.filter(is_approved=True, is_deleted=False).select_related('user')
+            replies_qs = Comment.objects.filter(
+                is_approved=True, is_deleted=False
+            ).select_related('user', 'user__profile')
             comments = Comment.objects.filter(
                 content_type=content_type,
                 object_id=obj.pk,
                 is_approved=True,
                 is_deleted=False,
                 parent__isnull=True
-            ).select_related('user').prefetch_related(
+            ).select_related('user', 'user__profile').prefetch_related(
                 Prefetch('replies', queryset=replies_qs, to_attr='prefetched_replies')
             )
-            return Response(CommentSerializer(comments, many=True).data)
+            return Response(CommentSerializer(comments, many=True, context={'request': request}).data)
 
         if not request.user.is_authenticated:
             return Response({"detail": "برای ارسال کامنت باید وارد حساب خود شوید."},
@@ -137,5 +132,5 @@ class CommentableMixin:
 
         return Response({
             "message": "نظر شما با موفقیت ثبت شد و پس از تایید مدیریت نمایش داده خواهد شد.",
-            "data": CommentSerializer(comment).data
+            "data": CommentSerializer(comment, context={'request': request}).data
         }, status=status.HTTP_201_CREATED)

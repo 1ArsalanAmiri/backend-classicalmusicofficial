@@ -5,12 +5,28 @@ from .models import Comment
 class CommentUserSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     display_name = serializers.SerializerMethodField()
+    avatar = serializers.SerializerMethodField()
+    is_staff = serializers.BooleanField(read_only=True)
 
     def get_display_name(self, obj):
         full_name = obj.get_full_name().strip() if hasattr(obj, 'get_full_name') else ""
         if full_name:
             return full_name
         return getattr(obj, 'username', None) or str(getattr(obj, 'phone_number', obj.id))
+
+    def get_avatar(self, obj):
+        profile = getattr(obj, 'profile', None)
+        if not profile or not profile.profile_image:
+            return None
+
+        image_name = profile.profile_image.name or ""
+        if image_name.startswith("http://") or image_name.startswith("https://"):
+            return image_name
+
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(profile.profile_image.url)
+        return profile.profile_image.url
 
 
 class CommentSerializer(serializers.ModelSerializer):
@@ -40,7 +56,7 @@ class CommentSerializer(serializers.ModelSerializer):
             replies = obj.prefetched_replies
         else:
             replies = obj.replies.filter(is_approved=True, is_deleted=False)
-        return CommentSerializer(replies, many=True).data
+        return CommentSerializer(replies, many=True, context=self.context).data
 
 
 class CommentCreateSerializer(serializers.ModelSerializer):
