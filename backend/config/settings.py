@@ -325,20 +325,20 @@ SESSION_COOKIE_SECURE = True
 
 
 # STORAGES ---------
-STORAGES = {
-    "default": {
-        "BACKEND": "storages.backends.sftpstorage.SFTPStorage",
-    },
-    "staticfiles": {
-        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
-    },
-}
-
-SFTP_STORAGE_HOST = os.environ["SFTP_HOST"]
-SFTP_STORAGE_ROOT = "/home/your-user/media"
-SFTP_STORAGE_PARAMS = {
-    "username": os.environ["SFTP_USERNAME"],
-    "password": os.environ["SFTP_PASSWORD"],
-    "port": int(os.environ.get("SFTP_PORT", 22)),
-}
-SFTP_KNOWN_HOST_FILE = "/etc/ssh/ssh_known_hosts"
+# STORAGES = {
+#     "default": {
+#         "BACKEND": "storages.backends.sftpstorage.SFTPStorage",
+#     },
+#     "staticfiles": {
+#         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+#     },
+# }
+#
+# SFTP_STORAGE_HOST = os.environ["SFTP_HOST"]
+# SFTP_STORAGE_ROOT = "/home/your-user/media"
+# SFTP_STORAGE_PARAMS = {
+#     "username": os.environ["SFTP_USERNAME"],
+#     "password": os.environ["SFTP_PASSWORD"],
+#     "port": int(os.environ.get("SFTP_PORT", 22)),
+# }
+# SFTP_KNOWN_HOST_FILE = "/etc/ssh/ssh_known_hosts"
