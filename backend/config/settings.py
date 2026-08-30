@@ -1,7 +1,7 @@
+import os
 from pathlib import Path
 import environ
 from datetime import timedelta
-from os import path
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 from sentry_sdk.integrations.celery import CeleryIntegration
@@ -120,7 +120,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [path.join(BASE_DIR, 'templates')],
+        'DIRS': [os.path.join(BASE_DIR, 'templates')],
         'APP_DIRS': True,
         "OPTIONS": {
             "context_processors": [
@@ -161,10 +161,10 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = '/static/'
-STATIC_ROOT = path.join(BASE_DIR, 'staticfiles')
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 MEDIA_URL = '/media/'
-MEDIA_ROOT = path.join(BASE_DIR, 'media')
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 
 # STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.ManifestStaticFilesStorage'
@@ -323,3 +323,22 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 CSRF_COOKIE_SECURE = True
 SESSION_COOKIE_SECURE = True
 
+
+# STORAGES ---------
+STORAGES = {
+    "default": {
+        "BACKEND": "storages.backends.sftpstorage.SFTPStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
+
+SFTP_STORAGE_HOST = os.environ["SFTP_HOST"]
+SFTP_STORAGE_ROOT = "/home/your-user/media"
+SFTP_STORAGE_PARAMS = {
+    "username": os.environ["SFTP_USERNAME"],
+    "password": os.environ["SFTP_PASSWORD"],
+    "port": int(os.environ.get("SFTP_PORT", 22)),
+}
+SFTP_KNOWN_HOST_FILE = "/etc/ssh/ssh_known_hosts"

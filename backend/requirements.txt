@@ -10,6 +10,7 @@ django-debug-toolbar==4.4.6
 psycopg2-binary==2.9.9
 django-redis==5.4.0
 redis==5.2.1
+django-storages[sftp]
 
 # Admin & UI
 django-nested-admin==4.1.6

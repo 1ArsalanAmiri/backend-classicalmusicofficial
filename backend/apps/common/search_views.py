@@ -11,7 +11,7 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 
 from apps.music.models import Track, Album, Artist, AlbumType
-from apps.music.serializers import TrackSerializer, LandingAlbumSerializer
+from apps.music.serializers import TrackSerializer, LandingAlbumSerializer, ArtistBasicSerializer
 from apps.videos.models import Video
 from apps.videos.serializers import LandingVideoSerializer
 from apps.content.models import Post
@@ -27,11 +27,10 @@ MAX_GLOBAL_LIMIT = 20
 RANK_THRESHOLD = 0.1
 ARTIST_FANOUT_CAP = 100
 
-SINGLE_CATEGORIES = ('album', 'playlist', 'track', 'video', 'article')
+SINGLE_CATEGORIES = ('album', 'playlist', 'track', 'video', 'article', 'artist')
 
 
 def get_similarity_threshold(query: str) -> float:
-
     length = len(query)
     if length <= 4:
         return 0.1
@@ -72,6 +71,7 @@ class BaseSearchMixin:
             'playlist': LandingAlbumSerializer,
             'video': LandingVideoSerializer,
             'article': LandingPostSerializer,
+            'artist': ArtistBasicSerializer,
         }[category]
 
     def _context_for(self, request, category):
@@ -130,6 +130,14 @@ class BaseSearchMixin:
                 similarity=TrigramSimilarity('title', query),
             ).filter(similarity__gt=similarity_threshold).order_by('-similarity', '-id')
 
+        if category == 'artist':
+            return Artist.objects.annotate(
+                similarity=Greatest(
+                    TrigramSimilarity('name', query),
+                    Coalesce(TrigramSimilarity('nickname', query), 0.0),
+                )
+            ).filter(similarity__gt=similarity_threshold).order_by('-similarity', '-id')
+
         return Post.objects.filter(
             is_published=True,
             title__icontains=query,
@@ -150,11 +158,12 @@ class GlobalSearchView(BaseSearchMixin, APIView):
         summary="Global Search",
         parameters=[
             OpenApiParameter(
-                name='q', required=True,
+                name='q', description=f'عبارت جستجو (حداقل {MIN_QUERY_LENGTH} کاراکتر)', required=True,
                 type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
             ),
             OpenApiParameter(
-                name='limit',required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY,
+                name='limit',
+                required=False, type=OpenApiTypes.INT, location=OpenApiParameter.QUERY,
             ),
         ],
         tags=['Search'],
@@ -190,11 +199,11 @@ class CategorySearchView(BaseSearchMixin, generics.ListAPIView):
         summary="Category Search",
         parameters=[
             OpenApiParameter(
-                name='q', required=True,
+                name='q', description=f'عبارت جستجو (حداقل {MIN_QUERY_LENGTH} کاراکتر)', required=True,
                 type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
             ),
             OpenApiParameter(
-                name='type', required=True,
+                name='type', description=f"دسته: {' | '.join(SINGLE_CATEGORIES)}", required=True,
                 type=OpenApiTypes.STR, location=OpenApiParameter.QUERY,
             ),
             OpenApiParameter(
