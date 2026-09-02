@@ -5,7 +5,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('music', '0018_alter_artist_era'),
+        ('music', '0023_enable_trigram_and_backfill_search_vector'),
     ]
 
     operations = [

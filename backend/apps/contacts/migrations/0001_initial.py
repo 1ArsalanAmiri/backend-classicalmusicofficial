@@ -37,7 +37,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('body', models.TextField(verbose_name='متن پیام')),
-                ('attachment', models.FileField(blank=True, null=True, upload_to='tickets/attachments/', validators=[apps.contacts.models.validate_ticket_attachment], verbose_name='فایل ضمیمه')),
+                ('attachment', models.FileField(blank=True, null=True, upload_to='tickets/attachments/', verbose_name='فایل ضمیمه')),
                 ('created_at', models.DateTimeField(auto_now_add=True, verbose_name='تاریخ ارسال')),
                 ('sender', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='sent_messages', to=settings.AUTH_USER_MODEL, verbose_name='ارسال کننده')),
                 ('ticket', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='messages', to='contacts.ticket', verbose_name='تیکت')),
