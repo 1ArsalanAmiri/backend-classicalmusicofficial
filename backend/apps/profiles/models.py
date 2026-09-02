@@ -3,6 +3,8 @@ import jdatetime
 
 from apps.music.models import *
 
+DEFAULT_PROFILE_IMAGE_NAME = 'https://dl.classicalmusicofficial.com/media/defualt/pro.png'
+
 
 class UserProfile(models.Model):
     class Meta:
@@ -10,7 +12,13 @@ class UserProfile(models.Model):
         verbose_name_plural = 'پروفایل کاربران'
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='profile', verbose_name="کاربر")
-    profile_image = models.ImageField(upload_to='profile_images/', default='https://dl.classicalmusicofficial.com/media/defualt/pro.png', verbose_name="تصویر پروفایل")
+    profile_image = models.ImageField(
+        upload_to='profile_images/',
+        default=DEFAULT_PROFILE_IMAGE_NAME,
+        null=True,
+        blank=True,
+        verbose_name="تصویر پروفایل",
+    )
     joined_date = jmodels.jDateField(auto_now_add=True, verbose_name="تاریخ عضویت")
 
 

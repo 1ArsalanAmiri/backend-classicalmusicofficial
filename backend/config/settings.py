@@ -163,8 +163,31 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
-MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+MEDIA_URL = env("MEDIA_URL", default="http://dl.clmusic.ir/")
+MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+
+
+# ==============================================================================
+# FTP STORAGE - HOSTDL
+# ==============================================================================
+
+FTP_HOST = env("FTP_HOST")
+FTP_PORT = env.int("FTP_PORT", default=21)
+FTP_USERNAME = env("FTP_USERNAME")
+FTP_PASSWORD = env("FTP_PASSWORD")
+FTP_ROOT = env("FTP_ROOT", default="/www")
+FTP_TIMEOUT = env.int("FTP_TIMEOUT", default=30)
+
+
+STORAGES = {
+    "default": {
+        "BACKEND": "storage.ftp_storage.FTPStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
 
 
 # STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.ManifestStaticFilesStorage'
@@ -325,6 +348,13 @@ SESSION_COOKIE_SECURE = True
 
 
 # STORAGES ---------
+
+FTP_HOST = env("FTP_HOST")
+FTP_PORT = env.int("FTP_PORT", default=21)
+FTP_USERNAME = env("FTP_USERNAME")
+FTP_PASSWORD = env("FTP_PASSWORD")
+FTP_ROOT = env("FTP_ROOT", default="/www")
+
 # STORAGES = {
 #     "default": {
 #         "BACKEND": "storages.backends.sftpstorage.SFTPStorage",
