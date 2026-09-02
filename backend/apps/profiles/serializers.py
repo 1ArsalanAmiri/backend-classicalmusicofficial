@@ -1,5 +1,8 @@
+import logging
+
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth import get_user_model
+from django.core.files.storage import default_storage
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
@@ -8,7 +11,7 @@ from django.contrib.contenttypes.models import ContentType
 from apps.music.models import Artist, Album, Track, PlayHistory, ArtistRole, AlbumType
 from apps.common.models import PublishStatus
 from apps.videos.models import Video
-from apps.profiles.models import UserProfile
+from apps.profiles.models import UserProfile, DEFAULT_PROFILE_IMAGE_NAME
 from django.db.models import Q
 import jdatetime
 from apps.music.serializers import TrackSerializer
@@ -17,6 +20,7 @@ from apps.music.serializers import AlbumListSerializer
 
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -136,6 +140,7 @@ class UserProfileUpdateSerializer(serializers.ModelSerializer):
     first_name = serializers.CharField(source='user.first_name', required=False)
     last_name = serializers.CharField(source='user.last_name', required=False)
     email = serializers.EmailField(source='user.email', required=False)
+    profile_image = serializers.ImageField(required=False, allow_null=True)
 
     class Meta:
         model = UserProfile
@@ -168,7 +173,27 @@ class UserProfileUpdateSerializer(serializers.ModelSerializer):
         if user_needs_update:
             user.save()
 
-        return super().update(instance, validated_data)
+        old_image_name = None
+        if 'profile_image' in validated_data:
+            current_image = instance.profile_image
+            if current_image and current_image.name and current_image.name != DEFAULT_PROFILE_IMAGE_NAME:
+                old_image_name = current_image.name
+
+        updated_instance = super().update(instance, validated_data)
+
+        if old_image_name:
+            def _delete_old_image(name=old_image_name):
+                try:
+                    default_storage.delete(name)
+                except Exception:
+                    logger.warning(
+                        "Could not delete old profile image '%s' for user profile pk=%s",
+                        name, instance.pk, exc_info=True,
+                    )
+
+            transaction.on_commit(_delete_old_image)
+
+        return updated_instance
 
 
 class ChangePasswordSerializer(serializers.Serializer):
