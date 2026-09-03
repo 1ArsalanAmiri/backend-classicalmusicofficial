@@ -241,6 +241,8 @@ CELERY_BROKER_URL = 'redis://redis:6379/0'
 CELERY_RESULT_BACKEND = 'redis://redis:6379/0'
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
+CELERY_TASK_SOFT_TIME_LIMIT = 600  # ۱۰ دقیقه
+CELERY_TASK_TIME_LIMIT = 660  # ۱۱ دقیقه
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'Asia/Tehran'
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
@@ -354,21 +356,13 @@ FTP_PORT = env.int("FTP_PORT", default=21)
 FTP_USERNAME = env("FTP_USERNAME")
 FTP_PASSWORD = env("FTP_PASSWORD")
 FTP_ROOT = env("FTP_ROOT", default="/www")
+FTP_TIMEOUT = env.int("FTP_TIMEOUT", default=30)
 
-# STORAGES = {
-#     "default": {
-#         "BACKEND": "storages.backends.sftpstorage.SFTPStorage",
-#     },
-#     "staticfiles": {
-#         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
-#     },
-# }
-#
-# SFTP_STORAGE_HOST = os.environ["SFTP_HOST"]
-# SFTP_STORAGE_ROOT = "/home/your-user/media"
-# SFTP_STORAGE_PARAMS = {
-#     "username": os.environ["SFTP_USERNAME"],
-#     "password": os.environ["SFTP_PASSWORD"],
-#     "port": int(os.environ.get("SFTP_PORT", 22)),
-# }
-# SFTP_KNOWN_HOST_FILE = "/etc/ssh/ssh_known_hosts"
+STORAGES = {
+    "default": {
+        "BACKEND": "storage.ftp_storage.FTPStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}

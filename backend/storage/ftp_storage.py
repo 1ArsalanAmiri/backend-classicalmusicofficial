@@ -1,7 +1,9 @@
 from ftplib import FTP_TLS, error_perm
+from tempfile import SpooledTemporaryFile
 import posixpath
 
 from django.conf import settings
+from django.core.files.base import File
 from django.core.files.storage import Storage
 
 
@@ -33,6 +35,11 @@ class FTPStorage(Storage):
         # Encrypt FTP data connection.
         ftp.prot_p()
 
+        # اکثر هاست‌های FTP پشت NAT/فایروال هستن و بدون passive اصلاً
+        # کانکشن داده برقرار نمیشه. پیش‌فرض ftplib هم passive هست، ولی
+        # صریح تنظیمش می‌کنیم که به هیچ فرضی وابسته نباشیم.
+        ftp.set_pasv(True)
+
         # Use binary mode for MP3, MP4, FLAC, images, etc.
         ftp.voidcmd("TYPE I")
 
@@ -61,6 +68,36 @@ class FTPStorage(Storage):
 
         ftp.cwd(current)
 
+    def _open(self, name, mode='rb'):
+        """
+        دانلود فایل از FTP و برگردوندنش به‌شکل یک File آبجکت قابل‌خوندن.
+
+        از SpooledTemporaryFile استفاده می‌کنیم (نه BytesIO خام): تا وقتی
+        فایل کوچیکه (پیش‌فرض زیر ۱۰ مگابایت) توی RAM می‌مونه، ولی برای
+        فایل‌های بزرگ (ویدیو چند گیگابایتی) خودکار به یک فایل موقت روی
+        دیسک سرریز می‌کنه - وگرنه دانلود یک ویدیوی بزرگ می‌تونست حافظه‌ی
+        worker رو کامل پر کنه.
+        """
+        name = name.replace("\\", "/").lstrip("/")
+        directory = posixpath.dirname(name)
+        filename = posixpath.basename(name)
+
+        ftp = self._connect()
+        buffer = SpooledTemporaryFile(max_size=10 * 1024 * 1024)
+
+        try:
+            if directory:
+                ftp.cwd(directory)
+            ftp.retrbinary(f"RETR {filename}", buffer.write, blocksize=1024 * 1024)
+        finally:
+            try:
+                ftp.quit()
+            except Exception:
+                ftp.close()
+
+        buffer.seek(0)
+        return File(buffer, name=name)
+
     def _save(self, name, content):
         name = name.replace("\\", "/").lstrip("/")
 
@@ -86,6 +123,17 @@ class FTPStorage(Storage):
             except Exception:
                 ftp.close()
 
+        return name
+
+    def get_available_name(self, name, max_length=None):
+        """
+        همه‌ی توابع upload_to پروژه (track_audio_path, video_path,
+        upload_path_handler و ...) از uuid4().hex استفاده می‌کنن، پس
+        برخورد اسم عملاً غیرممکنه. رفتار پیش‌فرض Storage.save() قبل از هر
+        ذخیره یک‌بار self.exists(name) رو صدا می‌زنه که برای FTPStorage
+        یعنی یک اتصال کامل FTP اضافه (connect+TLS+login+cwd+SIZE) به‌ازای
+        هر آپلود - بدون هیچ فایده‌ی واقعی. اینجا رد می‌کنیم.
+        """
         return name
 
     def delete(self, name):
@@ -194,4 +242,3 @@ class FTPStorage(Storage):
         raise NotImplementedError(
             "FTPStorage does not support local filesystem paths."
         )
-

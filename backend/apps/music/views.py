@@ -51,6 +51,7 @@ from apps.content.serializers import LandingPostSerializer
 from apps.videos.models import Video
 from apps.videos.serializers import LandingVideoSerializer
 from apps.common.permissions import HasStreamSubscription , HasAllSubscription
+from django.http import FileResponse
 
 
 logger = logging.getLogger(__name__)
@@ -183,14 +184,6 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
 
         return qs
 
-    # نکته: اکشن‌های «comments» و «like» که قبلاً اینجا با پیاده‌سازی دستی
-    # (و باگ‌دار) تعریف شده بودن حذف شدن. AlbumViewSet از CommentableMixin و
-    # LikableMixin ارث‌بری می‌کنه که خودشون همین مسیرها (comments/ و like/)
-    # رو با روش صحیح (بر اساس content_type + object_id) پیاده‌سازی می‌کنن.
-    # نسخه‌ی قبلی مستقیم روی Comment.objects.filter(album=...) و album.likes
-    # کوئری می‌زد که چون این فیلد/رابطه‌ها اصلاً روی مدل وجود ندارن باعث
-    # AttributeError/FieldError و ارور 500 می‌شد (و چون هر دو روی همون
-    # url_path ثبت می‌شدن، عملاً نسخه‌ی درستِ ارث‌بری‌شده رو هم شادو می‌کردن).
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -217,19 +210,11 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
 
-    # حداکثر مدتی که این اندپوینت حاضره توی همون درخواست اول منتظر بمونه
-    # تا فایل زیپ آماده بشه. اگه بیشتر از این طول کشید (آلبوم خیلی بزرگ،
-    # یا سرور شلوغ)، به‌جای قفل نگه‌داشتن کانکشن، برمی‌گرده به همون رفتار
-    # قبلی (PENDING/PROCESSING) تا فرانت با poll دوباره چک کنه.
-    # نکته: این عدد باید کوچیک‌تر از proxy_read_timeout توی Nginx و
-    # timeout توی gunicorn باشه، وگرنه قبل از این‌که Django جواب بده،
-    # Nginx خودش 504 برمی‌گردونه. (مثلاً روی این‌ها 40-45 ثانیه بذار.)
     ZIP_WAIT_TIMEOUT = 30  # ثانیه
 
     def _serve_zip_file(self, album, zip_export):
-        response = HttpResponse()
-        response['X-Accel-Redirect'] = f"/protected-media/{zip_export.zip_file.name}"
-        response['Content-Type'] = 'application/zip'
+        file_obj = default_storage.open(zip_export.zip_file.name, 'rb')
+        response = FileResponse(file_obj, content_type='application/zip')
         safe_filename = quote(f"{album.slug}.zip")
         response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
         return response
@@ -369,13 +354,15 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         if not user_has_stream_access(request.user):
             return Response({"detail": "شما اشتراک فعال برای پخش این آهنگ را ندارید."},
                             status=status.HTTP_403_FORBIDDEN)
+
         safe_filename = os.path.basename(track.audio_file.name)
         content_type, _ = mimetypes.guess_type(track.audio_file.name)
-        response = HttpResponse()
-        response['X-Accel-Redirect'] = f"/protected-media/{track.audio_file.name}"
-        response['Content-Type'] = content_type or 'audio/mpeg'
-        response['Content-Disposition'] = f'inline; filename="{safe_filename}"'
+
+        file_obj = default_storage.open(track.audio_file.name, 'rb')
+        response = FileResponse(file_obj, content_type=content_type or 'audio/mpeg')
+        response['Content-Disposition'] = f'inline; filename="{quote(safe_filename)}"'
         return response
+
 
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated], url_path='download')
     def download(self, request, slug=None):
@@ -387,23 +374,13 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
                             status=status.HTTP_403_FORBIDDEN)
 
         content_type, _ = mimetypes.guess_type(track.audio_file.name)
-        accel_path = f"/protected-media/{track.audio_file.name}"
-
-        response = HttpResponse()
-        response['X-Accel-Redirect'] = accel_path
-        response['Content-Type'] = content_type or 'application/octet-stream'
         safe_filename = quote(track.audio_file.name.split("/")[-1])
+
+        file_obj = default_storage.open(track.audio_file.name, 'rb')
+        response = FileResponse(file_obj, content_type=content_type or 'application/octet-stream')
         response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
         return response
 
-    @extend_schema(parameters=[
-        OpenApiParameter(name="page", description="شماره صفحه", required=False, type=OpenApiTypes.INT,
-                         location=OpenApiParameter.QUERY),
-        OpenApiParameter(name="page_size", description="تعداد آیتم در هر صفحه", required=False, type=OpenApiTypes.INT,
-                         location=OpenApiParameter.QUERY),
-        OpenApiParameter(name="search", description="جستجو در عنوان، نام و لقب هنرمند", required=False,
-                         type=OpenApiTypes.STR, location=OpenApiParameter.QUERY),
-    ])
     @action(detail=False, methods=["get"], url_path="chosen")
     def chosen(self, request):
         queryset = self.filter_queryset(

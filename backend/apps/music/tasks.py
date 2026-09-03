@@ -15,7 +15,7 @@ from django.db import transaction
 from celery import shared_task
 from mutagen import File as MutagenFile
 from django.utils.text import get_valid_filename
-from .models import AlbumArchiveUpload, Track, Artist, AlbumZipExport, Genre, AlbumType , Album
+from .models import AlbumArchiveUpload, Track, Artist, AlbumZipExport, Genre, AlbumType, Album
 from .utils import MockStorageConnector
 from django.conf import settings
 from apps.common.models import PublishStatus
@@ -35,7 +35,13 @@ def _build_unique_track_slug(title: str) -> str:
     return f"{base_slug}-{unique_suffix}" if base_slug else f"track-{unique_suffix}"
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=10)
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=10,
+    soft_time_limit=2400,  
+    time_limit=2500,
+)
 def process_album_archive_task(self, upload_record_id: int):
     temp_dir = None
     upload_record = None
@@ -48,17 +54,24 @@ def process_album_archive_task(self, upload_record_id: int):
         upload_record.status = "extracting"
         upload_record.save(update_fields=["status"])
 
-        archive_path = upload_record.archive_file.path
-        if not os.path.exists(archive_path):
-            raise ValueError("فایل آرشیو در مسیر مشخص شده یافت نشد.")
-
         temp_dir = tempfile.mkdtemp()
 
+        original_name = upload_record.archive_file.name
+        archive_ext = os.path.splitext(original_name)[1].lower()
+        archive_path = os.path.join(temp_dir, f"archive{archive_ext}")
+
+        with default_storage.open(original_name, 'rb') as remote_f:
+            with open(archive_path, 'wb') as local_f:
+                shutil.copyfileobj(remote_f, local_f)
+
+        if not os.path.exists(archive_path) or os.path.getsize(archive_path) == 0:
+            raise ValueError("دانلود فایل آرشیو از storage ناموفق بود یا فایل خالی است.")
+
         # -------- Extract --------
-        if archive_path.lower().endswith(".zip"):
+        if archive_ext == ".zip":
             with zipfile.ZipFile(archive_path, "r") as zip_ref:
                 zip_ref.extractall(temp_dir)
-        elif archive_path.lower().endswith(".rar"):
+        elif archive_ext == ".rar":
             with rarfile.RarFile(archive_path, "r") as rar_ref:
                 rar_ref.extractall(temp_dir)
         else:
@@ -140,7 +153,6 @@ def process_album_archive_task(self, upload_record_id: int):
                 raw_title = raw_title_list[0] if raw_title_list else filename
                 safe_title = (str(raw_title) or "Untitled").strip()[:TRACK_TITLE_MAX_LENGTH]
 
-                # FIX: تولید اسلاگ با رعایت دقیق max_length واقعی + جا برای suffix
                 safe_slug = _build_unique_track_slug(safe_title)
 
                 raw_track_number_list = audio_meta.get("tracknumber", [str(index + 1)])
@@ -333,11 +345,11 @@ def cleanup_old_album_zips():
 
         deleted_count = 0
         for export in old_exports:
-            if export.zip_file and os.path.exists(export.zip_file.path):
+            if export.zip_file and export.zip_file.name:
                 try:
-                    os.remove(export.zip_file.path)
-                except OSError as e:
-                    logger.error(f"Failed to remove file {export.zip_file.path}: {e}")
+                    default_storage.delete(export.zip_file.name)
+                except Exception as e:
+                    logger.error(f"Failed to remove remote zip {export.zip_file.name}: {e}")
                     continue
             export.delete()
             deleted_count += 1
@@ -348,34 +360,53 @@ def cleanup_old_album_zips():
         return "Failed during cleanup."
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=10)
+@shared_task(bind=True, max_retries=3, default_retry_delay=10, soft_time_limit=1200, time_limit=1300)
 def generate_album_zip_task(self, album_id: int):
+    zip_export = None
     try:
         album = Album.objects.prefetch_related('tracks').get(pk=album_id)
         zip_export, _ = AlbumZipExport.objects.get_or_create(album=album)
 
-        zip_export.status = AlbumZipExport.StatusChoices.PROCESSING
-        zip_export.save(update_fields=['status'])
+        AlbumZipExport.objects.filter(pk=zip_export.pk).update(
+            status=AlbumZipExport.StatusChoices.PROCESSING
+        )
 
-        export_dir = os.path.join(settings.MEDIA_ROOT, 'exports', 'albums')
-        os.makedirs(export_dir, exist_ok=True)
         file_name = f"album_{album.id}_{int(timezone.now().timestamp())}.zip"
-        file_path = os.path.join(export_dir, file_name)
 
-        with zipfile.ZipFile(file_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            for track in album.tracks.filter(status=PublishStatus.PUBLISHED):
-                if track.audio_file and os.path.exists(track.audio_file.path):
-                    ext = os.path.splitext(track.audio_file.path)[1]
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            local_zip_path = os.path.join(tmp_dir, file_name)
+
+            with zipfile.ZipFile(local_zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                for track in album.tracks.filter(status=PublishStatus.PUBLISHED):
+                    if not track.audio_file:
+                        continue
+                    ext = os.path.splitext(track.audio_file.name)[1]
                     arcname = f"{track.track_number:02d} - {track.title}{ext}"
-                    zip_file.write(track.audio_file.path, arcname=arcname)
+                    try:
+                        with default_storage.open(track.audio_file.name, 'rb') as remote_audio:
+                            zip_file.writestr(arcname, remote_audio.read())
+                    except Exception as track_err:
+                        logger.error(
+                            "Could not read track %s for album zip %s: %s",
+                            track.id, album_id, track_err,
+                        )
+                        continue
 
-        zip_export.zip_file = f"exports/albums/{file_name}"
-        zip_export.status = AlbumZipExport.StatusChoices.COMPLETED
-        zip_export.created_at = timezone.now()
-        zip_export.save()
+            # -------- آپلود فایل زیپ نهایی به FTP --------
+            remote_zip_name = f"exports/albums/{file_name}"
+            with open(local_zip_path, 'rb') as f:
+                saved_name = default_storage.save(remote_zip_name, File(f))
+
+        AlbumZipExport.objects.filter(pk=zip_export.pk).update(
+            zip_file=saved_name,
+            status=AlbumZipExport.StatusChoices.COMPLETED,
+            created_at=timezone.now(),
+        )
 
     except Exception as exc:
-        if 'zip_export' in locals():
-            zip_export.status = AlbumZipExport.StatusChoices.FAILED
-            zip_export.save(update_fields=['status'])
+        if zip_export is not None:
+            AlbumZipExport.objects.filter(pk=zip_export.pk).update(
+                status=AlbumZipExport.StatusChoices.FAILED
+            )
+        logger.exception(f"generate_album_zip_task failed for album {album_id}")
         raise self.retry(exc=exc, countdown=10)
