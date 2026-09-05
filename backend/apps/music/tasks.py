@@ -56,20 +56,12 @@ def process_album_archive_task(self, upload_record_id: int):
 
         temp_dir = tempfile.mkdtemp()
 
-        # -------- دانلود آرشیو از FTP به دیسک موقت لوکال --------
-        # archive_file.path روی FTPStorage وجود نداره (NotImplementedError)،
-        # و zipfile/rarfile (مخصوصاً rarfile که باینری unrar رو صدا می‌زنه)
-        # به یک مسیر واقعی روی دیسک نیاز دارن، نه یک file-like object.
-        original_name = upload_record.archive_file.name
-        archive_ext = os.path.splitext(original_name)[1].lower()
-        archive_path = os.path.join(temp_dir, f"archive{archive_ext}")
-
-        with default_storage.open(original_name, 'rb') as remote_f:
-            with open(archive_path, 'wb') as local_f:
-                shutil.copyfileobj(remote_f, local_f)
+        archive_path = upload_record.archive_file.path
 
         if not os.path.exists(archive_path) or os.path.getsize(archive_path) == 0:
-            raise ValueError("دانلود فایل آرشیو از storage ناموفق بود یا فایل خالی است.")
+            raise ValueError("فایل آرشیو یافت نشد یا خالی است.")
+
+        archive_ext = os.path.splitext(archive_path)[1].lower()
 
         # -------- Extract --------
         if archive_ext == ".zip":
@@ -317,6 +309,13 @@ def process_album_archive_task(self, upload_record_id: int):
                 shutil.rmtree(temp_dir)
             except Exception as cleanup_err:
                 logger.error(f"Failed to delete temp dir {temp_dir}: {cleanup_err}")
+
+
+        if upload_record and upload_record.archive_file and upload_record.archive_file.name:
+            try:
+                upload_record.archive_file.storage.delete(upload_record.archive_file.name)
+            except Exception as cleanup_err:
+                logger.error(f"Failed to delete scratch archive file: {cleanup_err}")
 
 
 @shared_task

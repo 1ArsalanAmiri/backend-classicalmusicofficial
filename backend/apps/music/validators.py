@@ -8,6 +8,6 @@ def validate_archive_file(value):
     if ext not in valid_extensions:
         raise ValidationError(f'فرمت فایل مجاز نیست. فرمت‌های پشتیبانی‌شده: {", ".join(valid_extensions)}')
 
-    max_size_mb = 500
+    max_size_mb = 1200  # قبلاً 500 بود؛ کاربر گفته فایل‌ها تا ~1 گیگ هم می‌رسن
     if value.size > max_size_mb * 1024 * 1024:
         raise ValidationError(f'حجم فایل نباید بیشتر از {max_size_mb} مگابایت باشد.')

@@ -13,6 +13,8 @@ from django.conf import settings
 from django.utils import timezone
 from django.contrib.postgres.search import SearchVectorField
 from django.contrib.postgres.indexes import GinIndex
+from apps.common.storage import local_scratch_storage
+
 
 
 logger = getLogger(__name__)
@@ -268,7 +270,7 @@ class AlbumCredit(TimeStampedModel):
 
 class AlbumArchiveUpload(TimeStampedModel):
     album = models.ForeignKey(Album, on_delete=models.CASCADE, related_name="archive_uploads")
-    archive_file = models.FileField(upload_to="protected/tmp/archives/")
+    archive_file = models.FileField(upload_to="tmp/archives/", storage=local_scratch_storage)
     task_id = models.CharField(max_length=255, blank=True, null=True)
     status = models.CharField(max_length=20, choices=ArchiveUploadStatus.choices, default=ArchiveUploadStatus.PENDING)
     progress = models.PositiveIntegerField(default=0, help_text=_("درصد پیشرفت از 0 تا 100"))
