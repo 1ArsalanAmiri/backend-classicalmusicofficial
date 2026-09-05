@@ -363,6 +363,9 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         response['Content-Disposition'] = f'inline; filename="{quote(safe_filename)}"'
         return response
 
+    # ==============================================================================
+    # متد download در TrackViewSet
+    # ==============================================================================
 
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated], url_path='download')
     def download(self, request, slug=None):

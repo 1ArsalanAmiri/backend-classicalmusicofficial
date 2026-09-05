@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
     bind=True,
     max_retries=3,
     default_retry_delay=300,
-    soft_time_limit=1800,
+    soft_time_limit=1800,   
     time_limit=1900,
 )
 def convert_video_to_hls(self, video_id):
@@ -90,5 +90,4 @@ def convert_video_to_hls(self, video_id):
         raise self.retry(exc=exc)
 
     finally:
-
         shutil.rmtree(work_dir, ignore_errors=True)

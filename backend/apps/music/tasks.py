@@ -39,7 +39,7 @@ def _build_unique_track_slug(title: str) -> str:
     bind=True,
     max_retries=3,
     default_retry_delay=10,
-    soft_time_limit=2400,  
+    soft_time_limit=2400,   # ۴۰ دقیقه - استخراج+آپلود یه آرشیو بزرگ ممکنه طول بکشه
     time_limit=2500,
 )
 def process_album_archive_task(self, upload_record_id: int):
@@ -56,6 +56,10 @@ def process_album_archive_task(self, upload_record_id: int):
 
         temp_dir = tempfile.mkdtemp()
 
+        # -------- دانلود آرشیو از FTP به دیسک موقت لوکال --------
+        # archive_file.path روی FTPStorage وجود نداره (NotImplementedError)،
+        # و zipfile/rarfile (مخصوصاً rarfile که باینری unrar رو صدا می‌زنه)
+        # به یک مسیر واقعی روی دیسک نیاز دارن، نه یک file-like object.
         original_name = upload_record.archive_file.name
         archive_ext = os.path.splitext(original_name)[1].lower()
         archive_path = os.path.join(temp_dir, f"archive{archive_ext}")
@@ -376,6 +380,9 @@ def generate_album_zip_task(self, album_id: int):
         with tempfile.TemporaryDirectory() as tmp_dir:
             local_zip_path = os.path.join(tmp_dir, file_name)
 
+            # -------- ساخت زیپ به‌صورت محلی، با خوندن هر ترک از FTP --------
+            # track.audio_file.path روی FTPStorage وجود نداره؛ باید بایت‌ها
+            # رو از storage بخونیم (default_storage.open) نه از دیسک لوکال.
             with zipfile.ZipFile(local_zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
                 for track in album.tracks.filter(status=PublishStatus.PUBLISHED):
                     if not track.audio_file:
