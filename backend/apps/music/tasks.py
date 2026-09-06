@@ -56,6 +56,7 @@ def process_album_archive_task(self, upload_record_id: int):
 
         temp_dir = tempfile.mkdtemp()
 
+        # -------- archive_file الان روی local_scratch_storage ه، نه FTP --------
         archive_path = upload_record.archive_file.path
 
         if not os.path.exists(archive_path) or os.path.getsize(archive_path) == 0:
@@ -213,7 +214,7 @@ def process_album_archive_task(self, upload_record_id: int):
                         track_instance.audio_file.save(filename, File(f), save=False)
                 except Exception as upload_err:
                     logger.error(f"Upload failed for {file_path}: {upload_err}")
-                    task_warnings.append(f"خطا در ذخیره‌سازی فایل {filename}")
+                    task_warnings.append(f"خطا در ذخیره‌سازی فایل {filename}: {upload_err}")
                     continue
 
                 tracks_data_list.append({
@@ -231,6 +232,7 @@ def process_album_archive_task(self, upload_record_id: int):
                 continue
 
         # -------- Database Save (Optimized Bulk Insert/Update) --------
+        bulk_save_succeeded = False
         if tracks_data_list:
             try:
                 with transaction.atomic():
@@ -269,6 +271,8 @@ def process_album_archive_task(self, upload_record_id: int):
                     if m2m_relations:
                         TrackArtistThrough.objects.bulk_create(m2m_relations, ignore_conflicts=True)
 
+                bulk_save_succeeded = True
+
             except Exception as db_err:
                 logger.error(f"DB Bulk save failed for album {album.id}: {db_err}")
                 task_warnings.append(f"خطای دیتابیس در ذخیره دسته‌جمعی ترک‌ها: {db_err}")
@@ -282,10 +286,24 @@ def process_album_archive_task(self, upload_record_id: int):
                 logger.error(f"Editorial playlist sync failed for album {album.id}: {sync_err}")
                 task_warnings.append("خطا در همگام‌سازی پلی‌لیست ادیتوریال")
 
-        upload_record.status = "completed"
-        upload_record.progress = 100
-        if task_warnings:
-            upload_record.error_log = "هشدارهای تسک:\n" + "\n".join(task_warnings)
+        created_tracks_count = len(tracks_data_list) if bulk_save_succeeded else 0
+
+        if created_tracks_count == 0:
+            upload_record.status = "failed"
+            upload_record.progress = 100
+            if task_warnings:
+                upload_record.error_log = "هیچ ترکی ساخته نشد. جزئیات خطاها:\n" + "\n".join(task_warnings)
+            else:
+                upload_record.error_log = "هیچ ترکی ساخته نشد و دلیل مشخصی هم ثبت نشد - لاگ Celery را بررسی کنید."
+        else:
+            upload_record.status = "completed"
+            upload_record.progress = 100
+            if task_warnings:
+                upload_record.error_log = (
+                    f"{created_tracks_count} ترک با موفقیت ساخته شد. هشدارهای جزئی:\n"
+                    + "\n".join(task_warnings)
+                )
+
         upload_record.save(update_fields=["status", "progress", "error_log"])
 
     except ValueError as ve:
@@ -309,7 +327,6 @@ def process_album_archive_task(self, upload_record_id: int):
                 shutil.rmtree(temp_dir)
             except Exception as cleanup_err:
                 logger.error(f"Failed to delete temp dir {temp_dir}: {cleanup_err}")
-
 
         if upload_record and upload_record.archive_file and upload_record.archive_file.name:
             try:
@@ -380,8 +397,6 @@ def generate_album_zip_task(self, album_id: int):
             local_zip_path = os.path.join(tmp_dir, file_name)
 
             # -------- ساخت زیپ به‌صورت محلی، با خوندن هر ترک از FTP --------
-            # track.audio_file.path روی FTPStorage وجود نداره؛ باید بایت‌ها
-            # رو از storage بخونیم (default_storage.open) نه از دیسک لوکال.
             with zipfile.ZipFile(local_zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
                 for track in album.tracks.filter(status=PublishStatus.PUBLISHED):
                     if not track.audio_file:
