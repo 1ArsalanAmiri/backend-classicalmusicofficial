@@ -323,7 +323,6 @@ class Track(TimeStampedModel):
             models.UniqueConstraint(
                 fields=['album', 'track_number'],
                 name='unique_track_number_per_album',
-                condition=models.Q(album__isnull=False)
             )
         ]
         indexes = [
