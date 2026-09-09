@@ -45,6 +45,7 @@ def _build_unique_track_slug(title: str) -> str:
 def process_album_archive_task(self, upload_record_id: int):
     temp_dir = None
     upload_record = None
+    will_retry = False
 
     try:
         upload_record = AlbumArchiveUpload.objects.select_related("album").prefetch_related("album__main_artists").get(
@@ -319,7 +320,11 @@ def process_album_archive_task(self, upload_record_id: int):
             upload_record.error_log = str(e)
             upload_record.save(update_fields=["status", "error_log"])
         logger.exception(f"Unexpected error in task {upload_record_id}")
-        raise self.retry(exc=e, countdown=10)
+
+        if self.request.retries < self.max_retries:
+
+            will_retry = True
+            raise self.retry(exc=e, countdown=10)
 
     finally:
         if temp_dir and os.path.exists(temp_dir):
@@ -328,7 +333,7 @@ def process_album_archive_task(self, upload_record_id: int):
             except Exception as cleanup_err:
                 logger.error(f"Failed to delete temp dir {temp_dir}: {cleanup_err}")
 
-        if upload_record and upload_record.archive_file and upload_record.archive_file.name:
+        if not will_retry and upload_record and upload_record.archive_file and upload_record.archive_file.name:
             try:
                 upload_record.archive_file.storage.delete(upload_record.archive_file.name)
             except Exception as cleanup_err:
