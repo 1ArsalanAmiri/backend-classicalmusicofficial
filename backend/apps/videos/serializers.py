@@ -4,10 +4,27 @@ from .models import Video, PublishStatus
 from ..music.serializers import ArtistBasicSerializer
 
 
+def build_cdn_url(request, relative_path):
+    if not relative_path:
+        return None
+    relative_path = str(relative_path).lstrip('/')
+    path = f"/video-cdn/{relative_path}"
+    if request is not None:
+        return request.build_absolute_uri(path)
+    return path
+
+
 class VideoListSerializer(serializers.ModelSerializer):
+    cover_image = serializers.SerializerMethodField()
+
     class Meta:
         model = Video
         fields = ['id', 'title', 'slug', 'cover_image', 'duration_seconds']
+
+    def get_cover_image(self, obj):
+        if not obj.cover_image:
+            return None
+        return build_cdn_url(self.context.get('request'), obj.cover_image.name)
 
 
 class VideoDetailSerializer(serializers.ModelSerializer):
@@ -15,6 +32,7 @@ class VideoDetailSerializer(serializers.ModelSerializer):
     more_from_artist = serializers.SerializerMethodField()
     similar_videos = serializers.SerializerMethodField()
     hls_file = serializers.SerializerMethodField()
+    cover_image = serializers.SerializerMethodField()
 
     class Meta:
         model = Video
@@ -27,11 +45,13 @@ class VideoDetailSerializer(serializers.ModelSerializer):
     def get_hls_file(self, obj):
         has_access = self.context.get('has_all_access', False)
         if has_access and obj.hls_file:
-            request = self.context.get('request')
-            if request is not None:
-                return request.build_absolute_uri(settings.MEDIA_URL + obj.hls_file)
-            return settings.MEDIA_URL + obj.hls_file
+            return build_cdn_url(self.context.get('request'), obj.hls_file)
         return None
+
+    def get_cover_image(self, obj):
+        if not obj.cover_image:
+            return None
+        return build_cdn_url(self.context.get('request'), obj.cover_image.name)
 
     def get_more_from_artist(self, obj):
         artist_ids = obj.artists.values_list('id', flat=True)
@@ -58,6 +78,7 @@ class LandingVideoSerializer(serializers.ModelSerializer):
     era_display = serializers.CharField(source='get_era_display', read_only=True)
     video_file = serializers.SerializerMethodField()
     hls_file = serializers.SerializerMethodField()
+    cover_image = serializers.SerializerMethodField()
 
     class Meta:
         model = Video
@@ -71,17 +92,16 @@ class LandingVideoSerializer(serializers.ModelSerializer):
     def get_hls_file(self, obj):
         has_access = self.context.get('has_all_access', False)
         if has_access and obj.hls_file:
-            request = self.context.get('request')
-            if request is not None:
-                return request.build_absolute_uri(settings.MEDIA_URL + obj.hls_file)
-            return settings.MEDIA_URL + obj.hls_file
+            return build_cdn_url(self.context.get('request'), obj.hls_file)
         return None
+
+    def get_cover_image(self, obj):
+        if not obj.cover_image:
+            return None
+        return build_cdn_url(self.context.get('request'), obj.cover_image.name)
 
     def get_video_file(self, obj):
         has_access = self.context.get('has_all_access', False)
         if not has_access or not obj.video_file:
             return None
-        request = self.context.get('request')
-        if request:
-            return request.build_absolute_uri(obj.video_file.url)
-        return obj.video_file.url
+        return build_cdn_url(self.context.get('request'), obj.video_file.name)

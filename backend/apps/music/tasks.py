@@ -5,6 +5,8 @@ import rarfile
 import shutil
 import uuid
 import logging
+import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta
 from django.core.files.storage import default_storage
 from django.core.files.base import File
@@ -26,6 +28,8 @@ logger = logging.getLogger(__name__)
 TRACK_TITLE_MAX_LENGTH = Track._meta.get_field('title').max_length
 TRACK_SLUG_MAX_LENGTH = Track._meta.get_field('slug').max_length
 
+FTP_UPLOAD_CONCURRENCY = 4
+
 
 def _build_unique_track_slug(title: str) -> str:
 
@@ -33,6 +37,13 @@ def _build_unique_track_slug(title: str) -> str:
     max_base_length = max(TRACK_SLUG_MAX_LENGTH - (len(unique_suffix) + 1), 1)
     base_slug = slugify(title, allow_unicode=True)[:max_base_length]
     return f"{base_slug}-{unique_suffix}" if base_slug else f"track-{unique_suffix}"
+
+
+def _upload_track_audio(pending_item):
+    track_instance = pending_item["track_instance"]
+    with open(pending_item["file_path"], 'rb') as f:
+        track_instance.audio_file.save(pending_item["filename"], File(f), save=False)
+    return pending_item
 
 
 @shared_task(
@@ -57,7 +68,7 @@ def process_album_archive_task(self, upload_record_id: int):
 
         temp_dir = tempfile.mkdtemp()
 
-        # -------- archive_file الان روی local_scratch_storage ه، نه FTP --------
+        # -------- archive_file روی local_scratch_storage است، نه FTP --------
         archive_path = upload_record.archive_file.path
 
         if not os.path.exists(archive_path) or os.path.getsize(archive_path) == 0:
@@ -96,7 +107,8 @@ def process_album_archive_task(self, upload_record_id: int):
 
         used_track_numbers = set(album.tracks.values_list('track_number', flat=True))
 
-        tracks_data_list = []
+        # =====================================================================
+        pending_items = []
 
         for index, file_path in enumerate(audio_files):
             raw_filename = os.path.basename(file_path)
@@ -112,7 +124,9 @@ def process_album_archive_task(self, upload_record_id: int):
                     audio_meta = MutagenFile(file_path, easy=True)
                 except Exception as meta_error:
                     logger.warning(f"Skipping {file_path}: Metadata read error - {meta_error}")
-                    task_warnings.append(f"خطا در خواندن متادیتا فایل {filename}")
+                    task_warnings.append(
+                        f"خطا در خواندن متادیتا فایل {filename}: {type(meta_error).__name__}: {meta_error}"
+                    )
                     continue
 
                 if not audio_meta:
@@ -145,6 +159,9 @@ def process_album_archive_task(self, upload_record_id: int):
                             cover_extracted = True
                     except Exception as cover_error:
                         logger.warning(f"Failed to extract cover from {file_path}: {cover_error}")
+                        task_warnings.append(
+                            f"خطا در استخراج کاور از {filename}: {type(cover_error).__name__}: {cover_error}"
+                        )
 
                 # -------- Metadata Extraction --------
                 raw_title_list = audio_meta.get("title", [filename])
@@ -199,7 +216,8 @@ def process_album_archive_task(self, upload_record_id: int):
                     except (ValueError, TypeError):
                         pass
 
-                # ساخت نمونه ترک در حافظه RAM (بدون audio_file هنوز)
+                # ساخت نمونه ترک در حافظه RAM (بدون audio_file هنوز - آپلودش
+                # توی مرحله‌ی ۲ و به‌صورت موازی انجام میشه)
                 track_instance = Track(
                     album=album,
                     track_number=track_number,
@@ -210,27 +228,49 @@ def process_album_archive_task(self, upload_record_id: int):
                     status=PublishStatus.PUBLISHED,
                 )
 
-                try:
-                    with open(file_path, 'rb') as f:
-                        track_instance.audio_file.save(filename, File(f), save=False)
-                except Exception as upload_err:
-                    logger.error(f"Upload failed for {file_path}: {upload_err}")
-                    task_warnings.append(f"خطا در ذخیره‌سازی فایل {filename}: {upload_err}")
-                    continue
-
-                tracks_data_list.append({
+                pending_items.append({
                     "track_instance": track_instance,
-                    "artist_objs": track_artists
+                    "artist_objs": track_artists,
+                    "file_path": file_path,
+                    "filename": filename,
                 })
 
-                if index % 5 == 0 or index == total_files - 1:
-                    progress = int(((index + 1) / total_files) * 90)
-                    AlbumArchiveUpload.objects.filter(id=upload_record_id).update(progress=progress)
-
             except Exception as track_error:
-                logger.error(f"Track processing error on {file_path}: {track_error}")
-                task_warnings.append(f"خطا در پردازش کامل فایل {filename}")
+                logger.error(f"Track processing error on {file_path}: {traceback.format_exc()}")
+                task_warnings.append(
+                    f"خطا در پردازش فایل {filename}: {type(track_error).__name__}: {track_error}"
+                )
                 continue
+
+        # =====================================================================
+        # مرحله ۲ (موازی): آپلود فایل‌های صوتی به FTP - همزمان، نه یکی‌یکی.
+        # =====================================================================
+        tracks_data_list = []
+        completed_count = 0
+
+        if pending_items:
+            with ThreadPoolExecutor(max_workers=FTP_UPLOAD_CONCURRENCY) as executor:
+                future_to_item = {
+                    executor.submit(_upload_track_audio, item): item for item in pending_items
+                }
+                for future in as_completed(future_to_item):
+                    item = future_to_item[future]
+                    completed_count += 1
+                    try:
+                        future.result()
+                        tracks_data_list.append({
+                            "track_instance": item["track_instance"],
+                            "artist_objs": item["artist_objs"],
+                        })
+                    except Exception as upload_err:
+                        logger.error(f"Upload failed for {item['file_path']}: {traceback.format_exc()}")
+                        task_warnings.append(
+                            f"خطا در آپلود فایل {item['filename']}: {type(upload_err).__name__}: {upload_err}"
+                        )
+
+                    if completed_count % 5 == 0 or completed_count == total_files:
+                        progress = int((completed_count / total_files) * 90)
+                        AlbumArchiveUpload.objects.filter(id=upload_record_id).update(progress=progress)
 
         # -------- Database Save (Optimized Bulk Insert/Update) --------
         bulk_save_succeeded = False
@@ -275,8 +315,10 @@ def process_album_archive_task(self, upload_record_id: int):
                 bulk_save_succeeded = True
 
             except Exception as db_err:
-                logger.error(f"DB Bulk save failed for album {album.id}: {db_err}")
-                task_warnings.append(f"خطای دیتابیس در ذخیره دسته‌جمعی ترک‌ها: {db_err}")
+                logger.error(f"DB Bulk save failed for album {album.id}: {traceback.format_exc()}")
+                task_warnings.append(
+                    f"خطای دیتابیس در ذخیره دسته‌جمعی ترک‌ها: {type(db_err).__name__}: {db_err}"
+                )
 
         # -------- Auto-Sync پلی‌لیست‌های ادیتوریال --------
         if album.album_type == AlbumType.EDITORIAL_PLAYLIST:
@@ -284,8 +326,10 @@ def process_album_archive_task(self, upload_record_id: int):
             try:
                 sync_editorial_album_to_playlist(album)
             except Exception as sync_err:
-                logger.error(f"Editorial playlist sync failed for album {album.id}: {sync_err}")
-                task_warnings.append("خطا در همگام‌سازی پلی‌لیست ادیتوریال")
+                logger.error(f"Editorial playlist sync failed for album {album.id}: {traceback.format_exc()}")
+                task_warnings.append(
+                    f"خطا در همگام‌سازی پلی‌لیست ادیتوریال: {type(sync_err).__name__}: {sync_err}"
+                )
 
         created_tracks_count = len(tracks_data_list) if bulk_save_succeeded else 0
 
@@ -315,16 +359,17 @@ def process_album_archive_task(self, upload_record_id: int):
         logger.error(f"Validation Error in task {upload_record_id}: {ve}")
 
     except Exception as e:
+        full_trace = traceback.format_exc()
         if upload_record:
             upload_record.status = "failed"
-            upload_record.error_log = str(e)
+            upload_record.error_log = f"{type(e).__name__}: {e}\n\n{full_trace}"
             upload_record.save(update_fields=["status", "error_log"])
         logger.exception(f"Unexpected error in task {upload_record_id}")
 
         if self.request.retries < self.max_retries:
-
             will_retry = True
             raise self.retry(exc=e, countdown=10)
+        # اگه دیگه retryای نمونده، ادامه میده به finally و پاک میشه.
 
     finally:
         if temp_dir and os.path.exists(temp_dir):
@@ -333,6 +378,8 @@ def process_album_archive_task(self, upload_record_id: int):
             except Exception as cleanup_err:
                 logger.error(f"Failed to delete temp dir {temp_dir}: {cleanup_err}")
 
+        # فایل zip/rar خام رو فقط وقتی پاک می‌کنیم که تسک واقعاً تمومه
+        # (موفق، یا failed نهایی) - نه وسط یه چرخه‌ی retry.
         if not will_retry and upload_record and upload_record.archive_file and upload_record.archive_file.name:
             try:
                 upload_record.archive_file.storage.delete(upload_record.archive_file.name)
@@ -359,7 +406,7 @@ def extract_track_metadata_task(track_id):
     except Track.DoesNotExist:
         pass
     except Exception as e:
-        logger.error(f"Metadata extraction failed for track {track_id}: {e}")
+        logger.error(f"Metadata extraction failed for track {track_id}: {traceback.format_exc()}")
 
 
 @shared_task
@@ -374,14 +421,14 @@ def cleanup_old_album_zips():
                 try:
                     default_storage.delete(export.zip_file.name)
                 except Exception as e:
-                    logger.error(f"Failed to remove remote zip {export.zip_file.name}: {e}")
+                    logger.error(f"Failed to remove remote zip {export.zip_file.name}: {traceback.format_exc()}")
                     continue
             export.delete()
             deleted_count += 1
 
         return f"Successfully deleted {deleted_count} old album zip caches."
     except Exception as e:
-        logger.error(f"Error in cleanup_old_album_zips: {e}")
+        logger.error(f"Error in cleanup_old_album_zips: {traceback.format_exc()}")
         return "Failed during cleanup."
 
 
@@ -414,7 +461,7 @@ def generate_album_zip_task(self, album_id: int):
                     except Exception as track_err:
                         logger.error(
                             "Could not read track %s for album zip %s: %s",
-                            track.id, album_id, track_err,
+                            track.id, album_id, traceback.format_exc(),
                         )
                         continue
 

@@ -52,6 +52,7 @@ from apps.videos.models import Video
 from apps.videos.serializers import LandingVideoSerializer
 from apps.common.permissions import HasStreamSubscription , HasAllSubscription
 from django.http import FileResponse
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,23 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_LANDING_LIMIT = 10
 MAX_LANDING_LIMIT = 20
+
+
+class QueryParamJWTAuthentication(JWTAuthentication):
+    def authenticate(self, request):
+        header = self.get_header(request)
+        if header is not None:
+            raw_token = self.get_raw_token(header)
+        else:
+            raw_token = request.GET.get('token')
+            if raw_token:
+                raw_token = raw_token.encode('utf-8')
+
+        if raw_token is None:
+            return None
+
+        validated_token = self.get_validated_token(raw_token)
+        return self.get_user(validated_token), validated_token
 
 
 class AlbumBatchUploadAPIView(APIView):
@@ -346,7 +364,7 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         serializer = self.get_serializer(filtered_queryset, many=True)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated], url_path='stream')
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated],authentication_classes=[QueryParamJWTAuthentication], url_path='stream')
     def stream(self, request, slug=None):
         track = self.get_object()
         if not track.audio_file:
@@ -367,7 +385,7 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
     # متد download در TrackViewSet
     # ==============================================================================
 
-    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated], url_path='download')
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated],authentication_classes=[QueryParamJWTAuthentication], url_path='download')
     def download(self, request, slug=None):
         track = self.get_object()
         if not track.audio_file:
