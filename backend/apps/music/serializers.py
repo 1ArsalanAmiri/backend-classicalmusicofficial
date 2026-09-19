@@ -216,7 +216,7 @@ class LandingAlbumSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Album
-        fields = ['title', 'slug', 'album_type', 'cover_image', 'main_artists', 'main_artist_image']
+        fields = ['title', 'slug', 'album_type', 'cover_image', 'main_artists', 'main_artist_image', 'created_at']
 
     def get_main_artist_image(self, obj):
         candidates = [artist for artist in obj.main_artists.all() if artist.image]

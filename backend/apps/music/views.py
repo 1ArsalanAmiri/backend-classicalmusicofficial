@@ -1,4 +1,3 @@
-from django.http import HttpResponse
 import mimetypes
 import logging
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
@@ -250,19 +249,14 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
 
         zip_export = album.zip_exports.order_by('created_at').last()
 
-        # وضعیت ۱: فایل از قبل کاملاً آماده است -> فوری سرو کن
         if zip_export and zip_export.status == AlbumZipExport.StatusChoices.COMPLETED and zip_export.zip_file:
             return self._serve_zip_file(album, zip_export)
 
-        # وضعیت ۲: یک تسک دیگه از قبل در حال ساخت همین زیپه -> به همون وصل شو
-        # (به‌جای صف کردن یک تسک تکراری برای درخواست‌های همزمان چند کاربر)
         if zip_export and zip_export.status == AlbumZipExport.StatusChoices.PROCESSING and zip_export.task_id:
             async_result = AsyncResult(zip_export.task_id)
         else:
             async_result = generate_album_zip_task.delay(album.id)
 
-        # وضعیت ۳: منتظر می‌مونیم (بلاک می‌کنیم) تا حداکثر ZIP_WAIT_TIMEOUT
-        # ثانیه که تسک تموم بشه، و در همون درخواست اول جواب رو برمی‌گردونیم.
         try:
             async_result.get(timeout=self.ZIP_WAIT_TIMEOUT, propagate=True)
         except CeleryTimeoutError:

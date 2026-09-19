@@ -6,7 +6,11 @@ from apps.subscriptions.services import user_has_all_access
 
 class TicketMessageSerializer(serializers.ModelSerializer):
     sender_name = serializers.SerializerMethodField()
-    is_admin = serializers.BooleanField(source='sender.is_staff', read_only=True)
+    # FIX: قبلاً source='sender.is_staff' بود که اگه sender یه روز None
+    # باشه (دقیقاً همون سناریویی که get_sender_name پایین‌تر براش چک
+    # داره) با AttributeError کرش می‌کرد. الان هم‌راستا با sender_name
+    # امن شده.
+    is_admin = serializers.SerializerMethodField()
 
     class Meta:
         model = TicketMessage
@@ -18,6 +22,9 @@ class TicketMessageSerializer(serializers.ModelSerializer):
             return "سیستم"
         full_name = obj.sender.get_full_name().strip()
         return full_name if full_name else obj.sender.username
+
+    def get_is_admin(self, obj):
+        return bool(obj.sender and obj.sender.is_staff)
 
 
 class TicketListSerializer(serializers.ModelSerializer):
@@ -46,6 +53,12 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         model = Ticket
         fields = ['id', 'ticket_type', 'subject', 'message']
 
+    def validate_message(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("متن پیام نمی‌تواند خالی باشد.")
+        return value
+
     def validate(self, attrs):
         ticket_type = attrs.get('ticket_type')
         user = self.context['request'].user
@@ -73,3 +86,9 @@ class TicketCreateSerializer(serializers.ModelSerializer):
 
 class TicketReplySerializer(serializers.Serializer):
     message = serializers.CharField(required=True)
+
+    def validate_message(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("متن پیام نمی‌تواند خالی باشد.")
+        return value

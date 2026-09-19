@@ -13,4 +13,4 @@ class PostSerializer(serializers.ModelSerializer):
 class LandingPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = Post
-        fields = ['title', 'slug', 'author', 'cover_image']
+        fields = ['title', 'slug', 'author', 'cover_image', 'created_at']

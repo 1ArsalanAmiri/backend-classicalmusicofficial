@@ -1,5 +1,8 @@
+import time
+from django.core.cache import cache
 from rest_framework import viewsets, status, permissions, filters
 from rest_framework.decorators import action
+from rest_framework.exceptions import Throttled
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db import transaction
@@ -15,6 +18,17 @@ from .serializers import (
 )
 
 
+def check_ticket_reply_rate_limit(user_id):
+    cache_key = f"ticket_reply_rate_limit_{user_id}"
+    reply_timestamps = cache.get(cache_key, [])
+    now = time.time()
+    valid_timestamps = [ts for ts in reply_timestamps if ts > (now - 600)]
+    if len(valid_timestamps) >= 5:
+        raise Throttled(detail="شما بیش از حد مجاز در ۱۰ دقیقه اخیر به تیکت پاسخ داده‌اید.")
+    valid_timestamps.append(now)
+    cache.set(cache_key, valid_timestamps, timeout=600)
+
+
 class TicketViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     http_method_names = ['get', 'post']
@@ -24,9 +38,10 @@ class TicketViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'updated_at']
 
     def get_queryset(self):
+
         return Ticket.objects.filter(user=self.request.user).prefetch_related(
             Prefetch('messages', queryset=TicketMessage.objects.select_related('sender'))
-        )
+        ).distinct()
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -57,6 +72,8 @@ class TicketViewSet(viewsets.ModelViewSet):
 
         serializer = TicketReplySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        check_ticket_reply_rate_limit(request.user.id)
 
         with transaction.atomic():
             message = TicketMessage.objects.create(
