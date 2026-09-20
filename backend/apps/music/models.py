@@ -2,6 +2,8 @@ from django.db import models
 from django.core.validators import FileExtensionValidator
 from django.db.models import Sum
 from django.utils.translation import gettext_lazy as _
+from rest_framework.exceptions import ValidationError
+
 from apps.common.models import (
     TimeStampedModel, ArchiveUploadStatus, PublishStatus,
     unique_slugify, save_with_unique_slug, artist_image_path, album_cover_path,
@@ -251,6 +253,19 @@ class Artist(TimeStampedModel):
             save_with_unique_slug(self, "slug", self.name, lambda **kw: super(Artist, self).save(*args, **kw), **kwargs)
             return
         super().save(*args, **kwargs)
+
+
+    def clean(self):
+        super().clean()
+
+        if self.featured_album_id:
+            if not self.featured_album.main_artists.filter(
+                    pk=self.pk
+            ).exists():
+                raise ValidationError({
+                    "featured_album": "آلبوم انتخاب‌شده متعلق به این آرتیست نیست."
+                })
+
 
     def __str__(self):
         return f"{self.name} ({self.get_artist_type_display()})"

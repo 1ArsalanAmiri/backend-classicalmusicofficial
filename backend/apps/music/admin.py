@@ -6,6 +6,7 @@ from django.http import JsonResponse
 from django.template.response import TemplateResponse
 from admin_extra_buttons.api import ExtraButtonsMixin, button
 from django.urls import reverse
+from django import forms
 
 from .models import (Artist, Album, Track, AlbumArchiveUpload, ArchiveUploadStatus,
                      Genre, Instrument, Label, AlbumCredit)
@@ -37,6 +38,7 @@ class TrackInlineForLabel(admin.TabularInline):
     show_change_link = True
     fields = ('title', 'release_date', 'status')
     classes = ('collapse',)
+
 
 
 # =========================================================
@@ -82,9 +84,36 @@ class LabelAdmin(admin.ModelAdmin):
 # =========================================================
 # Artist Admin
 # =========================================================
+class ArtistAdminForm(forms.ModelForm):
+    class Meta:
+        model = Artist
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        if self.instance and self.instance.pk:
+            self.fields["featured_album"].queryset = Album.objects.filter(
+                main_artists=self.instance
+            )
+        else:
+            self.fields["featured_album"].queryset = Album.objects.none()
+
+
 @admin.register(Artist)
 class ArtistAdmin(admin.ModelAdmin):
-    list_display = ("name", "nickname" ,"artist_type", "era", "country", "birth_year", "death_year")
+    form = ArtistAdminForm
+
+    list_display = (
+        "name",
+        "nickname",
+        "artist_type",
+        "era",
+        "country",
+        "birth_year",
+        "death_year"
+    )
+
     list_filter = ("artist_type", "era")
     search_fields = ("name", "nickname", "country", "biography")
     prepopulated_fields = {"slug": ("name",)}
@@ -93,13 +122,22 @@ class ArtistAdmin(admin.ModelAdmin):
 
     fieldsets = (
         (_("اطلاعات پایه"), {
-            "fields": ("name", "nickname", "slug", "artist_type", "era", "country", "image", "featured_album")
+            "fields": (
+                "name",
+                "nickname",
+                "slug",
+                "artist_type",
+                "era",
+                "country",
+                "image",
+                "featured_album"
+            )
         }),
         (_("اطلاعات زمانی (تولد / فوت)"), {
             "fields": ("birth_year", "death_year")
         }),
         (_("ارتباطات و جزئیات"), {
-            "fields": ("related_artists", "biography",)
+            "fields": ("related_artists", "biography")
         }),
         (_("تاریخچه"), {
             "fields": ("created_at", "updated_at")

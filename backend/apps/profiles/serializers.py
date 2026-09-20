@@ -265,7 +265,6 @@ class ArtistDetailSerializer(serializers.ModelSerializer):
         ]
 
     def get_albums(self, obj):
-
         albums = getattr(obj, 'published_albums', None)
         if albums is None:
             albums = obj.main_albums.filter(
