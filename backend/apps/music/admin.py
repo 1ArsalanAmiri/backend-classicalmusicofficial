@@ -93,7 +93,7 @@ class ArtistAdmin(admin.ModelAdmin):
 
     fieldsets = (
         (_("اطلاعات پایه"), {
-            "fields": ("name", "nickname", "slug", "artist_type", "era", "country", "image")
+            "fields": ("name", "nickname", "slug", "artist_type", "era", "country", "image", "featured_album")
         }),
         (_("اطلاعات زمانی (تولد / فوت)"), {
             "fields": ("birth_year", "death_year")
