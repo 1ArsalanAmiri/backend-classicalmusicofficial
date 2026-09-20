@@ -261,7 +261,7 @@ class ArtistDetailSerializer(serializers.ModelSerializer):
         model = Artist
         fields = [
             'slug', 'name', 'biography', 'image', 'birth_year', 'death_year',
-            'albums', 'playlists', 'videos', 'related_artists', 'is_followed'
+            'albums', 'featured_album' , 'playlists', 'videos', 'related_artists', 'is_followed'
         ]
 
     def get_albums(self, obj):

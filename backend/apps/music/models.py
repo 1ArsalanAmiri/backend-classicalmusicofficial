@@ -228,6 +228,8 @@ class Artist(TimeStampedModel):
     birth_year = models.PositiveIntegerField(_("سال تولد"), null=True, blank=True, help_text=_("مثال:1958"))
     death_year = models.PositiveIntegerField(_("سال فوت"), null=True, blank=True, help_text=_("اگر زنده هستش ، این فیلد رو خالی بگذارید"))
 
+    featured_album = models.ForeignKey('Album',on_delete=models.SET_NULL,null=True,blank=True,related_name='featured_by_artists',verbose_name=_("آلبوم منتخب"),)
+
     likes_count = models.PositiveIntegerField(_("تعداد لایک"), default=0)
     followers_count = models.PositiveIntegerField(_("تعداد فالوور"), default=0)
 
