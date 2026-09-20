@@ -164,7 +164,7 @@ STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 
-MEDIA_URL = env("MEDIA_URL", default="https://clmusic.ir/dl-proxy/")
+MEDIA_URL = env("MEDIA_URL", default="https://clmusic.ir/video-cdn/")
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
 
