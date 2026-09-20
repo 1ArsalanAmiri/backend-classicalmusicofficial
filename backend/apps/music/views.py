@@ -133,18 +133,14 @@ class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
         return qs
 
     def get_permissions(self):
-        # مسیرهای عمومی (لیست آلبوم‌ها و جزئیات)
         if self.action in ['list', 'retrieve']:
             return [AllowAny()]
-        # در بخش کامنت، فقط دیدن کامنت‌ها آزاده اما ارسالش توکن می‌خواد
         elif self.action == 'comments':
             if self.request.method == 'POST':
                 return [IsAuthenticated()]
             return [AllowAny()]
-        # لایک و آن‌لایک کردن
         elif self.action in ['like', 'unlike']:
             return [IsAuthenticated()]
-        # عملیات‌های write مثل ساخت، آپدیت و حذف آلبوم
         return [IsAuthenticated()]
 
 @method_decorator(never_cache, name='dispatch')
