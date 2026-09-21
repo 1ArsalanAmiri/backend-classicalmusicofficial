@@ -112,7 +112,7 @@ def process_album_archive_task(self, upload_record_id: int):
 
         for index, file_path in enumerate(audio_files):
             raw_filename = os.path.basename(file_path)
-            filename = get_valid_filename(raw_filename).replace(" ", "_").replace("%", "_")
+            filename = get_valid_filename(raw_filename).replace(" ", "-").replace("%", "-")
             try:
                 os.chmod(file_path, 0o644)
             except Exception as e:
@@ -216,8 +216,6 @@ def process_album_archive_task(self, upload_record_id: int):
                     except (ValueError, TypeError):
                         pass
 
-                # ساخت نمونه ترک در حافظه RAM (بدون audio_file هنوز - آپلودش
-                # توی مرحله‌ی ۲ و به‌صورت موازی انجام میشه)
                 track_instance = Track(
                     album=album,
                     track_number=track_number,
