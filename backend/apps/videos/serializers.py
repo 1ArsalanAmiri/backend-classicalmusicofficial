@@ -1,16 +1,7 @@
 from rest_framework import serializers
 from .models import Video, PublishStatus
 from ..music.serializers import ArtistBasicSerializer
-
-
-def build_cdn_url(request, relative_path):
-    if not relative_path:
-        return None
-    relative_path = str(relative_path).lstrip('/')
-    path = f"/video-cdn/{relative_path}"
-    if request is not None:
-        return request.build_absolute_uri(path)
-    return path
+from ..common.cdn import build_cdn_url
 
 
 class VideoListSerializer(serializers.ModelSerializer):
