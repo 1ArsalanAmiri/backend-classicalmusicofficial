@@ -34,7 +34,7 @@ class ArtistSerializer(serializers.ModelSerializer):
 
 class ArtistBasicSerializer(serializers.ModelSerializer):
     artist_type = serializers.CharField(source='get_artist_type_display', read_only=True)
-    image = CDNImageField(read_only=True)  # اصلاح: استفاده یکپارچه از CDNImageField
+    image = CDNImageField(read_only=True)
 
     class Meta:
         model = Artist
@@ -82,7 +82,6 @@ class TrackSerializer(serializers.ModelSerializer):
 
     def get_cover_image(self, obj):
         request = self.context.get('request')
-        # اصلاح: استفاده از property اختصاصی effective_cover_image در مدل Track
         effective_cover = obj.effective_cover_image
         if effective_cover:
             return build_cdn_url(request, effective_cover.name)
