@@ -649,12 +649,19 @@ class LandingPageView(APIView):
             is_published=True,
         ).order_by('-created_at')[:limit]
 
-        can_watch_videos = HasAllSubscription().has_permission(request, self)
+        can_watch_videos = HasStreamSubscription().has_permission(request, self)
+
         if can_watch_videos:
             videos = Video.objects.filter(
                 status=PublishStatus.PUBLISHED,
             ).prefetch_related('artists').order_by('-created_at')[:limit]
-            video_context = {**context, 'has_all_access': True}
+
+            video_context = {
+                **context,
+                'has_stream_access': True,
+                'has_all_access': HasAllSubscription().has_permission(request, self)
+            }
+
             videos_data = LandingVideoSerializer(videos, many=True, context=video_context).data
         else:
             videos_data = []

@@ -7,7 +7,7 @@ from django.db.models import F
 from .models import Video
 from apps.common.models import PublishStatus
 from .serializers import VideoListSerializer, VideoDetailSerializer
-from ..subscriptions.services import user_has_all_access
+from ..subscriptions.services import user_has_all_access, user_has_stream_access
 from ..common.cdn import build_cdn_url
 
 class VideoViewSet(ReadOnlyModelViewSet):
@@ -48,10 +48,14 @@ class VideoViewSet(ReadOnlyModelViewSet):
     def get_serializer_context(self):
         context = super().get_serializer_context()
         request = self.request
-        has_access = False
+
+        context['has_all_access'] = False
+        context['has_stream_access'] = False
+
         if request and request.user.is_authenticated:
-            has_access = user_has_all_access(request.user)
-        context['has_all_access'] = has_access
+            context['has_all_access'] = user_has_all_access(request.user)
+            context['has_stream_access'] = user_has_stream_access(request.user)
+
         return context
 
     def get_queryset(self):
