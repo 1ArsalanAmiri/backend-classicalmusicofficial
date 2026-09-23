@@ -4,19 +4,31 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework.reverse import reverse
 import random
 
+from ..common.cdn import CDNImageField, build_cdn_url
 from ..common.models import PublishStatus
+
+
+class ArtistFeaturedAlbumSerializer(serializers.ModelSerializer):
+    cover_image = CDNImageField(read_only=True)
+
+    class Meta:
+        model = Album
+        fields = ['title', 'slug', 'cover_image', 'album_type']
 
 
 class ArtistSerializer(serializers.ModelSerializer):
     artist_type_display = serializers.CharField(source='get_artist_type_display', read_only=True)
     era_display = serializers.CharField(source='get_era_display', read_only=True)
     is_followed = serializers.BooleanField(read_only=True, default=False)
+    image = CDNImageField(read_only=True)
+    featured_album = ArtistFeaturedAlbumSerializer(read_only=True)
 
     class Meta:
         model = Artist
         fields = [
-            'name', 'slug', 'nickname', 'country', 'birth_year', 'death_year', 'featured_album' ,'artist_type', 'artist_type_display',
-            'era', 'era_display', 'image', 'biography', 'likes_count', 'followers_count', 'is_followed'
+            'name', 'slug', 'nickname', 'country', 'birth_year', 'death_year', 'featured_album', 'artist_type',
+            'artist_type_display', 'era', 'era_display', 'image', 'biography', 'likes_count', 'followers_count',
+            'is_followed'
         ]
 
 
@@ -29,12 +41,9 @@ class ArtistBasicSerializer(serializers.ModelSerializer):
         fields = ['name', 'slug', 'artist_type', 'image']
 
     def get_image(self, obj):
-        request = self.context.get('request')
-        if obj.image:
-            if request:
-                return request.build_absolute_uri(obj.image.url)
-            return obj.image.url
-        return None
+        if not obj.image:
+            return None
+        return build_cdn_url(self.context.get('request'), obj.image.name)
 
 
 class RelatedArtistSerializer(serializers.ModelSerializer):
@@ -79,9 +88,9 @@ class TrackSerializer(serializers.ModelSerializer):
     def get_cover_image(self, obj):
         request = self.context.get('request')
         if obj.cover_image:
-            return request.build_absolute_uri(obj.cover_image.url)
+            return build_cdn_url(request, obj.cover_image.name)
         elif obj.album and obj.album.cover_image:
-            return request.build_absolute_uri(obj.album.cover_image.url)
+            return build_cdn_url(request, obj.album.cover_image.name)
         return None
 
     def get_audio_url(self, obj):
@@ -121,6 +130,7 @@ class TrackSerializer(serializers.ModelSerializer):
 
 class AlbumListSerializer(serializers.ModelSerializer):
     total_tracks = serializers.IntegerField(read_only=True)
+    cover_image = CDNImageField(read_only=True)
 
     class Meta:
         model = Album
@@ -138,6 +148,7 @@ class AlbumDetailSerializer(serializers.ModelSerializer):
     main_artists = ArtistBasicSerializer(many=True, read_only=True)
     label = serializers.SlugRelatedField(slug_field='slug', read_only=True)
     is_liked = serializers.BooleanField(read_only=True, default=False)
+    cover_image = CDNImageField(read_only=True)
 
     class Meta:
         model = Album
@@ -170,6 +181,7 @@ class InstrumentSerializer(serializers.ModelSerializer):
 
 class LabelListSerializer(serializers.ModelSerializer):
     is_followed = serializers.BooleanField(read_only=True, default=False)
+    logo = CDNImageField(read_only=True)
 
     class Meta:
         model = Label
@@ -183,6 +195,7 @@ class LabelDetailSerializer(serializers.ModelSerializer):
     singles = serializers.SerializerMethodField()
 
     is_followed = serializers.BooleanField(read_only=True, default=False)
+    logo = CDNImageField(read_only=True)
 
     class Meta:
         model = Label
@@ -213,6 +226,7 @@ class LandingArtistSerializer(serializers.ModelSerializer):
 class LandingAlbumSerializer(serializers.ModelSerializer):
     main_artists = LandingArtistSerializer(many=True, read_only=True)
     main_artist_image = serializers.SerializerMethodField()
+    cover_image = CDNImageField(read_only=True)
 
     class Meta:
         model = Album
@@ -224,7 +238,4 @@ class LandingAlbumSerializer(serializers.ModelSerializer):
             return None
 
         chosen = random.choice(candidates)
-        request = self.context.get('request')
-        if request:
-            return request.build_absolute_uri(chosen.image.url)
-        return chosen.image.url
+        return build_cdn_url(self.context.get('request'), chosen.image.name)

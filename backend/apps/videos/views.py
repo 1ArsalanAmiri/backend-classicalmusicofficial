@@ -6,7 +6,7 @@ from rest_framework import filters, status
 from django.db.models import F
 from .models import Video
 from apps.common.models import PublishStatus
-from .serializers import VideoListSerializer, VideoDetailSerializer ,build_cdn_url
+from .serializers import VideoListSerializer, VideoDetailSerializer, build_cdn_url
 from ..subscriptions.services import user_has_all_access
 
 

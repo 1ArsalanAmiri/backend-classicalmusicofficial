@@ -1,5 +1,4 @@
 import logging
-
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth import get_user_model
 from django.core.files.storage import default_storage
@@ -11,6 +10,7 @@ from django.contrib.contenttypes.models import ContentType
 from apps.music.models import Artist, Album, Track, PlayHistory, ArtistRole, AlbumType
 from apps.common.models import PublishStatus
 from apps.videos.models import Video
+from apps.videos.serializers import build_cdn_url
 from apps.profiles.models import UserProfile, DEFAULT_PROFILE_IMAGE_NAME
 from django.db.models import Q
 import jdatetime
@@ -76,14 +76,12 @@ class UserProfileSerializer(serializers.ModelSerializer):
     def get_subscription_start_date(self, obj):
         history = self.get_latest_active_subscription_history(obj)
         if history and history.start_date:
-            # Convert jdatetime.date to string YYYY-MM-DD
             return history.start_date.strftime('%Y-%m-%d')
         return None
 
     def get_subscription_end_date(self, obj):
         history = self.get_latest_active_subscription_history(obj)
         if history and history.end_date:
-            # Convert jdatetime.date to string YYYY-MM-DD
             return history.end_date.strftime('%Y-%m-%d')
         return None
 
@@ -116,7 +114,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             return "Upcoming"
         elif end_date >= today:
             return "Active"
-        else: # end_date < today
+        else:
             return "Expired"
 
     def get_liked_albums_count(self, obj):
@@ -207,13 +205,11 @@ class ChangePasswordSerializer(serializers.Serializer):
         new_password_confirm = attrs.get('new_password_confirm')
         old_password = attrs.get('old_password')
 
-        # بررسی تطابق رمز جدید و تکرار آن
         if new_password != new_password_confirm:
             raise serializers.ValidationError(
                 {"new_password_confirm": _("رمز عبور جدید و تکرار آن مطابقت ندارند.")}
             )
 
-        # بررسی رمز قبلی اگر کاربر رمز دارد
         if user.has_usable_password():
             if not old_password:
                 raise serializers.ValidationError(
@@ -225,7 +221,6 @@ class ChangePasswordSerializer(serializers.Serializer):
                     {"old_password": _("رمز عبور فعلی اشتباه است.")}
                 )
 
-        # جلوگیری از ثبت رمز جدید دقیقاً مشابه رمز قدیم
         if old_password and old_password == new_password:
             raise serializers.ValidationError(
                 {"new_password": _("رمز عبور جدید نمی‌تواند با رمز فعلی یکسان باشد.")}
@@ -244,9 +239,16 @@ class ArtistListSerializer(serializers.ModelSerializer):
 
 
 class ArtistVideoSerializer(serializers.ModelSerializer):
+    cover_image = serializers.SerializerMethodField()
+
     class Meta:
         model = Video
         fields = ['title', 'slug', 'cover_image', 'duration_seconds', 'recording_year', 'view_count']
+
+    def get_cover_image(self, obj):
+        if not obj.cover_image:
+            return None
+        return build_cdn_url(self.context.get('request'), obj.cover_image.name)
 
 
 class ArtistDetailSerializer(serializers.ModelSerializer):
@@ -261,7 +263,7 @@ class ArtistDetailSerializer(serializers.ModelSerializer):
         model = Artist
         fields = [
             'slug', 'name', 'biography', 'image', 'birth_year', 'death_year',
-            'albums', 'featured_album' , 'playlists', 'videos', 'related_artists', 'is_followed'
+            'albums', 'featured_album', 'playlists', 'videos', 'related_artists', 'is_followed'
         ]
 
     def get_albums(self, obj):
