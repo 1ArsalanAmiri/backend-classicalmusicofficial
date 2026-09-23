@@ -228,7 +228,7 @@ class AlbumAdmin(admin.ModelAdmin):
         super().save_model(request, obj, form, change)
         if obj.cover_image and change:
             tracks_to_update = Track.objects.filter(album=obj, cover_image__isnull=True)
-            updated_count = tracks_to_update.update(cover_image=obj.cover_image)
+            updated_count = tracks_to_update.update(cover_image=obj.cover_image.name)
             if updated_count > 0:
                 messages.success(request, _(f"کاور آلبوم به {updated_count} ترک اختصاص داده شد."))
 

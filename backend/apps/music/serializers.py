@@ -1,9 +1,9 @@
+import random
 from rest_framework import serializers
-from .models import Artist, Album, Track, Genre, Instrument, Label, AlbumType
 from drf_spectacular.utils import extend_schema_field
 from rest_framework.reverse import reverse
-import random
 
+from .models import Artist, Album, Track, Genre, Instrument, Label, AlbumType
 from ..common.cdn import CDNImageField, build_cdn_url
 from ..common.models import PublishStatus
 
@@ -34,16 +34,11 @@ class ArtistSerializer(serializers.ModelSerializer):
 
 class ArtistBasicSerializer(serializers.ModelSerializer):
     artist_type = serializers.CharField(source='get_artist_type_display', read_only=True)
-    image = serializers.SerializerMethodField()
+    image = CDNImageField(read_only=True)  # اصلاح: استفاده یکپارچه از CDNImageField
 
     class Meta:
         model = Artist
         fields = ['name', 'slug', 'artist_type', 'image']
-
-    def get_image(self, obj):
-        if not obj.image:
-            return None
-        return build_cdn_url(self.context.get('request'), obj.image.name)
 
 
 class RelatedArtistSerializer(serializers.ModelSerializer):
@@ -87,10 +82,10 @@ class TrackSerializer(serializers.ModelSerializer):
 
     def get_cover_image(self, obj):
         request = self.context.get('request')
-        if obj.cover_image:
-            return build_cdn_url(request, obj.cover_image.name)
-        elif obj.album and obj.album.cover_image:
-            return build_cdn_url(request, obj.album.cover_image.name)
+        # اصلاح: استفاده از property اختصاصی effective_cover_image در مدل Track
+        effective_cover = obj.effective_cover_image
+        if effective_cover:
+            return build_cdn_url(request, effective_cover.name)
         return None
 
     def get_audio_url(self, obj):
@@ -100,11 +95,25 @@ class TrackSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if request:
             try:
-                return reverse(
+                url = reverse(
                     'track-stream',
                     kwargs={'slug': obj.slug},
                     request=request
                 )
+                # 🟢 اصلاح کلیدی: استخراج توکن کاربر جهت سنجش دسترسی در پلیرهای HTML5
+                token = None
+                if hasattr(request, 'auth') and request.auth:
+                    token = str(request.auth)
+                elif 'token' in request.query_params:
+                    token = request.query_params.get('token')
+                elif request.headers.get('Authorization'):
+                    auth_hdr = request.headers.get('Authorization')
+                    if auth_hdr.startswith('Bearer '):
+                        token = auth_hdr.split(' ')[1]
+
+                if token:
+                    url = f"{url}?token={token}"
+                return url
             except Exception:
                 return None
         return None
@@ -116,7 +125,20 @@ class TrackSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if request:
             try:
-                return reverse('track-download', kwargs={'slug': obj.slug}, request=request)
+                url = reverse('track-download', kwargs={'slug': obj.slug}, request=request)
+                token = None
+                if hasattr(request, 'auth') and request.auth:
+                    token = str(request.auth)
+                elif 'token' in request.query_params:
+                    token = request.query_params.get('token')
+                elif request.headers.get('Authorization'):
+                    auth_hdr = request.headers.get('Authorization')
+                    if auth_hdr.startswith('Bearer '):
+                        token = auth_hdr.split(' ')[1]
+
+                if token:
+                    url = f"{url}?token={token}"
+                return url
             except Exception:
                 return None
         return None
@@ -237,5 +259,5 @@ class LandingAlbumSerializer(serializers.ModelSerializer):
         if not candidates:
             return None
 
-        chosen = random.choice(candidates)
+        chosen = candidates[0]
         return build_cdn_url(self.context.get('request'), chosen.image.name)
