@@ -82,9 +82,6 @@ def convert_video_to_hls(self, video_id):
             status='published',
         )
 
-        default_storage.delete(video.video_file.name)
-        Video.objects.filter(pk=video.pk).update(video_file=None)
-
     except Exception as exc:
         logger.exception("convert_video_to_hls failed for video %s", video_id)
         raise self.retry(exc=exc)
