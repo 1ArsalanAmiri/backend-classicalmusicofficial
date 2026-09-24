@@ -3,26 +3,34 @@ from django.db import transaction
 from django.utils import timezone
 from django.shortcuts import redirect
 from django.urls import reverse
+from rest_framework import serializers, status
+from rest_framework.generics import GenericAPIView
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 
 from .models import Payment, PaymentStatus, Discount, DiscountUsage
-from .services import AqayePardakhtService  # تغییر ایمپورت به سرویس جدید
+from .services import AqayePardakhtService
 from apps.subscriptions.models import Subscription
 
 
-class PaymentRequestAPIView(APIView):
+class PaymentRequestSerializer(serializers.Serializer):
+    subscription_id = serializers.IntegerField(required=True, help_text="شناسه اشتراک")
+    discount_code = serializers.CharField(required=False, allow_null=True, allow_blank=True,
+                                          help_text="کد تخفیف (اختیاری)")
+
+
+class PaymentRequestAPIView(GenericAPIView):
     permission_classes = [IsAuthenticated]
+    serializer_class = PaymentRequestSerializer
 
     def post(self, request, *args, **kwargs):
-        subscription_id = request.data.get('subscription_id')
-        discount_code = request.data.get('discount_code')
-        user = request.user
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
-        if not subscription_id:
-            return Response({"error": "ارسال شناسه اشتراک الزامی است."}, status=status.HTTP_400_BAD_REQUEST)
+        subscription_id = serializer.validated_data.get('subscription_id')
+        discount_code = serializer.validated_data.get('discount_code')
+        user = request.user
 
         try:
             subscription = Subscription.objects.get(id=subscription_id)
