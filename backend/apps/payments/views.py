@@ -7,10 +7,9 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
-import jdatetime
 
 from .models import Payment, PaymentStatus, Discount, DiscountUsage
-from .services import ZarinpalService
+from .services import AqayePardakhtService  # تغییر ایمپورت به سرویس جدید
 from apps.subscriptions.models import Subscription
 
 
@@ -77,39 +76,41 @@ class PaymentRequestAPIView(APIView):
                             status=status.HTTP_200_OK)
 
         callback_url = request.build_absolute_uri(reverse('payments:verify'))
-        zarinpal_service = ZarinpalService()
 
-        zp_response = zarinpal_service.request_payment(
+        aqaye_service = AqayePardakhtService()
+
+        api_response = aqaye_service.request_payment(
             amount_toman=int(payment.amount),
             description=payment.description,
             callback_url=callback_url,
-            mobile=str(mobile)
+            mobile=str(mobile),
+            invoice_id=str(payment.id)
         )
 
-        payment.raw_request = zp_response
+        payment.raw_request = api_response
         payment.save(update_fields=['raw_request'])
 
-        if zp_response.get("success"):
-            payment.authority = zp_response["authority"]
+        if api_response.get("success"):
+            payment.authority = api_response["authority"]
             payment.save(update_fields=['authority'])
-            return Response({"gateway_url": zp_response["gateway_url"]}, status=status.HTTP_200_OK)
+            return Response({"gateway_url": api_response["gateway_url"]}, status=status.HTTP_200_OK)
         else:
             payment.status = PaymentStatus.FAILED
             payment.save(update_fields=['status'])
-            return Response({"error": zp_response.get("error_message", "خطا در اتصال به درگاه")},
+            return Response({"error": api_response.get("error_message", "خطا در اتصال به درگاه")},
                             status=status.HTTP_502_BAD_GATEWAY)
-
 
 
 class PaymentVerifyAPIView(APIView):
     permission_classes = []
 
     def get(self, request, *args, **kwargs):
-        authority = request.query_params.get('Authority')
-        zp_status = request.query_params.get('Status')
+        authority = request.query_params.get('transid')
+        payment_status = request.query_params.get('status')
+
         frontend_base_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')
 
-        if not authority or not zp_status:
+        if not authority or not payment_status:
             return redirect(f"{frontend_base_url}/payment/result?status=failed&message=InvalidRequest")
 
         with transaction.atomic():
@@ -121,32 +122,29 @@ class PaymentVerifyAPIView(APIView):
             if payment.status in [PaymentStatus.SUCCESS, PaymentStatus.FAILED, PaymentStatus.CANCELED]:
                 return redirect(f"{frontend_base_url}/payment/result?status={payment.status.lower()}")
 
-            if zp_status == 'NOK':
+            if payment_status == '0':
                 payment.status = PaymentStatus.CANCELED
                 payment.save(update_fields=['status'])
                 return redirect(f"{frontend_base_url}/payment/result?status=canceled")
 
-            zarinpal_service = ZarinpalService()
-            verify_response = zarinpal_service.verify_payment(
+            aqaye_service = AqayePardakhtService()
+            verify_response = aqaye_service.verify_payment(
                 amount_toman=int(payment.amount),
-                authority=authority
+                transid=authority
             )
 
             payment.raw_verify = verify_response
 
             if verify_response.get("success"):
                 payment.status = PaymentStatus.SUCCESS
-                payment.ref_id = str(verify_response.get("ref_id", ""))
+                payment.ref_id = verify_response.get("ref_id", "")
                 payment.card_pan = verify_response.get("card_pan", "")
                 payment.verified_at = timezone.now()
                 payment.save()
 
                 from apps.profiles.models import UserProfile
-
                 profile, created = UserProfile.objects.get_or_create(user=payment.user)
-
                 profile.subscribe(payment.subscription)
-
 
                 if payment.discount:
                     DiscountUsage.objects.create(discount=payment.discount, user=payment.user)
@@ -154,7 +152,6 @@ class PaymentVerifyAPIView(APIView):
                     payment.discount.save(update_fields=['current_uses'])
 
                 return redirect(f"{frontend_base_url}/payment/result?status=success&ref_id={payment.ref_id}")
-
 
             else:
                 payment.status = PaymentStatus.FAILED

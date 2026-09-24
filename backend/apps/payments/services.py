@@ -5,118 +5,75 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
-class ZarinpalService:
-
+class AqayePardakhtService:
     def __init__(self):
-        self.merchant_id = settings.ZP_MERCHANT_ID
-        self.is_sandbox = getattr(settings, 'ZP_SANDBOX', False)
 
-        if self.is_sandbox:
-            self.base_api_url = "https://sandbox.zarinpal.com/pg/v4/payment"
-            self.start_pay_url = "https://sandbox.zarinpal.com/pg/StartPay/"
-        else:
-            self.base_api_url = "https://api.zarinpal.com/pg/v4/payment"
-            self.start_pay_url = "https://www.zarinpal.com/pg/StartPay/"
+        self.pin = getattr(settings, 'AQAYEPARDAKHT_PIN', '')
+        self.create_url = "https://panel.aqayepardakht.ir/api/v2/create"
+        self.verify_url = "https://panel.aqayepardakht.ir/api/v2/verify"
+        self.start_pay_url = "https://panel.aqayepardakht.ir/startpay/"
 
-        self.headers = {
-            "accept": "application/json",
-            "content-type": "application/json"
-        }
-
-    def request_payment(self, amount_toman, description, callback_url, mobile=""):
-
-        amount_rial = int(amount_toman * 10)
-
-        url = f"{self.base_api_url}/request.json"
-
+    def request_payment(self, amount_toman, description, callback_url, mobile="", invoice_id=""):
         payload = {
-            "merchant_id": self.merchant_id,
-            "amount": amount_rial,
+            "pin": self.pin,
+            "amount": amount_toman,
+            "callback": callback_url,
             "description": description,
-            "callback_url": callback_url,
-            "metadata": {"mobile": mobile} if mobile else {}
+            "mobile": mobile,
+            "invoice_id": invoice_id
         }
 
         try:
-            response = requests.post(url, json=payload, headers=self.headers, timeout=10)
+            response = requests.post(self.create_url, data=payload, timeout=10)
             response_data = response.json()
 
-            if response.status_code == 200 and not response_data.get('errors'):
-                authority = response_data['data']['authority']
-                gateway_url = f"{self.start_pay_url}{authority}"
+            if response_data.get('status') == "success":
+                transid = response_data.get('transid')
+                gateway_url = f"{self.start_pay_url}{transid}"
                 return {
                     'success': True,
-                    'authority': authority,
+                    'authority': transid,
                     'gateway_url': gateway_url,
                     'raw_response': response_data
                 }
             else:
-                logger.error(f"Zarinpal Request Error: HTTP {response.status_code} - {response_data}")
+                logger.error(f"AqayePardakht Request Error: {response_data}")
                 return {
                     'success': False,
-                    'error_message': self._get_error_message(response_data.get('errors')),
+                    'error_message': 'خطا در ایجاد تراکنش سمت درگاه آقای پرداخت',
                     'raw_response': response_data
                 }
 
         except requests.exceptions.RequestException as e:
-            logger.critical(f"Zarinpal Network Error during Request: {str(e)}")
+            logger.critical(f"AqayePardakht Network Error during Request: {str(e)}")
             return {'success': False, 'error_message': 'خطا در ارتباط با شبکه بانکی'}
 
-    def verify_payment(self, amount_toman, authority):
-
-        amount_rial = int(amount_toman * 10)
-
-        url = f"{self.base_api_url}/verify.json"
-
+    def verify_payment(self, amount_toman, transid):
         payload = {
-            "merchant_id": self.merchant_id,
-            "amount": amount_rial,
-            "authority": authority
+            "pin": self.pin,
+            "amount": amount_toman,
+            "transid": transid
         }
 
         try:
-            response = requests.post(url, json=payload, headers=self.headers, timeout=10)
+            response = requests.post(self.verify_url, data=payload, timeout=10)
             response_data = response.json()
 
-            if response.status_code == 200 and not response_data.get('errors'):
-                data = response_data['data']
-                code = data.get('code')
-
-                if code in [100, 101]:
-                    return {
-                        'success': True,
-                        'ref_id': data.get('ref_id'),
-                        'card_pan': data.get('card_pan', ''),
-                        'is_already_verified': (code == 101),
-                        'raw_response': response_data
-                    }
-                else:
-                    return {
-                        'success': False,
-                        'error_message': f"تراکنش ناموفق (کد: {code})",
-                        'raw_response': response_data
-                    }
+            if response_data.get('status') == "success" and str(response_data.get('code')) == "1":
+                return {
+                    'success': True,
+                    'ref_id': str(response_data.get('tracking_number', transid)),
+                    'card_pan': response_data.get('card_number', ''),
+                    'raw_response': response_data
+                }
             else:
-                logger.error(f"Zarinpal Verify Error: HTTP {response.status_code} - {response_data}")
+                logger.error(f"AqayePardakht Verify Error: {response_data}")
                 return {
                     'success': False,
-                    'error_message': self._get_error_message(response_data.get('errors')),
+                    'error_message': "تراکنش ناموفق بود.",
                     'raw_response': response_data
                 }
 
         except requests.exceptions.RequestException as e:
-            logger.critical(f"Zarinpal Network Error during Verify: {str(e)}")
-            return {'success': False, 'error_message': 'خطا در ارتباط با سرور زرین‌پال'}
-
-    def _get_error_message(self, errors_dict):
-        if not errors_dict:
-            return "خطای ناشناخته از سمت درگاه"
-
-        code = errors_dict.get('code')
-        message = errors_dict.get('message', 'خطای نامشخص')
-
-        if code == -11:
-            return "مرچنت کد نامعتبر است یا IP سرور در زرین‌پال ثبت نشده است."
-
-        return f"{message} (کد: {code})"
+            logger.critical(f"AqayePardakht Network Error during Verify: {str(e)}")
+            return {'success': False, 'error_message': 'خطا در ارتباط با سرور آقای پرداخت'}

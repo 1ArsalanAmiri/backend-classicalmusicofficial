@@ -19,9 +19,11 @@ env = environ.Env(DEBUG=(bool, False),ALLOWED_HOSTS=(list, []),)
 
 environ.Env.read_env(BASE_DIR / '.env')
 
-ZP_MERCHANT_ID = env('ZP_MERCHANT_ID', default='c05db87d-9881-4de4-af7f-d998a00d5e48')
 
-ZP_SANDBOX = env.bool('ZP_SANDBOX', default=False)
+AQAYEPARDAKHT_PIN = env('MID')
+# ZP_MERCHANT_ID = env('ZP_MERCHANT_ID', default='c05db87d-9881-4de4-af7f-d998a00d5e48')
+#
+# ZP_SANDBOX = env.bool('ZP_SANDBOX', default=False)
 
 SECRET_KEY = env('SECRET_KEY')
 
