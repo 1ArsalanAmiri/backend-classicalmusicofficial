@@ -17,7 +17,7 @@ from apps.subscriptions.models import Subscription
 class PaymentRequestSerializer(serializers.Serializer):
     subscription_id = serializers.IntegerField(required=True, help_text="شناسه اشتراک")
     discount_code = serializers.CharField(required=False, allow_null=True, allow_blank=True,
-                                          help_text="کد تخفیف (اختیاری)")
+                                          help_text="کد تخفیف ")
 
 
 class PaymentRequestAPIView(GenericAPIView):

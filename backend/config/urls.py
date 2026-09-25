@@ -38,7 +38,9 @@ urlpatterns = [
 
     path("contacts/", include("apps.contacts.urls") , name="contacts"),
 
-    path("content/" , include("apps.content.urls"), name="content")
+    path("content/" , include("apps.content.urls"), name="content"),
+
+    path("subscriptions/", include("apps.subscriptions.urls"), name="subscriptions"),
 
     # path('sentry-debug/', trigger_error),
 
