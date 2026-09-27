@@ -16,8 +16,7 @@ from django.db.models import Q
 import jdatetime
 from apps.music.serializers import TrackSerializer
 from apps.playlists.models import Playlist
-from apps.music.serializers import AlbumListSerializer
-
+from apps.music.serializers import TrackSerializer, AlbumListSerializer, ArtistFeaturedAlbumSerializer
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -253,11 +252,11 @@ class ArtistVideoSerializer(serializers.ModelSerializer):
 
 class ArtistDetailSerializer(serializers.ModelSerializer):
     albums = serializers.SerializerMethodField()
-
     playlists = serializers.SerializerMethodField()
     videos = serializers.SerializerMethodField()
     related_artists = ArtistListSerializer(many=True, read_only=True)
     is_followed = serializers.BooleanField(read_only=True, default=False)
+    featured_album = ArtistFeaturedAlbumSerializer(read_only=True)
 
     class Meta:
         model = Artist

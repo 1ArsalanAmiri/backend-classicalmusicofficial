@@ -116,7 +116,7 @@ class PaymentVerifyAPIView(APIView):
         authority = request.query_params.get('transid')
         payment_status = request.query_params.get('status')
 
-        frontend_base_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')
+        frontend_base_url = getattr(settings, 'FRONTEND_URL')
 
         if not authority or not payment_status:
             return redirect(f"{frontend_base_url}/payment/result?status=failed&message=InvalidRequest")

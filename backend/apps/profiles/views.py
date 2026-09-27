@@ -65,6 +65,7 @@ class ChangePasswordView(APIView):
 
 class ArtistViewSet(viewsets.ReadOnlyModelViewSet):
     lookup_field = 'slug'
+
     def get_serializer_class(self):
         if self.action == 'list':
             return ArtistListSerializer
