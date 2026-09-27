@@ -7,8 +7,6 @@ class Subscription(models.Model):
 
     SUBSCRIPTION_CHOICES = [
         ('online', 'فقط پخش آنلاین'),
-        ('download', 'فقط دانلود'),
-        ('videos' , 'دانلود ویدیو ها'),
         ('both', 'دانلود و پخش'),
         ('all' , 'همه قابلیت ها')
     ]
