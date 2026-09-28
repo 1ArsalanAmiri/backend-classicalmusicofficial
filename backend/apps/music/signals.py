@@ -1,9 +1,11 @@
-import os
+import logging
 from django.contrib.postgres.search import SearchVector
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.core.cache import cache
 from .models import Album, Track, AlbumZipExport
+
+logger = logging.getLogger(__name__)
 
 
 @receiver([post_save, post_delete], sender=Album)
@@ -23,10 +25,17 @@ def invalidate_album_cache_on_track_change(sender, instance, **kwargs):
 
 
 def delete_album_zip_cache(album):
-    exports = AlbumZipExport.objects.filter(album=album)
-    for export in exports:
-        if export.zip_file and os.path.exists(export.zip_file.path):
-            os.remove(export.zip_file.path)
+    """
+    زیپ‌های کش‌شده‌ی آلبوم را پاک می‌کند.
+    قبلاً از export.zip_file.path و os.remove استفاده می‌شد؛ روی storageهای remote (مثل FTP)
+    .path پیاده‌سازی نشده و NotImplementedError می‌داد و ذخیره‌ی هر ترک را می‌شکست.
+    """
+    for export in AlbumZipExport.objects.filter(album=album):
+        if export.zip_file and export.zip_file.name:
+            try:
+                export.zip_file.storage.delete(export.zip_file.name)
+            except Exception:
+                logger.exception("Could not delete album zip file %s", export.zip_file.name)
         export.delete()
 
 

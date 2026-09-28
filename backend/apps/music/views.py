@@ -1,5 +1,6 @@
 import mimetypes
 import logging
+import time
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -223,16 +224,114 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
 
-    ZIP_WAIT_TIMEOUT = 30  # ثانیه
+    ZIP_WAIT_TIMEOUT = 30        # ثانیه؛ حداکثر مدتی که درخواست منتظر ساخت زیپ می‌ماند
+    ZIP_POLL_INTERVAL = 1        # ثانیه
+    ZIP_STALE_AFTER = 30 * 60    # ثانیه؛ رکورد PENDING/PROCESSING قدیمی‌تر از این گیرکرده حساب می‌شود
+    ZIP_RETRY_AFTER = 5          # ثانیه؛ برای هدر Retry-After در پاسخ 202
+
+    _ZIP_ACTIVE_STATUSES = (
+        AlbumZipExport.StatusChoices.PENDING,
+        AlbumZipExport.StatusChoices.PROCESSING,
+    )
 
     def _serve_zip_file(self, album, zip_export):
-        file_obj = default_storage.open(zip_export.zip_file.name, 'rb')
-        response = FileResponse(file_obj, content_type='application/zip')
-        safe_filename = quote(f"{album.slug}.zip")
-        response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
+        """
+        فایل زیپ را استریم می‌کند. اگر فایل روی storage نبود None برمی‌گرداند
+        تا view زیپ جدید بسازد.
+        - نام فایل با as_attachment/filename ساخته می‌شود؛ جنگو خودش نام‌های فارسی/غیر ASCII
+          را درست (filename*=UTF-8'') انکود می‌کند. (quote دستی داخل filename="..." باعث می‌شد
+          مرورگر نام را به‌صورت %D8%A7... نشان دهد.)
+        """
+        try:
+            file_obj = default_storage.open(zip_export.zip_file.name, 'rb')
+        except Exception:
+            logger.exception("Cannot open album zip %s for album %s", zip_export.zip_file.name, album.id)
+            return None
+
+        response = FileResponse(
+            file_obj,
+            as_attachment=True,
+            filename=album.get_zip_filename(),
+            content_type='application/zip',
+        )
+        response['Cache-Control'] = 'no-store'
         return response
 
-    @action(detail=True, methods=['get'], url_path='download-zip', permission_classes=[IsAuthenticated])
+    def _is_zip_export_stale(self, zip_export):
+        return (timezone.now() - zip_export.created_at).total_seconds() > self.ZIP_STALE_AFTER
+
+    def _get_or_start_zip_export(self, album):
+        """
+        آخرین خروجی قابل‌استفاده را برمی‌گرداند یا در صورت نیاز یک تسک جدید می‌سازد.
+        قفل روی ردیف آلبوم باعث می‌شود چند درخواست هم‌زمان چند تسک تکراری نسازند.
+        """
+        with transaction.atomic():
+            Album._base_manager.select_for_update().get(pk=album.pk)
+
+            zip_export = album.zip_exports.order_by('-id').first()
+            if zip_export:
+                if zip_export.status == AlbumZipExport.StatusChoices.COMPLETED and zip_export.zip_file:
+                    return zip_export
+                if (zip_export.status in self._ZIP_ACTIVE_STATUSES
+                        and not self._is_zip_export_stale(zip_export)):
+                    return zip_export  # تسک در حال اجراست؛ فقط منتظرش می‌مانیم
+
+            # آخرین رکورد FAILED / گیرکرده / بدون فایل است -> رکورد و تسک جدید
+            zip_export = AlbumZipExport.objects.create(
+                album=album, status=AlbumZipExport.StatusChoices.PENDING
+            )
+            export_id = zip_export.pk
+
+            def _enqueue():
+                try:
+                    generate_album_zip_task.delay(album.id, export_id)
+                except Exception:
+                    logger.exception("Could not enqueue generate_album_zip_task for album %s", album.id)
+                    AlbumZipExport.objects.filter(pk=export_id).update(
+                        status=AlbumZipExport.StatusChoices.FAILED
+                    )
+
+            transaction.on_commit(_enqueue)
+            return zip_export
+
+    def _wait_for_zip_export(self, zip_export_id):
+        """
+        تا ZIP_WAIT_TIMEOUT ثانیه وضعیت رکورد را در دیتابیس چک می‌کند
+        (بدون نیاز به result backend و بدون مشکل retry تسک).
+        اگر رکورد حذف شده باشد (آلبوم وسط ساخت تغییر کرده) None برمی‌گرداند.
+        """
+        deadline = time.monotonic() + self.ZIP_WAIT_TIMEOUT
+        while True:
+            zip_export = AlbumZipExport.objects.filter(pk=zip_export_id).first()
+            if zip_export is None:
+                return None
+            if zip_export.status in (AlbumZipExport.StatusChoices.COMPLETED,
+                                     AlbumZipExport.StatusChoices.FAILED):
+                return zip_export
+            if time.monotonic() >= deadline:
+                return zip_export
+            time.sleep(self.ZIP_POLL_INTERVAL)
+
+    def _zip_processing_response(self):
+        response = Response(
+            {
+                "detail": "فایل ZIP در حال آماده‌سازی است. لطفاً چند لحظه دیگر مجدداً تلاش کنید.",
+                "status": "PROCESSING",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+        response['Retry-After'] = str(self.ZIP_RETRY_AFTER)
+        return response
+
+    # authentication_classes: لینک دانلود مستقیم (مرورگر) هدر Authorization نمی‌فرستد؛
+    # مثل stream/download ترک‌ها باید توکن از query-string هم پذیرفته شود: ?token=...
+    @action(
+        detail=True,
+        methods=['get'],
+        url_path='download-zip',
+        permission_classes=[IsAuthenticated],
+        authentication_classes=[QueryParamJWTAuthentication],
+    )
     def download_zip(self, request, slug=None):
         album = self.get_object()
 
@@ -243,41 +342,36 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        zip_export = album.zip_exports.order_by('created_at').last()
+        # حداکثر دو تلاش: اگر فایل زیپ ثبت‌شده واقعاً روی storage نبود، یک‌بار از نو ساخته می‌شود.
+        for _attempt in range(2):
+            zip_export = self._get_or_start_zip_export(album)
 
-        if zip_export and zip_export.status == AlbumZipExport.StatusChoices.COMPLETED and zip_export.zip_file:
-            return self._serve_zip_file(album, zip_export)
+            if zip_export.status != AlbumZipExport.StatusChoices.COMPLETED:
+                zip_export = self._wait_for_zip_export(zip_export.pk)
 
-        if zip_export and zip_export.status == AlbumZipExport.StatusChoices.PROCESSING and zip_export.task_id:
-            async_result = AsyncResult(zip_export.task_id)
-        else:
-            async_result = generate_album_zip_task.delay(album.id)
+                if zip_export is None:
+                    return self._zip_processing_response()
 
-        try:
-            async_result.get(timeout=self.ZIP_WAIT_TIMEOUT, propagate=True)
-        except CeleryTimeoutError:
-            return Response(
-                {
-                    "detail": "ساخت فایل ZIP بیشتر از حد معمول طول کشید. لطفاً چند لحظه دیگر مجدداً تلاش کنید.",
-                    "status": "PROCESSING",
-                },
-                status=status.HTTP_202_ACCEPTED
-            )
-        except Exception:
-            logger.exception("generate_album_zip_task failed for album_id=%s", album.id)
-            return Response(
-                {"detail": "در ساخت فایل ZIP خطایی رخ داد. لطفاً دوباره تلاش کنید.", "status": "FAILED"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+                if zip_export.status == AlbumZipExport.StatusChoices.FAILED:
+                    logger.error("Album zip export %s failed for album_id=%s", zip_export.pk, album.id)
+                    return Response(
+                        {"detail": "در ساخت فایل ZIP خطایی رخ داد. لطفاً دوباره تلاش کنید.", "status": "FAILED"},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
 
-        # تسک تموم شد؛ رکورد رو دوباره از دیتابیس بخون و فایل رو سرو کن
-        zip_export = album.zip_exports.order_by('created_at').last()
-        if zip_export and zip_export.status == AlbumZipExport.StatusChoices.COMPLETED and zip_export.zip_file:
-            return self._serve_zip_file(album, zip_export)
+                if zip_export.status != AlbumZipExport.StatusChoices.COMPLETED or not zip_export.zip_file:
+                    return self._zip_processing_response()
+
+            response = self._serve_zip_file(album, zip_export)
+            if response is not None:
+                return response
+
+            # فایل روی storage پیدا نشد -> رکورد خراب را حذف کن و دوباره بساز
+            AlbumZipExport.objects.filter(pk=zip_export.pk).delete()
 
         return Response(
-            {"detail": "فایل آماده نشد، لطفاً دوباره تلاش کنید.", "status": "PROCESSING"},
-            status=status.HTTP_202_ACCEPTED
+            {"detail": "فایل ZIP در دسترس نیست. لطفاً دوباره تلاش کنید.", "status": "FAILED"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
 @method_decorator(never_cache, name='dispatch')

@@ -1,4 +1,6 @@
 import os
+import re
+import time
 import tempfile
 import zipfile
 import rarfile
@@ -15,6 +17,7 @@ from django.utils.text import slugify
 from django.core.files.base import ContentFile
 from django.db import transaction
 from celery import shared_task
+from celery.exceptions import SoftTimeLimitExceeded
 from mutagen import File as MutagenFile
 from django.utils.text import get_valid_filename
 from .models import AlbumArchiveUpload, Track, Artist, AlbumZipExport, Genre, AlbumType, Album
@@ -430,54 +433,161 @@ def cleanup_old_album_zips():
         return "Failed during cleanup."
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=10, soft_time_limit=1200, time_limit=1300)
-def generate_album_zip_task(self, album_id: int):
-    zip_export = None
+ZIP_COPY_CHUNK_SIZE = 1024 * 1024  # 1MB
+ZIP_INVALID_NAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
+ZIP_ENTRY_NAME_MAX_LENGTH = 120
+
+
+def _build_zip_entry_name(track, position, used_names):
+    """
+    نام فایل داخل زیپ: «01 - عنوان ترک.mp3»
+    - اگر track_number خالی باشد از ترتیب ترک در آلبوم استفاده می‌شود (قبلاً TypeError می‌داد).
+    - کاراکترهای نامعتبر (/ \\ : * ? " < > |) حذف می‌شوند تا داخل زیپ پوشه‌ی اضافه ساخته نشود.
+    - نام تکراری با پسوند (2)، (3) ... یکتا می‌شود.
+    """
+    ext = os.path.splitext(track.audio_file.name)[1].lower()
+    number = track.track_number if track.track_number is not None else position
+
+    title = ZIP_INVALID_NAME_CHARS.sub("-", track.title or "").strip(" .-")
+    title = title[:ZIP_ENTRY_NAME_MAX_LENGTH] or f"track-{track.pk}"
+
+    base = f"{number:02d} - {title}"
+    name = f"{base}{ext}"
+    counter = 2
+    while name.lower() in used_names:
+        name = f"{base} ({counter}){ext}"
+        counter += 1
+    used_names.add(name.lower())
+    return name
+
+
+def _discard_remote_file(name):
+    if not name:
+        return
     try:
-        album = Album.objects.prefetch_related('tracks').get(pk=album_id)
-        zip_export, _ = AlbumZipExport.objects.get_or_create(album=album)
+        default_storage.delete(name)
+    except Exception:
+        logger.error("Could not delete remote zip %s: %s", name, traceback.format_exc())
 
-        AlbumZipExport.objects.filter(pk=zip_export.pk).update(
-            status=AlbumZipExport.StatusChoices.PROCESSING
-        )
 
-        file_name = f"album_{album.id}_{int(timezone.now().timestamp())}.zip"
+def _prepare_zip_export(album, export_id):
+    """
+    رکورد AlbumZipExport مربوط به این اجرا را برمی‌گرداند.
+    اگر رکورد وجود نداشت (مثلاً سیگنال تغییر ترک آن را پاک کرده) یکی جدید ساخته می‌شود.
+    """
+    zip_export = None
+    if export_id:
+        zip_export = AlbumZipExport.objects.filter(pk=export_id, album=album).first()
+    if zip_export is None:
+        zip_export = AlbumZipExport.objects.create(album=album)
+    return zip_export
 
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            local_zip_path = os.path.join(tmp_dir, file_name)
 
-            # -------- ساخت زیپ به‌صورت محلی، با خوندن هر ترک از FTP --------
-            with zipfile.ZipFile(local_zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                for track in album.tracks.filter(status=PublishStatus.PUBLISHED):
-                    if not track.audio_file:
-                        continue
-                    ext = os.path.splitext(track.audio_file.name)[1]
-                    arcname = f"{track.track_number:02d} - {track.title}{ext}"
-                    try:
-                        with default_storage.open(track.audio_file.name, 'rb') as remote_audio:
-                            zip_file.writestr(arcname, remote_audio.read())
-                    except Exception as track_err:
-                        logger.error(
-                            "Could not read track %s for album zip %s: %s",
-                            track.id, album_id, traceback.format_exc(),
-                        )
-                        continue
+@shared_task(bind=True, max_retries=3, default_retry_delay=10, soft_time_limit=1200, time_limit=1300)
+def generate_album_zip_task(self, album_id: int, export_id: int = None):
+    zip_export = None
+    saved_name = None      # فایل آپلودشده روی storage که هنوز نهایی نشده
+    finalized = False
 
-            # -------- آپلود فایل زیپ نهایی به FTP --------
-            remote_zip_name = f"exports/albums/{file_name}"
-            with open(local_zip_path, 'rb') as f:
-                saved_name = default_storage.save(remote_zip_name, File(f))
-
-        AlbumZipExport.objects.filter(pk=zip_export.pk).update(
-            zip_file=saved_name,
-            status=AlbumZipExport.StatusChoices.COMPLETED,
-            created_at=timezone.now(),
-        )
-
-    except Exception as exc:
+    def mark_failed():
         if zip_export is not None:
             AlbumZipExport.objects.filter(pk=zip_export.pk).update(
                 status=AlbumZipExport.StatusChoices.FAILED
             )
-        logger.exception(f"generate_album_zip_task failed for album {album_id}")
-        raise self.retry(exc=exc, countdown=10)
+
+    try:
+        album = Album.objects.get(pk=album_id)
+        zip_export = _prepare_zip_export(album, export_id)
+
+        # created_at را ریست می‌کنیم تا view بتواند رکوردهای PROCESSING قدیمیِ گیرکرده را تشخیص دهد.
+        AlbumZipExport.objects.filter(pk=zip_export.pk).update(
+            status=AlbumZipExport.StatusChoices.PROCESSING,
+            task_id=self.request.id,
+            created_at=timezone.now(),
+            zip_file=None,
+        )
+
+        tracks = [
+            t for t in album.tracks.filter(status=PublishStatus.PUBLISHED).order_by("track_number", "id")
+            if t.audio_file
+        ]
+        if not tracks:
+            raise ValueError("این آلبوم هیچ ترک منتشرشده‌ی دارای فایل صوتی ندارد.")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            local_zip_path = os.path.join(tmp_dir, "album.zip")
+
+            # فایل‌های صوتی از قبل فشرده‌اند (mp3/flac)، پس ZIP_STORED سریع‌تر است و حجم را کم نمی‌کند.
+            # هر ترک به‌صورت استریم (chunk) کپی می‌شود تا کل فایل داخل RAM نیاید.
+            used_names = set()
+            with zipfile.ZipFile(local_zip_path, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as zf:
+                for position, track in enumerate(tracks, start=1):
+                    arcname = _build_zip_entry_name(track, position, used_names)
+                    info = zipfile.ZipInfo(arcname, date_time=time.localtime()[:6])
+                    info.compress_type = zipfile.ZIP_STORED
+                    info.external_attr = 0o644 << 16
+                    try:
+                        with default_storage.open(track.audio_file.name, "rb") as src, \
+                                zf.open(info, "w") as dst:
+                            shutil.copyfileobj(src, dst, ZIP_COPY_CHUNK_SIZE)
+                    except Exception as track_err:
+                        # زیپ ناقص هرگز نباید به کاربر برسد؛ کل عملیات fail می‌شود و retry می‌خورد.
+                        raise RuntimeError(
+                            f"خواندن فایل ترک {track.pk} برای ساخت زیپ ناموفق بود: "
+                            f"{type(track_err).__name__}: {track_err}"
+                        ) from track_err
+
+            local_size = os.path.getsize(local_zip_path)
+            remote_zip_name = f"exports/albums/album_{album.id}_{zip_export.id}_{int(time.time())}.zip"
+            with open(local_zip_path, "rb") as f:
+                saved_name = default_storage.save(remote_zip_name, File(f))
+
+        # مطمئن می‌شویم آپلود کامل بوده (اگر storage از size پشتیبانی کند)
+        try:
+            remote_size = default_storage.size(saved_name)
+        except Exception:
+            remote_size = None
+        if remote_size is not None and remote_size != local_size:
+            raise RuntimeError(
+                f"حجم فایل آپلودشده ({remote_size}) با حجم فایل محلی ({local_size}) برابر نیست."
+            )
+
+        updated = AlbumZipExport.objects.filter(pk=zip_export.pk).update(
+            zip_file=saved_name,
+            status=AlbumZipExport.StatusChoices.COMPLETED,
+            created_at=timezone.now(),
+        )
+        if not updated:
+            # وسط ساخت، ترک‌ها تغییر کرده و سیگنال رکورد را پاک کرده -> این زیپ قدیمی است.
+            raise RuntimeError("رکورد خروجی زیپ در حین ساخت حذف شد (آلبوم تغییر کرده است).")
+        finalized = True
+
+        # زیپ‌های قدیمی همین آلبوم را پاک می‌کنیم تا روی storage انباشته نشوند.
+        for old in AlbumZipExport.objects.filter(album=album).exclude(pk=zip_export.pk).exclude(
+                status__in=[AlbumZipExport.StatusChoices.PENDING, AlbumZipExport.StatusChoices.PROCESSING]):
+            if old.zip_file and old.zip_file.name:
+                _discard_remote_file(old.zip_file.name)
+            old.delete()
+
+    except SoftTimeLimitExceeded:
+        logger.error("generate_album_zip_task soft time limit exceeded for album %s", album_id)
+        if not finalized:
+            _discard_remote_file(saved_name)
+            mark_failed()
+
+    except Album.DoesNotExist:
+        logger.error("generate_album_zip_task: album %s does not exist", album_id)
+
+    except ValueError as ve:
+        # خطای قطعی (مثلاً آلبوم بدون ترک) - retry فایده‌ای ندارد
+        logger.error("generate_album_zip_task validation error for album %s: %s", album_id, ve)
+        mark_failed()
+
+    except Exception as exc:
+        logger.exception("generate_album_zip_task failed for album %s", album_id)
+        if not finalized:
+            _discard_remote_file(saved_name)
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc, countdown=10)
+        mark_failed()
+        raise
