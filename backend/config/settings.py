@@ -33,6 +33,13 @@ FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")
 
 BACKEND_URL= "https://clmusic.ir/"
 
+
+PAYMENT_DOMAIN = env("PAYMENT_DOMAIN", default="https://clmusic.ir")
+
+USE_X_FORWARDED_HOST = True
+USE_X_FORWARDED_PORT = True
+
+
 ALLOWED_HOSTS = ["*"]
 
 

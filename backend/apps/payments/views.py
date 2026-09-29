@@ -1,3 +1,4 @@
+# apps/payments/views.py
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
@@ -96,7 +97,9 @@ class PaymentRequestAPIView(GenericAPIView):
             return Response({"message": "اشتراک شما به صورت رایگان فعال شد.", "is_free": True},
                             status=status.HTTP_200_OK)
 
-        callback_url = request.build_absolute_uri(reverse('payments:verify'))
+        # ساخت آدرس کال‌بک بر اساس دامنه ثبت‌شده در تنظیمات
+        payment_domain = getattr(settings, 'PAYMENT_DOMAIN', 'https://clmusic.ir').rstrip('/')
+        callback_url = f"{payment_domain}{reverse('payments:verify')}"
 
         aqaye_service = AqayePardakhtService()
 

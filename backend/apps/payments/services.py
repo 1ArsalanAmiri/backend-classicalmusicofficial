@@ -7,7 +7,6 @@ logger = logging.getLogger(__name__)
 
 class AqayePardakhtService:
     def __init__(self):
-
         self.pin = getattr(settings, 'AQAYEPARDAKHT_PIN', '')
         self.create_url = "https://panel.aqayepardakht.ir/api/v2/create"
         self.verify_url = "https://panel.aqayepardakht.ir/api/v2/verify"
@@ -23,8 +22,15 @@ class AqayePardakhtService:
             "invoice_id": invoice_id
         }
 
+        # اضافه کردن هدرهای Referer و Origin جهت تایید شاپرک
+        payment_domain = getattr(settings, 'PAYMENT_DOMAIN', 'https://clmusic.ir').rstrip('/')
+        headers = {
+            "Referer": f"{payment_domain}/",
+            "Origin": payment_domain
+        }
+
         try:
-            response = requests.post(self.create_url, data=payload, timeout=10)
+            response = requests.post(self.create_url, data=payload, headers=headers, timeout=10)
             response_data = response.json()
 
             if response_data.get('status') == "success":
