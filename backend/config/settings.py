@@ -29,7 +29,7 @@ SECRET_KEY = env('SECRET_KEY')
 
 DEBUG = env.bool('DEBUG', default=False)
 
-FRONTEND_URL = "http://localhost:3000"
+FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")
 
 BACKEND_URL= "https://clmusic.ir/"
 
