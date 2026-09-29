@@ -247,5 +247,5 @@ class LandingAlbumSerializer(serializers.ModelSerializer):
         if not candidates:
             return None
 
-        chosen = candidates[0]
+        chosen = random.choice(candidates)
         return build_cdn_url(self.context.get('request'), chosen.image.name)

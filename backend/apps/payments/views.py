@@ -3,6 +3,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.shortcuts import redirect
 from django.urls import reverse
+from urllib.parse import quote
 from rest_framework import serializers, status
 from rest_framework.generics import GenericAPIView
 from rest_framework.views import APIView
@@ -12,6 +13,18 @@ from rest_framework.permissions import IsAuthenticated
 from .models import Payment, PaymentStatus, Discount, DiscountUsage
 from .services import AqayePardakhtService
 from apps.subscriptions.models import Subscription
+
+
+def _cancel_redirect(reason: str):
+    frontend_base_url = getattr(settings, 'FRONTEND_URL')
+    return redirect(f"{frontend_base_url}/payments/cancel?reason={quote(reason)}")
+
+
+def _verify_redirect(ref_id: str = ""):
+    frontend_base_url = getattr(settings, 'FRONTEND_URL')
+    if ref_id:
+        return redirect(f"{frontend_base_url}/payments/verify?ref_id={quote(ref_id)}")
+    return redirect(f"{frontend_base_url}/payments/verify")
 
 
 class PaymentRequestSerializer(serializers.Serializer):
@@ -116,24 +129,24 @@ class PaymentVerifyAPIView(APIView):
         authority = request.query_params.get('transid')
         payment_status = request.query_params.get('status')
 
-        frontend_base_url = getattr(settings, 'FRONTEND_URL')
-
         if not authority or not payment_status:
-            return redirect(f"{frontend_base_url}/payment/result?status=failed&message=InvalidRequest")
+            return _cancel_redirect("InvalidRequest")
 
         with transaction.atomic():
             try:
                 payment = Payment.objects.select_for_update().get(authority=authority)
             except Payment.DoesNotExist:
-                return redirect(f"{frontend_base_url}/payment/result?status=failed&message=PaymentNotFound")
+                return _cancel_redirect("PaymentNotFound")
 
-            if payment.status in [PaymentStatus.SUCCESS, PaymentStatus.FAILED, PaymentStatus.CANCELED]:
-                return redirect(f"{frontend_base_url}/payment/result?status={payment.status.lower()}")
+            if payment.status == PaymentStatus.SUCCESS:
+                return _verify_redirect(payment.ref_id)
+            if payment.status in [PaymentStatus.FAILED, PaymentStatus.CANCELED]:
+                return _cancel_redirect(payment.status)
 
             if payment_status == '0':
                 payment.status = PaymentStatus.CANCELED
                 payment.save(update_fields=['status'])
-                return redirect(f"{frontend_base_url}/payment/result?status=canceled")
+                return _cancel_redirect("CanceledByUser")
 
             aqaye_service = AqayePardakhtService()
             verify_response = aqaye_service.verify_payment(
@@ -159,9 +172,9 @@ class PaymentVerifyAPIView(APIView):
                     payment.discount.current_uses += 1
                     payment.discount.save(update_fields=['current_uses'])
 
-                return redirect(f"{frontend_base_url}/payment/result?status=success&ref_id={payment.ref_id}")
+                return _verify_redirect(payment.ref_id)
 
             else:
                 payment.status = PaymentStatus.FAILED
                 payment.save()
-                return redirect(f"{frontend_base_url}/payment/result?status=failed&message=GatewayRejected")
+                return _cancel_redirect("GatewayRejected")
