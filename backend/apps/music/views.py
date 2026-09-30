@@ -704,7 +704,6 @@ class EditorialPlaylistViewSet(AlbumViewSet):
 
 
 class LandingPageView(APIView):
-
     permission_classes = [AllowAny]
 
     @extend_schema(
@@ -743,22 +742,21 @@ class LandingPageView(APIView):
             is_published=True,
         ).order_by('-created_at')[:limit]
 
-        can_watch_videos = HasStreamSubscription().has_permission(request, self)
+        # حذف شرط can_watch_videos و لود کردن لیست ویدیوها برای همه
+        videos = Video.objects.filter(
+            status=PublishStatus.PUBLISHED,
+        ).prefetch_related('artists').order_by('-created_at')[:limit]
 
-        if can_watch_videos:
-            videos = Video.objects.filter(
-                status=PublishStatus.PUBLISHED,
-            ).prefetch_related('artists').order_by('-created_at')[:limit]
+        has_stream = user_has_stream_access(request.user) if request.user.is_authenticated else False
+        has_all = user_has_all_access(request.user) if request.user.is_authenticated else False
 
-            video_context = {
-                **context,
-                'has_stream_access': True,
-                'has_all_access': HasAllSubscription().has_permission(request, self)
-            }
+        video_context = {
+            **context,
+            'has_stream_access': has_stream,
+            'has_all_access': has_all
+        }
 
-            videos_data = LandingVideoSerializer(videos, many=True, context=video_context).data
-        else:
-            videos_data = []
+        videos_data = LandingVideoSerializer(videos, many=True, context=video_context).data
 
         return Response({
             "albums": LandingAlbumSerializer(albums, many=True, context=context).data,

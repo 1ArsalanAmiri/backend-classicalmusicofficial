@@ -82,7 +82,7 @@ class LandingVideoSerializer(serializers.ModelSerializer):
         ]
 
     def get_hls_file(self, obj):
-        has_access = self.context.get('has_all_access', False)
+        has_access = self.context.get('has_stream_access', False)
         if has_access and obj.hls_file:
             return build_cdn_url(self.context.get('request'), obj.hls_file)
         return None
