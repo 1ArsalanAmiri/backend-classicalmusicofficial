@@ -17,12 +17,12 @@ class AqayePardakhtService:
             "pin": self.pin,
             "amount": amount_toman,
             "callback": callback_url,
+            "callback_method": "GET",  # هدایت کاربر با متد GET طبق داکیومنت آقای پرداخت
             "description": description,
             "mobile": mobile,
             "invoice_id": invoice_id
         }
 
-        # اضافه کردن هدرهای Referer و Origin جهت تایید شاپرک
         payment_domain = getattr(settings, 'PAYMENT_DOMAIN', 'https://clmusic.ir').rstrip('/')
         headers = {
             "Referer": f"{payment_domain}/",

@@ -16,22 +16,26 @@ from .services import AqayePardakhtService
 from apps.subscriptions.models import Subscription
 
 
+def _get_frontend_url() -> str:
+    frontend_url = getattr(settings, 'FRONTEND_URL', 'https://clmusic.ir')
+    return str(frontend_url).rstrip('/')
+
+
 def _cancel_redirect(reason: str):
-    frontend_base_url = getattr(settings, 'FRONTEND_URL')
-    return redirect(f"{frontend_base_url}/payments/cancel?reason={quote(reason)}")
+    base_url = _get_frontend_url()
+    return redirect(f"{base_url}/payments/cancel?reason={quote(str(reason))}")
 
 
-def _verify_redirect(ref_id: str = ""):
-    frontend_base_url = getattr(settings, 'FRONTEND_URL')
-    if ref_id:
-        return redirect(f"{frontend_base_url}/payments/verify?ref_id={quote(ref_id)}")
-    return redirect(f"{frontend_base_url}/payments/verify")
+def _verify_redirect(ref_id: str):
+    base_url = _get_frontend_url()
+    return redirect(f"{base_url}/payments/verify?ref_id={quote(str(ref_id))}")
 
 
 class PaymentRequestSerializer(serializers.Serializer):
     subscription_id = serializers.IntegerField(required=True, help_text="شناسه اشتراک")
-    discount_code = serializers.CharField(required=False, allow_null=True, allow_blank=True,
-                                          help_text="کد تخفیف ")
+    discount_code = serializers.CharField(
+        required=False, allow_null=True, allow_blank=True, help_text="کد تخفیف"
+    )
 
 
 class PaymentRequestAPIView(GenericAPIView):
@@ -97,7 +101,6 @@ class PaymentRequestAPIView(GenericAPIView):
             return Response({"message": "اشتراک شما به صورت رایگان فعال شد.", "is_free": True},
                             status=status.HTTP_200_OK)
 
-        # ساخت آدرس کال‌بک بر اساس دامنه ثبت‌شده در تنظیمات
         payment_domain = getattr(settings, 'PAYMENT_DOMAIN', 'https://clmusic.ir').rstrip('/')
         callback_url = f"{payment_domain}{reverse('payments:verify')}"
 
@@ -128,29 +131,38 @@ class PaymentRequestAPIView(GenericAPIView):
 class PaymentVerifyAPIView(APIView):
     permission_classes = []
 
-    def get(self, request, *args, **kwargs):
-        authority = request.query_params.get('transid')
-        payment_status = request.query_params.get('status')
+    def _handle_callback(self, request):
+        # استخراج پارامترها متناسب با متد ارسال شده (GET یا POST)
+        params = request.query_params if request.method == 'GET' else request.data
+        authority = params.get('transid')
+        payment_status = params.get('status')
 
-        if not authority or not payment_status:
+        # ۱. پارامترهای ناقص از گیت‌وی
+        if not authority or payment_status is None:
             return _cancel_redirect("InvalidRequest")
 
         with transaction.atomic():
             try:
                 payment = Payment.objects.select_for_update().get(authority=authority)
             except Payment.DoesNotExist:
+                # ۲. پرداخت پیدا نشد
                 return _cancel_redirect("PaymentNotFound")
 
+            # ۳. callback تکراری برای پرداخت موفق قبلی
             if payment.status == PaymentStatus.SUCCESS:
                 return _verify_redirect(payment.ref_id)
+
+            # ۴. callback تکراری برای پرداخت قبلاً failed یا canceled
             if payment.status in [PaymentStatus.FAILED, PaymentStatus.CANCELED]:
                 return _cancel_redirect(payment.status)
 
-            if payment_status == '0':
+            # ۵. لغو توسط کاربر در درگاه (status=0)
+            if str(payment_status) == '0':
                 payment.status = PaymentStatus.CANCELED
                 payment.save(update_fields=['status'])
                 return _cancel_redirect("CanceledByUser")
 
+            # ۶. استعلام و وریفای از درگاه آقای پرداخت (در صورت status=1)
             aqaye_service = AqayePardakhtService()
             verify_response = aqaye_service.verify_payment(
                 amount_toman=int(payment.amount),
@@ -160,6 +172,7 @@ class PaymentVerifyAPIView(APIView):
             payment.raw_verify = verify_response
 
             if verify_response.get("success"):
+                # ۷. پرداخت موفق اولین‌بار
                 payment.status = PaymentStatus.SUCCESS
                 payment.ref_id = verify_response.get("ref_id", "")
                 payment.card_pan = verify_response.get("card_pan", "")
@@ -179,5 +192,11 @@ class PaymentVerifyAPIView(APIView):
 
             else:
                 payment.status = PaymentStatus.FAILED
-                payment.save()
+                payment.save(update_fields=['status'])
                 return _cancel_redirect("GatewayRejected")
+
+    def get(self, request, *args, **kwargs):
+        return self._handle_callback(request)
+
+    def post(self, request, *args, **kwargs):
+        return self._handle_callback(request)
