@@ -74,7 +74,6 @@ class PaymentRequestAPIView(GenericAPIView):
                     return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
 
                 discount_amount = discount_obj.calculate_discount_amount(base_price)
-                # اطمینان از اینکه مبلغ نهایی در صورت خطای محاسباتی تخفیف، منفی نمی‌شود
                 final_amount = max(0, base_price - discount_amount)
 
             except Discount.DoesNotExist:
@@ -82,7 +81,6 @@ class PaymentRequestAPIView(GenericAPIView):
 
         mobile = getattr(user, 'phone_number', '') or ''
 
-        # قرار دادن ثبت دیتابیس در تراکنش تا در صورت خطا، دیتای ناقص ثبت نشود
         with transaction.atomic():
             payment = Payment.objects.create(
                 user=user,
@@ -94,7 +92,6 @@ class PaymentRequestAPIView(GenericAPIView):
                 description=f"خرید اشتراک {subscription.name} برای {user.username}"
             )
 
-            # پردازش پرداخت‌های رایگان (تخفیف ۱۰۰ درصدی)
             if final_amount <= 0:
                 payment.status = PaymentStatus.SUCCESS
                 payment.verified_at = timezone.now()
@@ -106,7 +103,6 @@ class PaymentRequestAPIView(GenericAPIView):
 
                 if discount_obj:
                     DiscountUsage.objects.create(discount=discount_obj, user=user)
-                    # استفاده از F برای جلوگیری از Race Condition هنگام آپدیت تعداد استفاده
                     discount_obj.current_uses = F('current_uses') + 1
                     discount_obj.save(update_fields=['current_uses'])
 
@@ -115,7 +111,6 @@ class PaymentRequestAPIView(GenericAPIView):
                     status=status.HTTP_200_OK
                 )
 
-        # درخواست به درگاه (این بخش به عمد خارج از transaction قرار گرفته است)
         payment_domain = getattr(settings, 'PAYMENT_DOMAIN', 'https://clmusic.ir').rstrip('/')
         callback_url = f"{payment_domain}{reverse('payments:verify')}"
 
@@ -179,7 +174,6 @@ class PaymentVerifyAPIView(APIView):
                 )
                 return _cancel_redirect(reason)
 
-            # بررسی لغو توسط کاربر
             if payment_status is not None and str(payment_status).strip().lower() in ('0', 'nok', 'nack', 'cancel',
                                                                                       'canceled', 'cancelled', 'false'):
                 payment.status = PaymentStatus.CANCELED
@@ -190,7 +184,6 @@ class PaymentVerifyAPIView(APIView):
                     payment.save(update_fields=['status'])
                 return _cancel_redirect("CanceledByUser")
 
-            # درخواست وریفای به درگاه آقای پرداخت
             aqaye_service = AqayePardakhtService()
             verify_response = aqaye_service.verify_payment(
                 amount_toman=int(payment.amount),
@@ -212,7 +205,6 @@ class PaymentVerifyAPIView(APIView):
 
                 if payment.discount:
                     DiscountUsage.objects.create(discount=payment.discount, user=payment.user)
-                    # استفاده از F برای جلوگیری از Race Condition
                     payment.discount.current_uses = F('current_uses') + 1
                     payment.discount.save(update_fields=['current_uses'])
 
