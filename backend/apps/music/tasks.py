@@ -243,9 +243,6 @@ def process_album_archive_task(self, upload_record_id: int):
                 )
                 continue
 
-        # =====================================================================
-        # مرحله ۲ (موازی): آپلود فایل‌های صوتی به FTP - همزمان، نه یکی‌یکی.
-        # =====================================================================
         tracks_data_list = []
         completed_count = 0
 
@@ -370,7 +367,6 @@ def process_album_archive_task(self, upload_record_id: int):
         if self.request.retries < self.max_retries:
             will_retry = True
             raise self.retry(exc=e, countdown=10)
-        # اگه دیگه retryای نمونده، ادامه میده به finally و پاک میشه.
 
     finally:
         if temp_dir and os.path.exists(temp_dir):
@@ -379,8 +375,6 @@ def process_album_archive_task(self, upload_record_id: int):
             except Exception as cleanup_err:
                 logger.error(f"Failed to delete temp dir {temp_dir}: {cleanup_err}")
 
-        # فایل zip/rar خام رو فقط وقتی پاک می‌کنیم که تسک واقعاً تمومه
-        # (موفق، یا failed نهایی) - نه وسط یه چرخه‌ی retry.
         if not will_retry and upload_record and upload_record.archive_file and upload_record.archive_file.name:
             try:
                 upload_record.archive_file.storage.delete(upload_record.archive_file.name)
@@ -439,12 +433,6 @@ ZIP_ENTRY_NAME_MAX_LENGTH = 120
 
 
 def _build_zip_entry_name(track, position, used_names):
-    """
-    نام فایل داخل زیپ: «01 - عنوان ترک.mp3»
-    - اگر track_number خالی باشد از ترتیب ترک در آلبوم استفاده می‌شود (قبلاً TypeError می‌داد).
-    - کاراکترهای نامعتبر (/ \\ : * ? " < > |) حذف می‌شوند تا داخل زیپ پوشه‌ی اضافه ساخته نشود.
-    - نام تکراری با پسوند (2)، (3) ... یکتا می‌شود.
-    """
     ext = os.path.splitext(track.audio_file.name)[1].lower()
     number = track.track_number if track.track_number is not None else position
 
@@ -471,10 +459,6 @@ def _discard_remote_file(name):
 
 
 def _prepare_zip_export(album, export_id):
-    """
-    رکورد AlbumZipExport مربوط به این اجرا را برمی‌گرداند.
-    اگر رکورد وجود نداشت (مثلاً سیگنال تغییر ترک آن را پاک کرده) یکی جدید ساخته می‌شود.
-    """
     zip_export = None
     if export_id:
         zip_export = AlbumZipExport.objects.filter(pk=export_id, album=album).first()
@@ -486,7 +470,7 @@ def _prepare_zip_export(album, export_id):
 @shared_task(bind=True, max_retries=3, default_retry_delay=10, soft_time_limit=1200, time_limit=1300)
 def generate_album_zip_task(self, album_id: int, export_id: int = None):
     zip_export = None
-    saved_name = None      # فایل آپلودشده روی storage که هنوز نهایی نشده
+    saved_name = None
     finalized = False
 
     def mark_failed():
@@ -499,7 +483,6 @@ def generate_album_zip_task(self, album_id: int, export_id: int = None):
         album = Album.objects.get(pk=album_id)
         zip_export = _prepare_zip_export(album, export_id)
 
-        # created_at را ریست می‌کنیم تا view بتواند رکوردهای PROCESSING قدیمیِ گیرکرده را تشخیص دهد.
         AlbumZipExport.objects.filter(pk=zip_export.pk).update(
             status=AlbumZipExport.StatusChoices.PROCESSING,
             task_id=self.request.id,
@@ -517,8 +500,6 @@ def generate_album_zip_task(self, album_id: int, export_id: int = None):
         with tempfile.TemporaryDirectory() as tmp_dir:
             local_zip_path = os.path.join(tmp_dir, "album.zip")
 
-            # فایل‌های صوتی از قبل فشرده‌اند (mp3/flac)، پس ZIP_STORED سریع‌تر است و حجم را کم نمی‌کند.
-            # هر ترک به‌صورت استریم (chunk) کپی می‌شود تا کل فایل داخل RAM نیاید.
             used_names = set()
             with zipfile.ZipFile(local_zip_path, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as zf:
                 for position, track in enumerate(tracks, start=1):
@@ -542,7 +523,6 @@ def generate_album_zip_task(self, album_id: int, export_id: int = None):
             with open(local_zip_path, "rb") as f:
                 saved_name = default_storage.save(remote_zip_name, File(f))
 
-        # مطمئن می‌شویم آپلود کامل بوده (اگر storage از size پشتیبانی کند)
         try:
             remote_size = default_storage.size(saved_name)
         except Exception:
