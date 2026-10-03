@@ -9,7 +9,7 @@ class VideoListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Video
-        fields = ['id', 'title', 'slug', 'cover_image', 'duration_seconds']
+        fields = ['id', 'title', 'slug', 'cover_image', 'duration_seconds','created_at',]
 
     def get_cover_image(self, obj):
         if not obj.cover_image:
@@ -27,7 +27,7 @@ class VideoDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Video
         fields = [
-            'id', 'title', 'slug', 'artists', 'era', 'recording_year',
+            'id', 'title', 'slug', 'artists', 'era', 'recording_year','created_at',
             'duration_seconds', 'hls_file', 'cover_image', 'view_count', 'likes_count',
             'more_from_artist', 'similar_videos'
         ]
