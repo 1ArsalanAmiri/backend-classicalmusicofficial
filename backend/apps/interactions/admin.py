@@ -8,12 +8,6 @@ User = get_user_model()
 
 
 class CommentReplyInline(admin.TabularInline):
-    """
-    اجازه می‌ده ادمین مستقیماً از داخل صفحه‌ی ویرایش یک کامنت، بهش پاسخ
-    بده - بدون نیاز به دونستن content_type/object_id به‌صورت دستی.
-    user، content_type و object_id توی CommentAdmin.save_formset پر
-    می‌شن (نه اینجا)، چون به شیء کامنتِ والد (form.instance) نیاز دارن.
-    """
     model = Comment
     fk_name = 'parent'
     extra = 1
@@ -146,6 +140,7 @@ class LikeAdmin(admin.ModelAdmin):
     search_fields = ('user__username', 'user__phone_number')
     autocomplete_fields = ['user']
     list_per_page = 50
+    ordering = ('-created_at',)
 
     @admin.display(description="اثر/آلبوم لایک شده")
     def get_related_object(self, obj):
@@ -179,6 +174,7 @@ class FollowAdmin(admin.ModelAdmin):
     search_fields = ('user__username', 'user__phone_number')
     autocomplete_fields = ['user']
     list_per_page = 50
+    ordering = ('-created_at',)
 
     @admin.display(description="آرتیست/لیبل فالو شده")
     def get_related_object(self, obj):
@@ -212,6 +208,7 @@ class BookmarkAdmin(admin.ModelAdmin):
     search_fields = ('user__username', 'user__phone_number')
     autocomplete_fields = ['user']
     list_per_page = 50
+    ordering = ('-created_at',)
 
     @admin.display(description="محتوای ذخیره شده")
     def get_related_object(self, obj):

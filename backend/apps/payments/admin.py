@@ -10,8 +10,8 @@ class PaymentAdmin(admin.ModelAdmin):
     search_fields = ('user__username', 'user__phone_number', 'authority', 'ref_id', 'mobile')
     readonly_fields = ('user', 'subscription', 'amount', 'discount', 'authority', 'ref_id', 'raw_request', 'raw_verify',
                        'verified_at', 'status', 'mobile')
+    ordering = ('-created_at',)
 
-    # جلوگیری از اضافه کردن پرداخت دستی (پرداخت فقط باید از طریق سیستم ایجاد شود)
     def has_add_permission(self, request):
         return False
 
@@ -42,12 +42,14 @@ class DiscountAdmin(admin.ModelAdmin):
     list_display = ('code', 'discount_value', 'max_uses', 'current_uses', 'is_active', 'start_date', 'end_date')
     list_filter = ('is_active', 'start_date', 'end_date')
     search_fields = ('code', 'name')
+    ordering = ('-id',)
 
 
 @admin.register(DiscountUsage)
 class DiscountUsageAdmin(admin.ModelAdmin):
     list_display = ('discount', 'user', 'used_at')
     readonly_fields = ('discount', 'user', 'used_at')
+    ordering = ('-used_at',)
 
     def has_add_permission(self, request):
         return False

@@ -40,7 +40,6 @@ class TrackInlineForLabel(admin.TabularInline):
     classes = ('collapse',)
 
 
-
 # =========================================================
 # Label Admin
 # =========================================================
@@ -51,6 +50,7 @@ class LabelAdmin(admin.ModelAdmin):
     prepopulated_fields = {'slug': ('name',)}
     inlines = [TrackInlineForLabel]
     readonly_fields = ('display_related_albums',)
+    ordering = ('-id',)
 
     fieldsets = (
         ('اطلاعات پایه', {
@@ -119,6 +119,7 @@ class ArtistAdmin(admin.ModelAdmin):
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ("created_at", "updated_at")
     filter_horizontal = ("related_artists",)
+    ordering = ("-created_at",)
 
     fieldsets = (
         (_("اطلاعات پایه"), {
@@ -158,6 +159,7 @@ class TrackAdmin(ExtraButtonsMixin, admin.ModelAdmin):
     autocomplete_fields = ['album', 'genre', 'instrument', 'label']
 
     list_select_related = ['album', 'label']
+    ordering = ['-id']
 
 
     @admin.display(description='آلبوم / سینگل', ordering='album__title')
@@ -181,13 +183,14 @@ class TrackAdmin(ExtraButtonsMixin, admin.ModelAdmin):
 # =========================================================
 @admin.register(Album)
 class AlbumAdmin(admin.ModelAdmin):
-    list_display = ('title', 'title_fa', 'display_main_artists', 'label', 'status', 'display_album_type', 'upload_archive_button', 'display_cover_image')
+    list_display = ('title', 'title_fa', 'created_at', 'label', 'status', 'display_album_type', 'upload_archive_button', 'display_cover_image')
     list_filter = ('status', 'album_type', 'release_year', 'label')
     search_fields = ('title', 'title_fa', 'main_artists__name', 'credits__artist__name', 'label__name')
     prepopulated_fields = {"slug": ("title",)}
     readonly_fields = ("created_at", "updated_at")
     autocomplete_fields = ['main_artists', 'label']
     inlines = [AlbumCreditInline, TrackInline]
+    ordering = ('-created_at',)
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -209,13 +212,6 @@ class AlbumAdmin(admin.ModelAdmin):
             '<span style="white-space: nowrap; display: inline-block;">{}</span>',
             obj.get_album_type_display()
         )
-
-    @admin.display(description=_('آرتیست‌های اصلی'))
-    def display_main_artists(self, obj):
-        artists = obj.main_artists.all()
-        if artists.exists():
-            return ", ".join([artist.name for artist in artists])
-        return "-"
 
     def display_cover_image(self, obj):
         if obj.cover_image:
@@ -300,7 +296,7 @@ class GenreAdmin(admin.ModelAdmin):
     search_fields = ("name", "slug")
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ("created_at", "updated_at")
-    ordering = ("name",)
+    ordering = ("-created_at",)
 
 
 @admin.register(Instrument)
@@ -309,4 +305,4 @@ class InstrumentAdmin(admin.ModelAdmin):
     search_fields = ("name", "slug")
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ("created_at", "updated_at")
-    ordering = ("name",)
+    ordering = ("-created_at",)
