@@ -64,3 +64,10 @@ def update_album_search_vector(sender, instance, update_fields=None, **kwargs):
     Album.objects.filter(pk=instance.pk).update(
         search_vector=SearchVector('title', config='simple') + SearchVector('title_fa', config='simple')
     )
+
+
+@receiver([post_save, post_delete], sender=Album)
+@receiver([post_save, post_delete], sender=Track)
+def invalidate_music_api_cache(sender, instance, **kwargs):
+
+    cache.clear()

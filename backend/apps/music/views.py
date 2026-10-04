@@ -1,62 +1,60 @@
 import mimetypes
 import logging
 import time
+import os
+import tempfile
+import zipfile
+from urllib.parse import quote
+
+from django.shortcuts import get_object_or_404
+from django.db import transaction
+from django.db.models import F, Count, Sum, Prefetch, OuterRef, Exists
+from django.db.models.functions import Coalesce
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page, never_cache
+from django.views.decorators.vary import vary_on_headers
+from django.core.files import File
+from django.utils import timezone
+from django.core.files.storage import default_storage
+from django.contrib.contenttypes.models import ContentType
+from django.http import FileResponse
+from django.core.cache import cache
+from django.db.models.signals import post_save, post_delete
+from django.dispatch import receiver
+
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
-from django.shortcuts import get_object_or_404
-from .models import *
-from .tasks import process_album_archive_task
-from rest_framework import viewsets, filters, status
-from django_filters.rest_framework import DjangoFilterBackend
-from .serializers import *
-from apps.common.pagination import ClassicalMusicPagination
-from apps.common.filters import AlbumFilter, TrackFilter
-from django.db import transaction
-from rest_framework.decorators import action
-from apps.common.permissions import user_has_stream_access, user_has_all_access
-from apps.common.models import PublishStatus
-from django.utils.decorators import method_decorator
-from django.views.decorators.cache import cache_page
+from rest_framework import viewsets, filters, status, permissions
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.viewsets import ReadOnlyModelViewSet
-from apps.interactions.mixins import LikableMixin, FollowableMixin, CommentableMixin
-from django.db.models import F, Count, Sum, Prefetch, OuterRef, Exists
-from django.db.models.functions import Coalesce
-from django.views.decorators.vary import vary_on_headers
-from ..interactions.models import Comment, Like, Follow
-from ..interactions.serializers import CommentSerializer, CommentCreateSerializer
+from rest_framework_simplejwt.authentication import JWTAuthentication
+
+from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 from asgiref.sync import sync_to_async
-from rest_framework.decorators import api_view, permission_classes
-import os
-import tempfile
-import zipfile
-from django.core.files import File
-from django.utils import timezone
-from urllib.parse import quote
-from django.core.files.storage import default_storage
-from django.contrib.contenttypes.models import ContentType
-from .tasks import generate_album_zip_task
 from celery.result import AsyncResult
 from celery.exceptions import TimeoutError as CeleryTimeoutError
-from rest_framework import status, permissions
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from django.views.decorators.cache import never_cache
+
+from .models import *
+from .serializers import *
+from .tasks import process_album_archive_task, generate_album_zip_task
 from apps.common.pagination import ClassicalMusicPagination, LandingPagination
+from apps.common.filters import AlbumFilter, TrackFilter
+from apps.common.permissions import user_has_stream_access, user_has_all_access, HasStreamSubscription, \
+    HasAllSubscription
+from apps.common.models import PublishStatus
+from apps.interactions.mixins import LikableMixin, FollowableMixin, CommentableMixin
 from apps.content.models import Post
 from apps.content.serializers import LandingPostSerializer
 from apps.videos.models import Video
 from apps.videos.serializers import LandingVideoSerializer
-from apps.common.permissions import HasStreamSubscription , HasAllSubscription
-from django.http import FileResponse
-from rest_framework_simplejwt.authentication import JWTAuthentication
-
+from ..interactions.models import Comment, Like, Follow
+from ..interactions.serializers import CommentSerializer, CommentCreateSerializer
 
 logger = logging.getLogger(__name__)
-
 
 DEFAULT_LANDING_LIMIT = 10
 MAX_LANDING_LIMIT = 20
@@ -111,6 +109,7 @@ class AlbumBatchUploadAPIView(APIView):
             "task_id": task.id
         }, status=status.HTTP_202_ACCEPTED)
 
+
 @method_decorator(never_cache, name='dispatch')
 class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
     queryset = Artist.objects.all()
@@ -118,6 +117,10 @@ class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['artist_type', 'era', 'country']
     search_fields = ['name', 'nickname']
+    ordering_fields = ['release_year', 'title', 'created_at']
+    ordering = ['-created_at']
+
+    album_type = AlbumType.OFFICIAL
     lookup_field = 'slug'
 
     def get_queryset(self):
@@ -144,13 +147,19 @@ class ArtistViewSet(FollowableMixin, LikableMixin, ReadOnlyModelViewSet):
             return [IsAuthenticated()]
         return [IsAuthenticated()]
 
+
 @method_decorator(never_cache, name='dispatch')
 class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     pagination_class = ClassicalMusicPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = AlbumFilter
-    search_fields = ['title', 'main_artists__name', 'main_artists__nickname', 'credits__artist__name','credits__artist__nickname']
-    ordering_fields = ['release_year', 'title']
+    search_fields = ['title', 'main_artists__name', 'main_artists__nickname', 'credits__artist__name',
+                     'credits__artist__nickname']
+
+    # اصلاح سیستم مرتب‌سازی برای نمایش جدیدترین‌ها
+    ordering_fields = ['release_year', 'title', 'created_at']
+    ordering = ['-created_at']
+
     lookup_field = 'slug'
     album_type = AlbumType.OFFICIAL
 
@@ -163,7 +172,8 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
             if self.request.method == 'POST':
                 return [IsAuthenticated()]
             return [AllowAny()]
-        # لایک کردن / برداشتن لایک - اکشن واقعی از LikableMixin با اسم like_toggle میاد
+        # لایک کردن / برداشتن لایک
+        # اکشن واقعی از LikableMixin با اسم like_toggle میاد
         elif self.action == 'like_toggle':
             return [IsAuthenticated()]
         # عملیات‌های write مثل ساخت، آپدیت و حذف آلبوم
@@ -198,7 +208,6 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
 
         return qs
 
-
     def get_serializer_context(self):
         context = super().get_serializer_context()
         request = self.request
@@ -224,10 +233,10 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
 
-    ZIP_WAIT_TIMEOUT = 30        # ثانیه؛ حداکثر مدتی که درخواست منتظر ساخت زیپ می‌ماند
-    ZIP_POLL_INTERVAL = 1        # ثانیه
-    ZIP_STALE_AFTER = 30 * 60    # ثانیه؛ رکورد PENDING/PROCESSING قدیمی‌تر از این گیرکرده حساب می‌شود
-    ZIP_RETRY_AFTER = 5          # ثانیه؛ برای هدر Retry-After در پاسخ 202
+    ZIP_WAIT_TIMEOUT = 30  # ثانیه؛ حداکثر مدتی که درخواست منتظر ساخت زیپ می‌ماند
+    ZIP_POLL_INTERVAL = 1  # ثانیه
+    ZIP_STALE_AFTER = 60  # ثانیه؛ رکورد PENDING/PROCESSING قدیمی‌تر از این گیرکرده حساب می‌شود
+    ZIP_RETRY_AFTER = 5  # ثانیه؛ برای هدر Retry-After در پاسخ 202
 
     _ZIP_ACTIVE_STATUSES = (
         AlbumZipExport.StatusChoices.PENDING,
@@ -238,9 +247,10 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
         """
         فایل زیپ را استریم می‌کند. اگر فایل روی storage نبود None برمی‌گرداند
         تا view زیپ جدید بسازد.
-        - نام فایل با as_attachment/filename ساخته می‌شود؛ جنگو خودش نام‌های فارسی/غیر ASCII
-          را درست (filename*=UTF-8'') انکود می‌کند. (quote دستی داخل filename="..." باعث می‌شد
-          مرورگر نام را به‌صورت %D8%A7... نشان دهد.)
+
+        نام فایل با as_attachment/filename ساخته می‌شود؛ جنگو خودش نام‌های فارسی/غیر ASCII
+        را درست (filename*=UTF-8'') انکود می‌کند. (quote دستی داخل filename="..." باعث می‌شد
+        مرورگر نام را به‌صورت %D8%A7... نشان دهد.)
         """
         try:
             file_obj = default_storage.open(zip_export.zip_file.name, 'rb')
@@ -298,7 +308,7 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
         """
         تا ZIP_WAIT_TIMEOUT ثانیه وضعیت رکورد را در دیتابیس چک می‌کند
         (بدون نیاز به result backend و بدون مشکل retry تسک).
-        اگر رکورد حذف شده باشد (آلبوم وسط ساخت تغییر کرده) None برمی‌گرداند.
+        اگر رکورد حذف شده باشد (آلبوم وسط ساخت تغییر کرده) None برمی‌‌گرداند.
         """
         deadline = time.monotonic() + self.ZIP_WAIT_TIMEOUT
         while True:
@@ -323,8 +333,6 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
         response['Retry-After'] = str(self.ZIP_RETRY_AFTER)
         return response
 
-    # authentication_classes: لینک دانلود مستقیم (مرورگر) هدر Authorization نمی‌فرستد؛
-    # مثل stream/download ترک‌ها باید توکن از query-string هم پذیرفته شود: ?token=...
     @action(
         detail=True,
         methods=['get'],
@@ -373,6 +381,7 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
             {"detail": "فایل ZIP در دسترس نیست. لطفاً دوباره تلاش کنید.", "status": "FAILED"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
 
 @method_decorator(never_cache, name='dispatch')
 class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
@@ -448,7 +457,8 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         serializer = self.get_serializer(filtered_queryset, many=True)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated],authentication_classes=[QueryParamJWTAuthentication], url_path='stream')
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated],
+            authentication_classes=[QueryParamJWTAuthentication], url_path='stream')
     def stream(self, request, slug=None):
         track = self.get_object()
         if not track.audio_file:
@@ -465,11 +475,8 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
         response['Content-Disposition'] = f'inline; filename="{quote(safe_filename)}"'
         return response
 
-    # ==============================================================================
-    # متد download در TrackViewSet
-    # ==============================================================================
-
-    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated],authentication_classes=[QueryParamJWTAuthentication], url_path='download')
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated],
+            authentication_classes=[QueryParamJWTAuthentication], url_path='download')
     def download(self, request, slug=None):
         track = self.get_object()
         if not track.audio_file:
@@ -565,6 +572,7 @@ class EraListView(APIView):
             for key, label in EraChoices.choices
         ]
         return Response(eras)
+
 
 @method_decorator(never_cache, name='dispatch')
 class LabelViewSet(FollowableMixin, LikableMixin, viewsets.ReadOnlyModelViewSet):
@@ -742,7 +750,6 @@ class LandingPageView(APIView):
             is_published=True,
         ).order_by('-created_at')[:limit]
 
-        # حذف شرط can_watch_videos و لود کردن لیست ویدیوها برای همه
         videos = Video.objects.filter(
             status=PublishStatus.PUBLISHED,
         ).prefetch_related('artists').order_by('-created_at')[:limit]
@@ -771,3 +778,9 @@ def get_album_and_tracks(album_slug):
     album = get_object_or_404(Album, slug=album_slug)
     tracks = list(album.tracks.select_related())
     return album, tracks
+
+
+@receiver([post_save, post_delete], sender=Album)
+@receiver([post_save, post_delete], sender=Track)
+def invalidate_music_api_cache(sender, instance, **kwargs):
+    cache.clear()
