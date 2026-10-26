@@ -375,3 +375,15 @@ STORAGES = {
         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
     },
 }
+
+
+# ==============================================================================
+# BIG ARCHIVE UPLOAD (album zip/rar up to 10GB)
+# ==============================================================================
+
+MAX_ARCHIVE_UPLOAD_BYTES = 10 * 1024 ** 3  # سقف آپلود آرشیو آلبوم
+
+ARCHIVE_EXTRACT_DIR = env("ARCHIVE_EXTRACT_DIR", default=None)
+
+
+FILE_UPLOAD_TEMP_DIR = env("FILE_UPLOAD_TEMP_DIR", default=None)

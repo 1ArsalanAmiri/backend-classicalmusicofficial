@@ -15,7 +15,7 @@ from django.core.files.base import File
 from django.utils import timezone
 from django.utils.text import slugify
 from django.core.files.base import ContentFile
-from django.db import transaction
+from django.db import transaction, close_old_connections
 from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
 from mutagen import File as MutagenFile
@@ -32,6 +32,33 @@ TRACK_TITLE_MAX_LENGTH = Track._meta.get_field('title').max_length
 TRACK_SLUG_MAX_LENGTH = Track._meta.get_field('slug').max_length
 
 FTP_UPLOAD_CONCURRENCY = 4
+
+AUDIO_EXTENSIONS = (".mp3", ".flac", ".wav", ".m4a")
+
+# پوشه‌ی موقت استخراج. برای آرشیوهای تا ۱۰ گیگ باید روی دیسکی باشد که فضای کافی دارد.
+# در settings.py مقدار ARCHIVE_EXTRACT_DIR را روی یک volume بزرگ بگذارید (اختیاری).
+ARCHIVE_EXTRACT_DIR = getattr(settings, "ARCHIVE_EXTRACT_DIR", None)
+DISK_SAFETY_MARGIN = 1024 ** 3  # ۱ گیگ حاشیه‌ی امن
+
+
+def _extract_audio_members(archive, temp_dir):
+    """
+    فقط فایل‌های صوتی را استخراج می‌کند (نه کل آرشیو) و قبل از شروع، فضای دیسک را چک می‌کند.
+    archive می‌تواند ZipFile یا RarFile باشد (هر دو infolist/extract دارند).
+    """
+    members = [
+        m for m in archive.infolist()
+        if not m.is_dir() and m.filename.lower().endswith(AUDIO_EXTENSIONS)
+    ]
+    needed = sum(m.file_size for m in members)
+    free = shutil.disk_usage(temp_dir).free
+    if needed + DISK_SAFETY_MARGIN > free:
+        raise ValueError(
+            f"فضای دیسک برای استخراج کافی نیست: نیاز به {needed / 1024 ** 3:.1f} گیگ، "
+            f"فضای آزاد {free / 1024 ** 3:.1f} گیگ."
+        )
+    for m in members:
+        archive.extract(m, temp_dir)
 
 
 def _build_unique_track_slug(title: str) -> str:
@@ -53,8 +80,8 @@ def _upload_track_audio(pending_item):
     bind=True,
     max_retries=3,
     default_retry_delay=10,
-    soft_time_limit=2400,   # ۴۰ دقیقه - استخراج+آپلود یه آرشیو بزرگ ممکنه طول بکشه
-    time_limit=2500,
+    soft_time_limit=14400,  # ۴ ساعت - استخراج+آپلود آرشیو تا ۱۰ گیگ
+    time_limit=14700,
 )
 def process_album_archive_task(self, upload_record_id: int):
     temp_dir = None
@@ -69,7 +96,7 @@ def process_album_archive_task(self, upload_record_id: int):
         upload_record.status = "extracting"
         upload_record.save(update_fields=["status"])
 
-        temp_dir = tempfile.mkdtemp()
+        temp_dir = tempfile.mkdtemp(dir=ARCHIVE_EXTRACT_DIR)
 
         # -------- archive_file روی local_scratch_storage است، نه FTP --------
         archive_path = upload_record.archive_file.path
@@ -82,18 +109,21 @@ def process_album_archive_task(self, upload_record_id: int):
         # -------- Extract --------
         if archive_ext == ".zip":
             with zipfile.ZipFile(archive_path, "r") as zip_ref:
-                zip_ref.extractall(temp_dir)
+                _extract_audio_members(zip_ref, temp_dir)
         elif archive_ext == ".rar":
             with rarfile.RarFile(archive_path, "r") as rar_ref:
-                rar_ref.extractall(temp_dir)
+                _extract_audio_members(rar_ref, temp_dir)
         else:
             raise ValueError("فرمت فایل آرشیو پشتیبانی نمی‌شود. فقط zip و rar مجاز است.")
+
+        # استخراج ممکن است طولانی باشد؛ اتصال DB ممکن است در این مدت بسته شده باشد.
+        close_old_connections()
 
         upload_record.status = "processing"
         upload_record.save(update_fields=["status"])
 
         # -------- Collect audio files --------
-        audio_extensions = (".mp3", ".flac", ".wav", ".m4a")
+        audio_extensions = AUDIO_EXTENSIONS
         audio_files = [
             os.path.join(root, f)
             for root, _, files in os.walk(temp_dir)
@@ -270,6 +300,9 @@ def process_album_archive_task(self, upload_record_id: int):
                         progress = int((completed_count / total_files) * 90)
                         AlbumArchiveUpload.objects.filter(id=upload_record_id).update(progress=progress)
 
+        # آپلود به FTP طولانی بوده؛ قبل از کار با DB اتصال را بررسی/تازه می‌کنیم.
+        close_old_connections()
+
         # -------- Database Save (Optimized Bulk Insert/Update) --------
         bulk_save_succeeded = False
         if tracks_data_list:
@@ -348,6 +381,16 @@ def process_album_archive_task(self, upload_record_id: int):
                 )
 
         upload_record.save(update_fields=["status", "progress", "error_log"])
+
+    except SoftTimeLimitExceeded:
+        # SoftTimeLimitExceeded از Exception ارث می‌برد؛ بدون این بلاک وارد retry می‌شد و
+        # کل استخراج/آپلود (و ترک‌های تکراری) از اول تکرار می‌شد.
+        close_old_connections()
+        logger.error(f"Soft time limit exceeded in task {upload_record_id}")
+        if upload_record:
+            upload_record.status = "failed"
+            upload_record.error_log = "زمان پردازش آرشیو بیش از حد مجاز شد (Time limit)."
+            upload_record.save(update_fields=["status", "error_log"])
 
     except ValueError as ve:
         if upload_record:

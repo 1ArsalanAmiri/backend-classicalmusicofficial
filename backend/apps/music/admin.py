@@ -1,4 +1,9 @@
+import os
+
+from django.conf import settings
 from django.contrib import admin, messages
+from django.core.exceptions import PermissionDenied
+from django.http import Http404
 from django.urls import path
 from django.utils.html import format_html, mark_safe
 from django.utils.translation import gettext_lazy as _
@@ -12,6 +17,9 @@ from .models import (Artist, Album, Track, AlbumArchiveUpload, ArchiveUploadStat
                      Genre, Instrument, Label, AlbumCredit)
 from .tasks import process_album_archive_task
 from .models import AlbumType
+
+ALLOWED_ARCHIVE_EXTENSIONS = (".zip", ".rar")
+MAX_ARCHIVE_UPLOAD_BYTES = getattr(settings, "MAX_ARCHIVE_UPLOAD_BYTES", 10 * 1024 ** 3)  # ۱۰ گیگ
 
 # =========================================================
 # Inlines
@@ -249,10 +257,23 @@ class AlbumAdmin(admin.ModelAdmin):
 
     def batch_upload_view(self, request, album_id):
         album = self.get_object(request, album_id)
+        if album is None:
+            raise Http404("آلبوم یافت نشد.")
+        if not self.has_change_permission(request, album):
+            raise PermissionDenied
+
         if request.method == 'POST':
             archive_file = request.FILES.get('archive_file')
             if not archive_file:
                 return JsonResponse({'error': 'No file provided.'}, status=400)
+
+            # اعتبارسنجی زودهنگام: قبل از ساخت رکورد و ارسال تسک به Celery
+            ext = os.path.splitext(archive_file.name)[1].lower()
+            if ext not in ALLOWED_ARCHIVE_EXTENSIONS:
+                return JsonResponse({'error': 'فرمت فایل پشتیبانی نمی‌شود. فقط zip و rar مجاز است.'}, status=400)
+            if archive_file.size > MAX_ARCHIVE_UPLOAD_BYTES:
+                limit_gb = MAX_ARCHIVE_UPLOAD_BYTES / 1024 ** 3
+                return JsonResponse({'error': f'حجم فایل بیشتر از سقف مجاز ({limit_gb:.0f} گیگابایت) است.'}, status=413)
 
             upload_record = AlbumArchiveUpload.objects.create(
                 album=album,
@@ -261,8 +282,9 @@ class AlbumAdmin(admin.ModelAdmin):
                 progress=0
             )
             task = process_album_archive_task.delay(upload_record.id)
-            upload_record.task_id = task.id
-            upload_record.save()
+            # فقط task_id را آپدیت می‌کنیم؛ save() کامل ممکن بود status/progress که تسک
+            # همین حالا تغییر داده را به PENDING/0 برگرداند (race با Celery).
+            AlbumArchiveUpload.objects.filter(pk=upload_record.pk).update(task_id=task.id)
 
             progress_url = reverse('admin:album_upload_progress', args=[upload_record.id])
             return JsonResponse({
