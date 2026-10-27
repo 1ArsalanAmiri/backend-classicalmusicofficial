@@ -156,7 +156,7 @@ class AlbumDetailSerializer(serializers.ModelSerializer):
     total_duration_ms = serializers.IntegerField(source='annotated_total_duration_ms', read_only=True)
     on_this_album = serializers.SerializerMethodField()
     main_artists = ArtistBasicSerializer(many=True, read_only=True)
-    label = serializers.SlugRelatedField(slug_field='slug', read_only=True)
+    label = serializers.SlugRelatedField(slug_field='name', read_only=True)
     is_liked = serializers.BooleanField(read_only=True, default=False)
     cover_image = CDNImageField(read_only=True)
 

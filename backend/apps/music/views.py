@@ -1,5 +1,6 @@
 import mimetypes
 import logging
+import re
 import time
 import os
 import tempfile
@@ -17,7 +18,7 @@ from django.core.files import File
 from django.utils import timezone
 from django.core.files.storage import default_storage
 from django.contrib.contenttypes.models import ContentType
-from django.http import FileResponse
+from django.http import FileResponse, HttpResponse, StreamingHttpResponse
 from django.core.cache import cache
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
@@ -58,6 +59,118 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_LANDING_LIMIT = 10
 MAX_LANDING_LIMIT = 20
+
+
+# ---------------------------------------------------------------------------
+# Audio streaming with HTTP Range support (seek در پلیر)
+# ---------------------------------------------------------------------------
+AUDIO_CHUNK_SIZE = 256 * 1024
+_RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
+
+
+def parse_byte_range(range_header, file_size):
+    if not range_header or not file_size:
+        return None
+
+    match = _RANGE_RE.match(range_header.strip())
+    if not match:
+        return None
+
+    first, last = match.groups()
+    if first == "" and last == "":
+        return None
+
+    if first == "":  # suffix: bytes=-500 یعنی ۵۰۰ بایت آخر
+        suffix = int(last)
+        if suffix == 0:
+            raise ValueError("unsatisfiable range")
+        return max(file_size - suffix, 0), file_size - 1
+
+    start = int(first)
+    if start >= file_size:
+        raise ValueError("unsatisfiable range")
+    end = min(int(last), file_size - 1) if last else file_size - 1
+    if end < start:
+        return None
+    return start, end
+
+
+async def _iter_file_range(file_obj, start, length, chunk_size=AUDIO_CHUNK_SIZE):
+    read = sync_to_async(file_obj.read, thread_sensitive=False)
+    try:
+        if start:
+            try:
+                await sync_to_async(file_obj.seek, thread_sensitive=False)(start)
+            except (AttributeError, OSError, ValueError):
+                # استوریج از seek پشتیبانی نمی‌کند؛ بایت‌های ابتدایی را می‌خوانیم و دور می‌ریزیم
+                skipped = 0
+                while skipped < start:
+                    data = await read(min(chunk_size, start - skipped))
+                    if not data:
+                        return
+                    skipped += len(data)
+
+        remaining = length
+        while remaining > 0:
+            data = await read(min(chunk_size, remaining))
+            if not data:
+                break
+            remaining -= len(data)
+            yield data
+    finally:
+        try:
+            await sync_to_async(file_obj.close, thread_sensitive=False)()
+        except Exception:
+            pass
+
+
+def build_audio_range_response(request, file_name, default_content_type, disposition):
+    content_type, _enc = mimetypes.guess_type(file_name)
+    content_type = content_type or default_content_type
+
+    try:
+        file_size = default_storage.size(file_name)
+    except Exception:
+        file_size = None
+
+    file_obj = default_storage.open(file_name, 'rb')
+
+    if not file_size:
+        # اندازه مشخص نیست؛ مثل قبل بدون Range
+        response = FileResponse(file_obj, content_type=content_type)
+        response['Content-Disposition'] = disposition
+        return response
+
+    byte_range = None
+    if not request.headers.get('If-Range'):
+        try:
+            byte_range = parse_byte_range(request.headers.get('Range'), file_size)
+        except ValueError:
+            file_obj.close()
+            response = HttpResponse(status=416)
+            response['Content-Range'] = f'bytes */{file_size}'
+            response['Accept-Ranges'] = 'bytes'
+            return response
+
+    if byte_range:
+        start, end = byte_range
+        status_code = 206
+    else:
+        start, end = 0, file_size - 1
+        status_code = 200
+    length = end - start + 1
+
+    response = StreamingHttpResponse(
+        _iter_file_range(file_obj, start, length),
+        status=status_code,
+        content_type=content_type,
+    )
+    response['Content-Length'] = str(length)
+    response['Accept-Ranges'] = 'bytes'
+    response['Content-Disposition'] = disposition
+    if status_code == 206:
+        response['Content-Range'] = f'bytes {start}-{end}/{file_size}'
+    return response
 
 
 class QueryParamJWTAuthentication(JWTAuthentication):
@@ -156,7 +269,6 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     search_fields = ['title', 'main_artists__name', 'main_artists__nickname', 'credits__artist__name',
                      'credits__artist__nickname']
 
-    # اصلاح سیستم مرتب‌سازی برای نمایش جدیدترین‌ها
     ordering_fields = ['release_year', 'title', 'created_at']
     ordering = ['-created_at']
 
@@ -166,17 +278,12 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ['list', 'retrieve']:
             return [AllowAny()]
-        # در بخش کامنت، فقط دیدن کامنت‌ها آزاده اما ارسالش توکن می‌خواد
-        # نکته: اکشن کامنت از CommentableMixin میاد و اسمش manage_comments هست، نه comments
         elif self.action == 'manage_comments':
             if self.request.method == 'POST':
                 return [IsAuthenticated()]
             return [AllowAny()]
-        # لایک کردن / برداشتن لایک
-        # اکشن واقعی از LikableMixin با اسم like_toggle میاد
         elif self.action == 'like_toggle':
             return [IsAuthenticated()]
-        # عملیات‌های write مثل ساخت، آپدیت و حذف آلبوم
         return [IsAuthenticated()]
 
     def get_queryset(self):
@@ -201,8 +308,7 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
             )
             qs = qs.annotate(is_liked=Exists(liked_subquery))
 
-        # 🟢 تغییر هوشمندانه: اگر در اکشن download_zip هستیم، فیلتر نوع آلبوم
-        # برداشته می‌شود تا پلی‌لیست‌های ادیتوریال هم توسط اسلاگ پیدا شوند.
+
         if getattr(self, 'action', None) != 'download_zip':
             qs = qs.filter(album_type=self.album_type)
 
@@ -244,14 +350,7 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
     )
 
     def _serve_zip_file(self, album, zip_export):
-        """
-        فایل زیپ را استریم می‌کند. اگر فایل روی storage نبود None برمی‌گرداند
-        تا view زیپ جدید بسازد.
 
-        نام فایل با as_attachment/filename ساخته می‌شود؛ جنگو خودش نام‌های فارسی/غیر ASCII
-        را درست (filename*=UTF-8'') انکود می‌کند. (quote دستی داخل filename="..." باعث می‌شد
-        مرورگر نام را به‌صورت %D8%A7... نشان دهد.)
-        """
         try:
             file_obj = default_storage.open(zip_export.zip_file.name, 'rb')
         except Exception:
@@ -271,10 +370,6 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
         return (timezone.now() - zip_export.created_at).total_seconds() > self.ZIP_STALE_AFTER
 
     def _get_or_start_zip_export(self, album):
-        """
-        آخرین خروجی قابل‌استفاده را برمی‌گرداند یا در صورت نیاز یک تسک جدید می‌سازد.
-        قفل روی ردیف آلبوم باعث می‌شود چند درخواست هم‌زمان چند تسک تکراری نسازند.
-        """
         with transaction.atomic():
             Album._base_manager.select_for_update().get(pk=album.pk)
 
@@ -305,11 +400,7 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
             return zip_export
 
     def _wait_for_zip_export(self, zip_export_id):
-        """
-        تا ZIP_WAIT_TIMEOUT ثانیه وضعیت رکورد را در دیتابیس چک می‌کند
-        (بدون نیاز به result backend و بدون مشکل retry تسک).
-        اگر رکورد حذف شده باشد (آلبوم وسط ساخت تغییر کرده) None برمی‌‌گرداند.
-        """
+
         deadline = time.monotonic() + self.ZIP_WAIT_TIMEOUT
         while True:
             zip_export = AlbumZipExport.objects.filter(pk=zip_export_id).first()
@@ -350,7 +441,6 @@ class AlbumViewSet(CommentableMixin, LikableMixin, viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        # حداکثر دو تلاش: اگر فایل زیپ ثبت‌شده واقعاً روی storage نبود، یک‌بار از نو ساخته می‌شود.
         for _attempt in range(2):
             zip_export = self._get_or_start_zip_export(album)
 
@@ -468,12 +558,12 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
                             status=status.HTTP_403_FORBIDDEN)
 
         safe_filename = os.path.basename(track.audio_file.name)
-        content_type, _ = mimetypes.guess_type(track.audio_file.name)
-
-        file_obj = default_storage.open(track.audio_file.name, 'rb')
-        response = FileResponse(file_obj, content_type=content_type or 'audio/mpeg')
-        response['Content-Disposition'] = f'inline; filename="{quote(safe_filename)}"'
-        return response
+        return build_audio_range_response(
+            request,
+            track.audio_file.name,
+            default_content_type='audio/mpeg',
+            disposition=f'inline; filename="{quote(safe_filename)}"',
+        )
 
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated],
             authentication_classes=[QueryParamJWTAuthentication], url_path='download')
@@ -485,13 +575,13 @@ class TrackViewSet(LikableMixin, ReadOnlyModelViewSet):
             return Response({"detail": "شما اشتراک فعال برای دانلود این آهنگ را ندارید."},
                             status=status.HTTP_403_FORBIDDEN)
 
-        content_type, _ = mimetypes.guess_type(track.audio_file.name)
         safe_filename = quote(track.audio_file.name.split("/")[-1])
-
-        file_obj = default_storage.open(track.audio_file.name, 'rb')
-        response = FileResponse(file_obj, content_type=content_type or 'application/octet-stream')
-        response['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
-        return response
+        return build_audio_range_response(
+            request,
+            track.audio_file.name,
+            default_content_type='application/octet-stream',
+            disposition=f'attachment; filename="{safe_filename}"',
+        )
 
     @action(detail=False, methods=["get"], url_path="chosen")
     def chosen(self, request):
