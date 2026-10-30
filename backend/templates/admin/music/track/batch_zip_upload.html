@@ -37,12 +37,15 @@
         </div>
         <div class="status-text" id="status-text">در حال آپلود فایل...</div>
         <div class="error-box" id="error-box"></div>
+        <button type="button" id="retry-btn" class="button" style="display: none; margin-top: 10px;">ادامه‌ی آپلود</button>
     </div>
 </div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    const CHUNK_URL = "{% url 'admin:album_chunk_upload' album.id %}";
     const MAX_BYTES = 10 * 1024 * 1024 * 1024; // ۱۰ گیگابایت
+    const MAX_RETRIES = 12;
     const MAX_POLL_FAILURES = 5;
     const STATUS_LABELS = {
         pending: 'در صف پردازش',
@@ -58,11 +61,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const statusText = document.getElementById('status-text');
     const errorBox = document.getElementById('error-box');
     const fileInput = document.getElementById('archive_file');
+    const retryBtn = document.getElementById('retry-btn');
 
     let uploading = false;
-    let lastLoaded = 0;
 
-    // تا وقتی آپلود در جریان است، بستن/رفرش صفحه هشدار بدهد
     window.addEventListener('beforeunload', function(e) {
         if (uploading) {
             e.preventDefault();
@@ -70,7 +72,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // تابع برای گرفتن توکن CSRF از کوکی
     function getCookie(name) {
         let cookieValue = null;
         if (document.cookie && document.cookie !== '') {
@@ -92,22 +93,215 @@ document.addEventListener('DOMContentLoaded', function() {
         return (bytes / 1024 / 1024).toFixed(1) + ' MB';
     }
 
-    function describeHttpError(status) {
-        if (status === 413) return 'خطای 413: حجم فایل از سقف مجاز سرور (nginx یا CDN) بیشتر است.';
-        if (status === 403) return 'خطای 403: نشست یا توکن CSRF منقضی شده یا دسترسی ندارید. صفحه را رفرش کنید و دوباره وارد شوید.';
-        if (status === 502 || status === 503 || status === 504) return 'خطای ' + status + ': سرور برنامه پاسخ نداد یا تایم‌اوت شد.';
-        if (status === 500) return 'خطای 500: خطای داخلی سرور (لاگ backend و nginx را بررسی کنید).';
-        return 'خطای سرور: ' + status;
+    function formatDuration(seconds) {
+        if (!isFinite(seconds) || seconds < 0) return '—';
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
+        return (h ? h + ' ساعت ' : '') + (m ? m + ' دقیقه ' : '') + (h ? '' : s + ' ثانیه');
+    }
+
+    // ===================== BEGIN-CORE =====================
+    // منطق آپلود تکه‌تکه؛ مستقل از DOM (وابستگی‌ها از d تزریق می‌شوند).
+    async function callWithRetry(fn, d, label) {
+        let attempt = 0;
+        for (;;) {
+            let res;
+            try {
+                res = await fn();
+            } catch (e) {
+                res = {network: true};
+            }
+            if (!res.network && res.status >= 200 && res.status < 300) return res;
+            if (!res.network && res.status === 409) return res;  // هم‌گام‌سازی؛ caller رسیدگی می‌کند
+            const fatal = !res.network && res.status >= 400 && res.status < 500 &&
+                          res.status !== 408 && res.status !== 429;
+            if (fatal) {
+                const err = new Error((res.data && res.data.error) || ('خطای سرور: ' + res.status));
+                err.fatal = true;
+                throw err;
+            }
+            attempt += 1;
+            if (attempt > d.maxRetries) {
+                throw new Error('ارتباط با سرور برقرار نشد (' + label + ').');
+            }
+            d.onStatus(label + ': خطای موقت، تلاش مجدد ' + attempt + ' از ' + d.maxRetries + '...');
+            await d.sleep(Math.min(2000 * Math.pow(2, attempt - 1), 30000));
+        }
+    }
+
+    async function uploadInChunks(file, d) {
+        const key = 'archive-upload:' + d.albumId + ':' + file.name + ':' + file.size + ':' + file.lastModified;
+        let uploadId = d.storage.get(key);
+        let offset = 0;
+        let chunkSize = 0;
+
+        if (uploadId) {  // ازسرگیری یک آپلود نیمه‌کاره
+            let st = null;
+            try { st = await d.api.status(uploadId); } catch (e) { st = null; }
+            if (st && st.status === 200 && st.data && st.data.ok) {
+                offset = st.data.received;
+                chunkSize = st.data.chunk_size;
+                d.onStatus('ادامه‌ی آپلود قبلی از ' + Math.round(offset / 1024 / 1024) + ' مگابایت...');
+            } else {
+                uploadId = null;
+                d.storage.remove(key);
+            }
+        }
+        if (!uploadId) {
+            const init = await callWithRetry(() => d.api.init(file), d, 'آماده‌سازی');
+            if (!init.data || !init.data.upload_id) {
+                const err = new Error((init.data && init.data.error) || 'شروع آپلود ناموفق بود.');
+                err.fatal = true;
+                throw err;
+            }
+            uploadId = init.data.upload_id;
+            chunkSize = init.data.chunk_size;
+            d.storage.set(key, uploadId);
+        }
+
+        let syncs = 0;
+        for (;;) {
+            while (offset < file.size) {
+                const base = offset;
+                const end = Math.min(base + chunkSize, file.size);
+                const res = await callWithRetry(
+                    () => d.api.chunk(uploadId, base, file.slice(base, end), loaded => d.onProgress(base + loaded)),
+                    d, 'ارسال');
+                if (res.status === 409) {
+                    if (++syncs > 50) throw new Error('هم‌گام‌سازی با سرور ناموفق بود.');
+                    offset = res.data.received;
+                } else {
+                    if (!(res.data.received > base)) throw new Error('پاسخ نامعتبر از سرور.');
+                    offset = res.data.received;
+                }
+                d.onProgress(offset);
+            }
+            d.onStatus('آپلود تمام شد؛ در حال نهایی‌سازی فایل روی سرور...');
+            const done = await callWithRetry(() => d.api.complete(uploadId), d, 'نهایی‌سازی');
+            if (done.status === 409) {  // سرور می‌گوید هنوز کامل نیست؛ از همان‌جا ادامه می‌دهیم
+                if (++syncs > 50) throw new Error('هم‌گام‌سازی با سرور ناموفق بود.');
+                offset = done.data.received;
+                continue;
+            }
+            d.storage.remove(key);
+            return done.data;
+        }
+    }
+    // ====================== END-CORE ======================
+
+    // ---------- وابستگی‌های واقعی مرورگر ----------
+    function parseResponse(response) {
+        return response.json().then(
+            function(data) { return {status: response.status, data: data}; },
+            function() { return {status: response.status, data: null}; }
+        );
+    }
+
+    function postFetch(fields) {
+        const fd = new FormData();
+        Object.keys(fields).forEach(function(k) { fd.append(k, fields[k]); });
+        return fetch(CHUNK_URL, {
+            method: 'POST', body: fd, credentials: 'same-origin', headers: {'X-CSRFToken': csrftoken}
+        }).then(parseResponse);
+    }
+
+    function postChunk(uploadId, offset, blob, onProgress) {
+        return new Promise(function(resolve, reject) {
+            const fd = new FormData();
+            fd.append('action', 'chunk');
+            fd.append('upload_id', uploadId);
+            fd.append('offset', offset);
+            fd.append('chunk', blob, 'chunk');
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', CHUNK_URL, true);
+            xhr.setRequestHeader('X-CSRFToken', csrftoken);
+            xhr.timeout = 5 * 60 * 1000;
+            xhr.upload.onprogress = function(e) { if (e.lengthComputable) onProgress(e.loaded); };
+            xhr.onload = function() {
+                let data = null;
+                try { data = JSON.parse(xhr.responseText); } catch (e) {}
+                resolve({status: xhr.status, data: data});
+            };
+            xhr.onerror = function() { reject(new Error('network')); };
+            xhr.ontimeout = function() { reject(new Error('timeout')); };
+            xhr.send(fd);
+        });
+    }
+
+    const api = {
+        status: function(uploadId) {
+            return fetch(CHUNK_URL + '?upload_id=' + encodeURIComponent(uploadId), {credentials: 'same-origin'})
+                .then(parseResponse);
+        },
+        init: function(file) { return postFetch({action: 'init', filename: file.name, size: file.size}); },
+        chunk: postChunk,
+        complete: function(uploadId) { return postFetch({action: 'complete', upload_id: uploadId}); }
+    };
+
+    const storage = {
+        get: function(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+        set: function(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+        remove: function(k) { try { localStorage.removeItem(k); } catch (e) {} }
+    };
+
+    function startUpload(file) {
+        uploadForm.style.display = 'none';
+        progressContainer.style.display = 'block';
+        retryBtn.style.display = 'none';
+        errorBox.style.display = 'none';
+        statusText.style.color = '';
+        progressBar.style.backgroundColor = '#007bff';
+
+        const startedAt = Date.now();
+        let startOffset = null;
+        uploading = true;
+
+        const deps = {
+            api: api,
+            storage: storage,
+            albumId: {{ album.id }},
+            maxRetries: MAX_RETRIES,
+            sleep: function(ms) { return new Promise(function(r) { setTimeout(r, ms); }); },
+            onStatus: function(msg) { statusText.textContent = msg; },
+            onProgress: function(sent) {
+                if (startOffset === null) startOffset = sent;
+                const pct = Math.min(100, Math.floor(sent / file.size * 100));
+                progressBar.style.width = pct + '%';
+                progressBar.textContent = pct + '%';
+                const elapsed = (Date.now() - startedAt) / 1000;
+                const speed = elapsed > 2 ? (sent - startOffset) / elapsed : 0;
+                const eta = speed > 0 ? (file.size - sent) / speed : NaN;
+                statusText.textContent = 'در حال آپلود... ' + formatSize(sent) + ' از ' + formatSize(file.size) +
+                    (speed ? ' — ' + (speed / 1024 / 1024).toFixed(2) + ' MB/s' : '') +
+                    (isFinite(eta) ? ' — باقی‌مانده: ' + formatDuration(eta) : '');
+            }
+        };
+
+        uploadInChunks(file, deps).then(function(data) {
+            uploading = false;
+            statusText.textContent = 'آپلود کامل شد. در انتظار پردازش...';
+            progressBar.style.backgroundColor = '#ffc107';
+            progressBar.style.width = '0%';
+            progressBar.textContent = '0%';
+            pollCeleryProgress(data.progress_url);
+        }).catch(function(err) {
+            uploading = false;
+            showError((err && err.message ? err.message : 'خطای نامشخص') +
+                '\nآپلود تا همین‌جا روی سرور ذخیره شده است؛ با «ادامه‌ی آپلود» از همان نقطه ادامه می‌یابد.');
+            if (!err || !err.fatal) {
+                retryBtn.style.display = 'inline-block';
+                retryBtn.onclick = function() { startUpload(file); };
+            }
+        });
     }
 
     uploadForm.addEventListener('submit', function(event) {
-        event.preventDefault(); // جلوگیری از ارسال عادی فرم
-
+        event.preventDefault();
         if (fileInput.files.length === 0) {
             alert('لطفا یک فایل را انتخاب کنید.');
             return;
         }
-
         const file = fileInput.files[0];
         const lowerName = file.name.toLowerCase();
         if (!lowerName.endsWith('.zip') && !lowerName.endsWith('.rar')) {
@@ -118,78 +312,7 @@ document.addEventListener('DOMContentLoaded', function() {
             alert('حجم فایل (' + formatSize(file.size) + ') بیشتر از سقف مجاز ۱۰ گیگابایت است.');
             return;
         }
-
-        const formData = new FormData(uploadForm);
-
-        // مخفی کردن فرم و نمایش نوار پیشرفت
-        uploadForm.style.display = 'none';
-        progressContainer.style.display = 'block';
-
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', uploadForm.action, true);
-        xhr.setRequestHeader('X-CSRFToken', csrftoken);
-        xhr.timeout = 0; // بدون محدودیت زمانی سمت مرورگر
-
-        uploading = true;
-        lastLoaded = 0;
-
-        // رویداد برای نمایش پیشرفت آپلود فایل به سرور
-        xhr.upload.onprogress = function(e) {
-            lastLoaded = e.loaded;
-            if (e.lengthComputable) {
-                const percentComplete = Math.round((e.loaded / e.total) * 100);
-                progressBar.style.width = percentComplete + '%';
-                progressBar.textContent = percentComplete + '%';
-                statusText.textContent = 'در حال آپلود فایل به سرور... (' +
-                    formatSize(e.loaded) + ' از ' + formatSize(e.total) + ')';
-            }
-        };
-
-        // ارسال از سمت مرورگر تمام شد؛ سرور هنوز باید فایل را بگیرد و ذخیره کند
-        xhr.upload.onload = function() {
-            statusText.textContent = 'ارسال تمام شد؛ سرور در حال دریافت و ذخیره فایل است. ' +
-                'برای فایل‌های بزرگ ممکن است چند دقیقه طول بکشد، صفحه را نبندید...';
-        };
-
-        // رویداد پس از دریافت پاسخ سرور
-        xhr.onload = function() {
-            uploading = false;
-
-            let data = null;
-            try {
-                data = JSON.parse(xhr.responseText);
-            } catch (e) {
-                console.error('Response Parsing Error:', e, xhr.responseText);
-            }
-
-            if (xhr.status === 200 && data && data.success) {
-                statusText.textContent = 'آپلود کامل شد. در انتظار پردازش...';
-                progressBar.style.backgroundColor = '#ffc107';
-                progressBar.style.width = '0%';
-                progressBar.textContent = '0%';
-                pollCeleryProgress(data.progress_url);
-            } else if (data && data.error) {
-                showError(data.error);
-            } else if (xhr.status === 200) {
-                showError('پاسخ نامعتبر از سرور (ممکن است سرور کرش کرده باشد).');
-            } else {
-                showError(describeHttpError(xhr.status));
-                console.error('Server Error:', xhr.status, xhr.responseText);
-            }
-        };
-
-        xhr.onerror = function() {
-            uploading = false;
-            showError(
-                'اتصال وسط آپلود قطع شد (پس از ارسال ' + formatSize(lastLoaded) + ' از ' +
-                formatSize(file.size) + ').\n' +
-                'اگر این عدد تقریباً صفر است، معمولاً سرور/nginx/CDN درخواست را به‌دلیل سقف حجم یا پر بودن دیسک رد کرده؛ ' +
-                'اگر وسط راه است، احتمالاً اینترنت شما قطع شده یا تایم‌اوت شده.\n' +
-                'کد دقیق را در تب Network مرورگر (DevTools) ببینید.'
-            );
-        };
-
-        xhr.send(formData);
+        startUpload(file);
     });
 
     function pollCeleryProgress(progressUrl) {
@@ -205,21 +328,21 @@ document.addEventListener('DOMContentLoaded', function() {
                     const status = String(data.status || '').toLowerCase();
                     const label = STATUS_LABELS[status] || data.status;
 
-                    progressBar.style.backgroundColor = '#17a2b8'; // رنگ آبی برای پردازش
+                    progressBar.style.backgroundColor = '#17a2b8';
                     progressBar.style.width = data.progress + '%';
                     progressBar.textContent = data.progress + '%';
                     statusText.textContent = 'وضعیت پردازش: ' + label;
 
                     if (status === 'completed') {
                         clearInterval(interval);
-                        progressBar.style.backgroundColor = '#28a745'; // سبز برای موفقیت
+                        progressBar.style.backgroundColor = '#28a745';
                         progressBar.style.width = '100%';
                         progressBar.textContent = '100%';
                         statusText.textContent = 'پردازش با موفقیت به پایان رسید!';
                         statusText.style.color = '#28a745';
                         if (data.error_log) {
                             errorBox.style.display = 'block';
-                            errorBox.textContent = data.error_log; // هشدارهای جزئی
+                            errorBox.textContent = data.error_log;
                         }
                     } else if (status === 'failed' || status === 'error') {
                         clearInterval(interval);
@@ -227,7 +350,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 })
                 .catch(err => {
-                    // پردازش ممکن است ساعت‌ها طول بکشد؛ یک خطای گذرا نباید پیگیری را قطع کند
                     failures += 1;
                     console.error('Error fetching progress:', err);
                     if (failures >= MAX_POLL_FAILURES) {
@@ -236,12 +358,11 @@ document.addEventListener('DOMContentLoaded', function() {
                                   'پردازش در پس‌زمینه ادامه دارد، بعداً رکورد آپلود را در ادمین بررسی کنید.');
                     }
                 });
-        }, 2000); // هر ۲ ثانیه
+        }, 2000);
     }
 
     function showError(message) {
-        uploading = false;
-        progressBar.style.backgroundColor = '#dc3545'; // قرمز برای خطا
+        progressBar.style.backgroundColor = '#dc3545';
         statusText.textContent = 'عملیات ناموفق بود.';
         statusText.style.color = '#dc3545';
         errorBox.style.display = 'block';

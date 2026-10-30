@@ -41,6 +41,12 @@ ARCHIVE_EXTRACT_DIR = getattr(settings, "ARCHIVE_EXTRACT_DIR", None)
 DISK_SAFETY_MARGIN = 1024 ** 3  # ۱ گیگ حاشیه‌ی امن
 
 
+def _is_macos_junk(name):
+    """فایل‌های ._xxx.mp3 و پوشه‌ی __MACOSX که مک داخل zip می‌گذارد؛ فایل صوتی واقعی نیستند."""
+    parts = name.replace("\\", "/").split("/")
+    return "__MACOSX" in parts or parts[-1].startswith("._")
+
+
 def _extract_audio_members(archive, temp_dir):
     """
     فقط فایل‌های صوتی را استخراج می‌کند (نه کل آرشیو) و قبل از شروع، فضای دیسک را چک می‌کند.
@@ -48,7 +54,9 @@ def _extract_audio_members(archive, temp_dir):
     """
     members = [
         m for m in archive.infolist()
-        if not m.is_dir() and m.filename.lower().endswith(AUDIO_EXTENSIONS)
+        if not m.is_dir()
+        and m.filename.lower().endswith(AUDIO_EXTENSIONS)
+        and not _is_macos_junk(m.filename)
     ]
     needed = sum(m.file_size for m in members)
     free = shutil.disk_usage(temp_dir).free
@@ -602,7 +610,6 @@ def generate_album_zip_task(self, album_id: int, export_id: int = None):
         logger.error("generate_album_zip_task: album %s does not exist", album_id)
 
     except ValueError as ve:
-        # خطای قطعی (مثلاً آلبوم بدون ترک) - retry فایده‌ای ندارد
         logger.error("generate_album_zip_task validation error for album %s: %s", album_id, ve)
         mark_failed()
 
